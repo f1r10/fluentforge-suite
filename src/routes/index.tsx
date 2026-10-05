@@ -1,24 +1,61 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { AuthLayout, ErrorText, setTokens } from "@/components/app/common";
+import { getSetupState, studentLogin } from "@/lib/auth.functions";
+import { brandingQuery } from "@/routes/__root";
+import { useI18n } from "@/lib/i18n";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
-  component: Index,
+  head: () => ({
+    meta: [
+      { title: "Sign in — Learning Platform" },
+      { name: "description", content: "Students sign in with their personal access key to practice and take exams." },
+      { property: "og:title", content: "Sign in — Learning Platform" },
+      { property: "og:description", content: "Students sign in with their personal access key to practice and take exams." },
+    ],
+  }),
+  loader: async () => {
+    const s = await getSetupState();
+    if (s.needsSetup) throw redirect({ to: "/setup" });
+  },
+  component: StudentLogin,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
+function StudentLogin() {
+  const { t } = useI18n();
+  const { data: b } = useSuspenseQuery(brandingQuery);
+  const navigate = useNavigate();
+  const [key, setKey] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await setTokens(await studentLogin({ data: { key } }));
+      navigate({ to: "/student" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setBusy(false); }
+  }
+
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <AuthLayout title={b.login_title || t("student_sign_in")}>
+      {b.login_instructions && <p className="mb-4 text-sm text-muted-foreground">{b.login_instructions}</p>}
+      <form onSubmit={submit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="key">{t("access_key")}</Label>
+          <Input id="key" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" autoCapitalize="off" spellCheck={false} className="h-11" required />
+        </div>
+        <ErrorText>{error}</ErrorText>
+        <Button type="submit" className="h-11 w-full" disabled={busy}>{t("sign_in")}</Button>
+      </form>
+      <Link to="/teacher-login" className="mt-6 text-sm text-muted-foreground underline-offset-4 hover:underline">{t("teacher_sign_in")}</Link>
+    </AuthLayout>
   );
 }

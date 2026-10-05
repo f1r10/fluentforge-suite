@@ -10,33 +10,184 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as RecoverRouteImport } from './routes/recover'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as TeacherLoginRouteImport } from './routes/teacher-login'
+import { Route as AuthenticatedStudentRouteImport } from './routes/_authenticated/student'
+import { Route as AuthenticatedTeacherRouteImport } from './routes/_authenticated/teacher'
+import { Route as AuthenticatedTeacherIndexRouteImport } from './routes/_authenticated/teacher.index'
+import { Route as AuthenticatedTeacherCatalogsRouteImport } from './routes/_authenticated/teacher.catalogs'
+import { Route as AuthenticatedTeacherExamsRouteImport } from './routes/_authenticated/teacher.exams'
+import { Route as AuthenticatedTeacherGroupsRouteImport } from './routes/_authenticated/teacher.groups'
+import { Route as AuthenticatedTeacherSettingsRouteImport } from './routes/_authenticated/teacher.settings'
+import { Route as AuthenticatedTeacherStudentsRouteImport } from './routes/_authenticated/teacher.students'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecoverRoute = RecoverRouteImport.update({
+  id: '/recover',
+  path: '/recover',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeacherLoginRoute = TeacherLoginRouteImport.update({
+  id: '/teacher-login',
+  path: '/teacher-login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedStudentRoute = AuthenticatedStudentRouteImport.update({
+  id: '/student',
+  path: '/student',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedTeacherRoute = AuthenticatedTeacherRouteImport.update({
+  id: '/teacher',
+  path: '/teacher',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedTeacherIndexRoute =
+  AuthenticatedTeacherIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
+const AuthenticatedTeacherCatalogsRoute =
+  AuthenticatedTeacherCatalogsRouteImport.update({
+    id: '/catalogs',
+    path: '/catalogs',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
+const AuthenticatedTeacherExamsRoute =
+  AuthenticatedTeacherExamsRouteImport.update({
+    id: '/exams',
+    path: '/exams',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
+const AuthenticatedTeacherGroupsRoute =
+  AuthenticatedTeacherGroupsRouteImport.update({
+    id: '/groups',
+    path: '/groups',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
+const AuthenticatedTeacherSettingsRoute =
+  AuthenticatedTeacherSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
+const AuthenticatedTeacherStudentsRoute =
+  AuthenticatedTeacherStudentsRouteImport.update({
+    id: '/students',
+    path: '/students',
+    getParentRoute: () => AuthenticatedTeacherRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/recover': typeof RecoverRoute
+  '/setup': typeof SetupRoute
+  '/teacher-login': typeof TeacherLoginRoute
+  '/student': typeof AuthenticatedStudentRoute
+  '/teacher': typeof AuthenticatedTeacherRouteWithChildren
+  '/teacher/catalogs': typeof AuthenticatedTeacherCatalogsRoute
+  '/teacher/exams': typeof AuthenticatedTeacherExamsRoute
+  '/teacher/groups': typeof AuthenticatedTeacherGroupsRoute
+  '/teacher/settings': typeof AuthenticatedTeacherSettingsRoute
+  '/teacher/students': typeof AuthenticatedTeacherStudentsRoute
+  '/teacher/': typeof AuthenticatedTeacherIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/recover': typeof RecoverRoute
+  '/setup': typeof SetupRoute
+  '/teacher-login': typeof TeacherLoginRoute
+  '/student': typeof AuthenticatedStudentRoute
+  '/teacher/catalogs': typeof AuthenticatedTeacherCatalogsRoute
+  '/teacher/exams': typeof AuthenticatedTeacherExamsRoute
+  '/teacher/groups': typeof AuthenticatedTeacherGroupsRoute
+  '/teacher/settings': typeof AuthenticatedTeacherSettingsRoute
+  '/teacher/students': typeof AuthenticatedTeacherStudentsRoute
+  '/teacher': typeof AuthenticatedTeacherIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/recover': typeof RecoverRoute
+  '/setup': typeof SetupRoute
+  '/teacher-login': typeof TeacherLoginRoute
+  '/_authenticated/student': typeof AuthenticatedStudentRoute
+  '/_authenticated/teacher': typeof AuthenticatedTeacherRouteWithChildren
+  '/_authenticated/teacher/catalogs': typeof AuthenticatedTeacherCatalogsRoute
+  '/_authenticated/teacher/exams': typeof AuthenticatedTeacherExamsRoute
+  '/_authenticated/teacher/groups': typeof AuthenticatedTeacherGroupsRoute
+  '/_authenticated/teacher/settings': typeof AuthenticatedTeacherSettingsRoute
+  '/_authenticated/teacher/students': typeof AuthenticatedTeacherStudentsRoute
+  '/_authenticated/teacher/': typeof AuthenticatedTeacherIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/recover'
+    | '/setup'
+    | '/teacher-login'
+    | '/student'
+    | '/teacher'
+    | '/teacher/catalogs'
+    | '/teacher/exams'
+    | '/teacher/groups'
+    | '/teacher/settings'
+    | '/teacher/students'
+    | '/teacher/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/recover'
+    | '/setup'
+    | '/teacher-login'
+    | '/student'
+    | '/teacher/catalogs'
+    | '/teacher/exams'
+    | '/teacher/groups'
+    | '/teacher/settings'
+    | '/teacher/students'
+    | '/teacher'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/recover'
+    | '/setup'
+    | '/teacher-login'
+    | '/_authenticated/student'
+    | '/_authenticated/teacher'
+    | '/_authenticated/teacher/catalogs'
+    | '/_authenticated/teacher/exams'
+    | '/_authenticated/teacher/groups'
+    | '/_authenticated/teacher/settings'
+    | '/_authenticated/teacher/students'
+    | '/_authenticated/teacher/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  RecoverRoute: typeof RecoverRoute
+  SetupRoute: typeof SetupRoute
+  TeacherLoginRoute: typeof TeacherLoginRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +199,133 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recover': {
+      id: '/recover'
+      path: '/recover'
+      fullPath: '/recover'
+      preLoaderRoute: typeof RecoverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/teacher-login': {
+      id: '/teacher-login'
+      path: '/teacher-login'
+      fullPath: '/teacher-login'
+      preLoaderRoute: typeof TeacherLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/student': {
+      id: '/_authenticated/student'
+      path: '/student'
+      fullPath: '/student'
+      preLoaderRoute: typeof AuthenticatedStudentRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/teacher': {
+      id: '/_authenticated/teacher'
+      path: '/teacher'
+      fullPath: '/teacher'
+      preLoaderRoute: typeof AuthenticatedTeacherRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/teacher/': {
+      id: '/_authenticated/teacher/'
+      path: '/'
+      fullPath: '/teacher/'
+      preLoaderRoute: typeof AuthenticatedTeacherIndexRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
+    '/_authenticated/teacher/catalogs': {
+      id: '/_authenticated/teacher/catalogs'
+      path: '/catalogs'
+      fullPath: '/teacher/catalogs'
+      preLoaderRoute: typeof AuthenticatedTeacherCatalogsRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
+    '/_authenticated/teacher/exams': {
+      id: '/_authenticated/teacher/exams'
+      path: '/exams'
+      fullPath: '/teacher/exams'
+      preLoaderRoute: typeof AuthenticatedTeacherExamsRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
+    '/_authenticated/teacher/groups': {
+      id: '/_authenticated/teacher/groups'
+      path: '/groups'
+      fullPath: '/teacher/groups'
+      preLoaderRoute: typeof AuthenticatedTeacherGroupsRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
+    '/_authenticated/teacher/settings': {
+      id: '/_authenticated/teacher/settings'
+      path: '/settings'
+      fullPath: '/teacher/settings'
+      preLoaderRoute: typeof AuthenticatedTeacherSettingsRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
+    '/_authenticated/teacher/students': {
+      id: '/_authenticated/teacher/students'
+      path: '/students'
+      fullPath: '/teacher/students'
+      preLoaderRoute: typeof AuthenticatedTeacherStudentsRouteImport
+      parentRoute: typeof AuthenticatedTeacherRoute
+    }
   }
 }
 
+interface AuthenticatedTeacherRouteChildren {
+  AuthenticatedTeacherCatalogsRoute: typeof AuthenticatedTeacherCatalogsRoute
+  AuthenticatedTeacherExamsRoute: typeof AuthenticatedTeacherExamsRoute
+  AuthenticatedTeacherGroupsRoute: typeof AuthenticatedTeacherGroupsRoute
+  AuthenticatedTeacherSettingsRoute: typeof AuthenticatedTeacherSettingsRoute
+  AuthenticatedTeacherStudentsRoute: typeof AuthenticatedTeacherStudentsRoute
+  AuthenticatedTeacherIndexRoute: typeof AuthenticatedTeacherIndexRoute
+}
+
+const AuthenticatedTeacherRouteChildren: AuthenticatedTeacherRouteChildren = {
+  AuthenticatedTeacherCatalogsRoute: AuthenticatedTeacherCatalogsRoute,
+  AuthenticatedTeacherExamsRoute: AuthenticatedTeacherExamsRoute,
+  AuthenticatedTeacherGroupsRoute: AuthenticatedTeacherGroupsRoute,
+  AuthenticatedTeacherSettingsRoute: AuthenticatedTeacherSettingsRoute,
+  AuthenticatedTeacherStudentsRoute: AuthenticatedTeacherStudentsRoute,
+  AuthenticatedTeacherIndexRoute: AuthenticatedTeacherIndexRoute,
+}
+
+const AuthenticatedTeacherRouteWithChildren =
+  AuthenticatedTeacherRoute._addFileChildren(AuthenticatedTeacherRouteChildren)
+
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedStudentRoute: typeof AuthenticatedStudentRoute
+  AuthenticatedTeacherRoute: typeof AuthenticatedTeacherRouteWithChildren
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedStudentRoute: AuthenticatedStudentRoute,
+  AuthenticatedTeacherRoute: AuthenticatedTeacherRouteWithChildren,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  RecoverRoute: RecoverRoute,
+  SetupRoute: SetupRoute,
+  TeacherLoginRoute: TeacherLoginRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
