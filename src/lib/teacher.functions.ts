@@ -81,7 +81,7 @@ export const listStudents = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return {
       total: count ?? 0,
-      rows: ((rows ?? []) as unknown as Array<Record<string, unknown> & { group_memberships: { groups: { id: string; name: string } }[] }>).map((r) => ({
+      rows: ((rows ?? []) as unknown as Array<{ id: string; first_name: string; last_name: string; username: string; status: string; last_active_at: string | null; group_memberships: { groups: { id: string; name: string } }[] }>).map((r) => ({
         id: r.id as string, first_name: r.first_name as string, last_name: r.last_name as string, username: r.username as string,
         status: r.status as "active" | "disabled" | "archived", last_active_at: r.last_active_at as string | null,
         groups: r.group_memberships.map((m) => m.groups).filter(Boolean),
@@ -225,7 +225,7 @@ export const getSettings = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
     const { data } = await context.supabase.from("system_settings").select("key, value");
-    return Object.fromEntries((data ?? []).map((r) => [r.key, r.value])) as Record<string, Record<string, unknown>>;
+    return Object.fromEntries((data ?? []).map((r) => [r.key, r.value])) as Record<string, Record<string, string | number | boolean | null | string[]>>;
   });
 
 export const saveBranding = t()
