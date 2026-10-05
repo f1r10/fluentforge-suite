@@ -10,7 +10,6 @@ const requireTeacher = createMiddleware({ type: "function" })
     return next();
   });
 
-const t = () => createServerFn({ method: "POST" }).middleware([requireTeacher]);
 
 export const getWhoAmI = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -103,7 +102,8 @@ async function issueKey(admin: Awaited<ReturnType<typeof import("./security.serv
   return key;
 }
 
-export const createStudent = t()
+export const createStudent = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ first_name: z.string().trim().min(1).max(80), last_name: z.string().trim().min(1).max(80), username: z.string().trim().min(3).max(40).regex(/^[a-z0-9._-]+$/), groupIds: z.array(z.string().uuid()).default([]) }).parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, randomToken, randomPassword, audit } = await import("./security.server");
@@ -121,7 +121,8 @@ export const createStudent = t()
     return { id: st.id, key };
   });
 
-export const regenerateKey = t()
+export const regenerateKey = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ studentId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
@@ -134,7 +135,8 @@ export const regenerateKey = t()
     return { key };
   });
 
-export const setStudentStatus = t()
+export const setStudentStatus = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ studentId: z.string().uuid(), status: z.enum(["active", "disabled", "archived"]) }).parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
@@ -145,7 +147,8 @@ export const setStudentStatus = t()
     return { ok: true };
   });
 
-export const terminateSessions = t()
+export const terminateSessions = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ studentId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
@@ -155,7 +158,8 @@ export const terminateSessions = t()
     return { ok: true };
   });
 
-export const updateStudent = t()
+export const updateStudent = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ studentId: z.string().uuid(), first_name: z.string().trim().min(1).max(80), last_name: z.string().trim().min(1).max(80), groupIds: z.array(z.string().uuid()) }).parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
@@ -173,7 +177,8 @@ export const listGroups = createServerFn({ method: "GET" })
     return (data ?? []).map((g) => ({ id: g.id, name: g.name, description: g.description, members: (g.group_memberships as unknown as { count: number }[])[0]?.count ?? 0 }));
   });
 
-export const saveGroup = t()
+export const saveGroup = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid().optional(), name: z.string().trim().min(1).max(100), description: z.string().max(500).optional() }).parse(d))
   .handler(async ({ data, context }) => {
     if (data.id) await context.supabase.from("groups").update({ name: data.name, description: data.description ?? null }).eq("id", data.id);
@@ -181,7 +186,8 @@ export const saveGroup = t()
     return { ok: true };
   });
 
-export const deleteGroup = t()
+export const deleteGroup = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await context.supabase.from("groups").update({ deleted_at: new Date().toISOString() }).eq("id", data.id);
@@ -196,7 +202,8 @@ export const listCatalogs = createServerFn({ method: "GET" })
     return (data ?? []).map((c) => ({ ...c, items: (c.catalog_items as unknown as { count: number }[])[0]?.count ?? 0 }));
   });
 
-export const createCatalog = t()
+export const createCatalog = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ name: z.string().trim().min(1).max(120), description: z.string().max(1000).optional() }).parse(d))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase.from("catalogs").insert({ name: data.name, description: data.description ?? null });
@@ -211,7 +218,8 @@ export const listExams = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
-export const createExam = t()
+export const createExam = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ title: z.string().trim().min(1).max(160), duration_minutes: z.number().int().min(1).max(1440).nullable(), available_from: z.string().nullable(), available_until: z.string().nullable() }).parse(d))
   .handler(async ({ data, context }) => {
     const { data: defaults } = await context.supabase.from("system_settings").select("value").eq("key", "exam_defaults").maybeSingle();
@@ -228,7 +236,8 @@ export const getSettings = createServerFn({ method: "GET" })
     return Object.fromEntries((data ?? []).map((r) => [r.key, r.value])) as Record<string, Record<string, string | number | boolean | null | string[]>>;
   });
 
-export const saveBranding = t()
+export const saveBranding = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) =>
     z.object({
       system_name: z.string().trim().min(1).max(100), short_name: z.string().max(40), login_title: z.string().max(120),
@@ -246,7 +255,8 @@ export const saveBranding = t()
     return { ok: true };
   });
 
-export const changeCredentials = t()
+export const changeCredentials = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
   .inputValidator((d) => z.object({ currentPassword: z.string().min(1), newUsername: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/), newPassword: z.string().min(8).max(200).or(z.literal("")) }).parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, publicClient, audit } = await import("./security.server");
@@ -262,7 +272,8 @@ export const changeCredentials = t()
     return { ok: true };
   });
 
-export const generateRecoveryCodes = t().handler(async ({ context }) => {
+export const generateRecoveryCodes = createServerFn({ method: "POST" })
+  .middleware([requireTeacher]).handler(async ({ context }) => {
   const { adminClient, randomToken, sha256, audit } = await import("./security.server");
   const admin = await adminClient();
   const { data: adm } = await admin.from("admin_users").select("id").eq("auth_user_id", context.userId).single();
