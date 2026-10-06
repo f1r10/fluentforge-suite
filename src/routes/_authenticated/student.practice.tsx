@@ -1,6 +1,6 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, Filter, Play, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -105,6 +105,9 @@ function SelfPracticePage() {
     accuracy: number | null;
   } | null>(null);
   const [resumeChecked, setResumeChecked] = useState(false);
+  const finishRef = useRef<(skipConfirmation?: boolean) => Promise<void>>(
+    async () => {},
+  );
 
   const topicTree = useMemo(() => flattenTopics(options.topics), [options.topics]);
   const catalogTree = useMemo(() => flattenCatalogs(options.catalogs), [options.catalogs]);
@@ -332,6 +335,8 @@ function SelfPracticePage() {
     }
   }
 
+  finishRef.current = finish;
+
   useEffect(() => {
     if (
       !sessionId ||
@@ -352,15 +357,13 @@ function SelfPracticePage() {
       setRemainingMs(remaining);
       if (remaining === 0 && !submitted && !finishing) {
         submitted = true;
-        void finish(true);
+        void finishRef.current(true);
       }
     };
 
     tick();
     const timer = window.setInterval(tick, 1_000);
     return () => window.clearInterval(timer);
-    // The current answer state is intentionally captured by rerenders below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sessionId,
     startedAt,
@@ -368,9 +371,6 @@ function SelfPracticePage() {
     filters.durationMinutes,
     summary,
     finishing,
-    responses,
-    feedback,
-    allQuestions,
   ]);
 
   return (
