@@ -137,7 +137,7 @@ describe("plain runtime storage capabilities", () => {
 
     const upload = await source.upload(
       object,
-      new Blob(["pdf fixture"], { type: "application/pdf" }),
+      new TextEncoder().encode("pdf fixture"),
       { contentType: "application/pdf", upsert: false },
     );
     expect(upload.error).toBeNull();
