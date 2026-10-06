@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, Eye, Search } from "lucide-react";
+import { CheckCircle2, Eye, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  generateAiReviewSuggestion,
+  getAiReviewStatus,
   listManualReviews,
   listReleaseQueue,
   listReviewExams,
@@ -247,6 +249,44 @@ function ReviewsPage() {
   );
 }
 
+type AiSuggestionView = {
+  score: number;
+  max_score: number;
+  confidence: number;
+  reason: string;
+  feedback: string;
+  provider: "local" | "gemini";
+  model: string;
+  generated_at: string;
+};
+
+function parseAiSuggestion(value: unknown): AiSuggestionView | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row["score"] !== "number" ||
+    typeof row["max_score"] !== "number" ||
+    typeof row["confidence"] !== "number" ||
+    typeof row["reason"] !== "string" ||
+    (row["provider"] !== "local" && row["provider"] !== "gemini") ||
+    typeof row["model"] !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    score: row["score"],
+    max_score: row["max_score"],
+    confidence: row["confidence"],
+    reason: row["reason"],
+    feedback: typeof row["feedback"] === "string" ? row["feedback"] : "",
+    provider: row["provider"],
+    model: row["model"],
+    generated_at:
+      typeof row["generated_at"] === "string" ? row["generated_at"] : "",
+  };
+}
+
 function ReviewDialog({
   review,
   onClose,
@@ -261,6 +301,39 @@ function ReviewDialog({
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState(() =>
+    parseAiSuggestion(review.ai_suggestion),
+  );
+
+  const { data: aiStatus } = useQuery({
+    queryKey: ["ai-review-status"],
+    queryFn: () => getAiReviewStatus(),
+    staleTime: 60_000,
+  });
+
+  async function generateSuggestion() {
+    setAiBusy(true);
+    try {
+      const suggestion = await generateAiReviewSuggestion({
+        data: { reviewId: review.id },
+      });
+      setAiSuggestion(suggestion);
+      toast.success(t("ai_suggestion_ready"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function useSuggestion() {
+    if (!aiSuggestion) return;
+    setScore(String(aiSuggestion.score));
+    if (aiSuggestion.feedback && !feedback.trim()) {
+      setFeedback(aiSuggestion.feedback);
+    }
+  }
 
   async function save() {
     const numeric = Number(score);
@@ -345,6 +418,95 @@ function ReviewDialog({
               <strong>{t("explanation")}:</strong> {review.question.explanation}
             </section>
           )}
+
+          <section className="space-y-3 rounded-md border border-border p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 font-medium">
+                  <Sparkles className="h-4 w-4" />
+                  {t("ai_grading_suggestion")}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("ai_suggestion_human_decision")}
+                </p>
+              </div>
+              {review.status === "pending" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!aiStatus?.available || aiBusy}
+                  onClick={generateSuggestion}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {aiBusy
+                    ? t("ai_generating")
+                    : aiSuggestion
+                      ? t("regenerate_ai_suggestion")
+                      : t("generate_ai_suggestion")}
+                </Button>
+              )}
+            </div>
+
+            {aiStatus && !aiStatus.available && (
+              <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                {t("ai_provider_unavailable")}
+                {aiStatus.message ? ` — ${aiStatus.message}` : ""}
+              </div>
+            )}
+
+            {aiStatus?.available && (
+              <div className="text-xs text-muted-foreground">
+                {t("ai_provider")}: {aiStatus.provider} · {aiStatus.model ?? "—"}
+                {aiStatus.isExternal && (
+                  <span> · {t("external_ai_privacy_note")}</span>
+                )}
+              </div>
+            )}
+
+            {aiSuggestion && (
+              <div className="space-y-3 rounded-md bg-muted/40 p-3 text-sm">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground">{t("suggested_score")}</div>
+                    <div className="font-semibold">
+                      {aiSuggestion.score} / {aiSuggestion.max_score}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">{t("confidence")}</div>
+                    <div className="font-semibold">
+                      {Math.round(aiSuggestion.confidence * 100)}%
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">{t("ai_provider")}</div>
+                    <div className="truncate font-semibold">
+                      {aiSuggestion.provider} · {aiSuggestion.model}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-muted-foreground">{t("reason")}</div>
+                  <div className="mt-1 whitespace-pre-wrap">{aiSuggestion.reason}</div>
+                </div>
+
+                {aiSuggestion.feedback && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">{t("suggested_feedback")}</div>
+                    <div className="mt-1 whitespace-pre-wrap">{aiSuggestion.feedback}</div>
+                  </div>
+                )}
+
+                {review.status === "pending" && (
+                  <Button type="button" size="sm" onClick={useSuggestion}>
+                    {t("use_suggested_score")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </section>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
