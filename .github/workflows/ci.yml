@@ -173,6 +173,7 @@ jobs:
           APP_STORAGE_SECRET=ci-storage-secret-6e103818623349ecb119164711975e48
           SETUP_TOKEN=ci-setup-token-cfbb3ba406844682
           PROCESSING_SHARED_SECRET=ci-processing-secret-6469f35399b348af
+          SCHEDULED_JOB_SECRET=ci-scheduled-backup-secret-356fcd98e2f84277
           APP_BIND_ADDRESS=127.0.0.1
           APP_PORT=3400
           AI_PROVIDER=disabled
