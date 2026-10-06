@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, BookOpen, ChevronRight, ClipboardList, Dumbbell, History, LogOut, Target } from "lucide-react";
+import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Dumbbell, History, LogOut, Target } from "lucide-react";
 import { heartbeat, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
@@ -60,6 +60,13 @@ function StudentHome() {
         </div>
         <div className="flex items-center gap-2">
           <LanguageSelect onChange={(l) => setMyLanguage({ data: { language: l } }).catch(() => {})} />
+          <Link
+            to="/student/notifications"
+            aria-label={t("notifications")}
+            className="p-2 text-muted-foreground hover:text-foreground"
+          >
+            <Bell className="h-5 w-5" />
+          </Link>
           <button onClick={signOut} aria-label={t("sign_out")} className="p-2 text-muted-foreground">
             <LogOut className="h-5 w-5" />
           </button>
