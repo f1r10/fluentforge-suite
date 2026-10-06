@@ -95,7 +95,9 @@ jobs:
 
           ok=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3300/api/health >/tmp/health.json; then
+            if curl -fsS -D /tmp/health.headers \
+              http://127.0.0.1:3300/api/health \
+              >/tmp/health.json; then
               ok=1
               break
             fi
@@ -107,5 +109,49 @@ jobs:
             exit 1
           fi
 
+          grep -qi '^x-content-type-options: nosniff' /tmp/health.headers
+          grep -qi '^x-frame-options: SAMEORIGIN' /tmp/health.headers
+          grep -qi '^referrer-policy: strict-origin-when-cross-origin' /tmp/health.headers
+          grep -qi '^permissions-policy:' /tmp/health.headers
+          grep -qi '^content-security-policy:' /tmp/health.headers
+
           cat /tmp/health.json
           docker stop fluentforge-web-ci
+
+
+  database-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Apply all FluentForge migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DATABASE_SSL: disable
+        run: bun run migrate
+
+      - name: Run database security/performance acceptance
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DATABASE_SSL: disable
+          ACCEPTANCE_QUERY_BUDGET_MS: "500"
+        run: bun run acceptance:db
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
