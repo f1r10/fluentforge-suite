@@ -60,7 +60,7 @@
 - [x] Teacher approval queue for after-approval results
 - [x] AI-assisted open-answer grading suggestion with explicit teacher apply/save and audit
 - [x] Full teacher attempt-monitoring / violation timeline UI
-- [ ] Strict server-controlled listening play limits (private delivery exists; counted streaming/proxy enforcement still required)
+- [x] Strict server-controlled listening play limits: atomic DB leases, hashed capability tokens, private Range proxy, attempt/deadline enforcement and teacher playback audit
 
 ## Processing / Operations
 - [x] Document import review pipeline: private source upload, queued extraction, confidence/duplicate review, approve/reject/edit, provenance and commit
