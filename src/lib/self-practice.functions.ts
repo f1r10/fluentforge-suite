@@ -559,6 +559,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       recentResult,
       finishedResult,
       monthResult,
+      streakResult,
     ] = await Promise.all([
       admin.rpc("student_practice_stats", { p_student_id: studentId }),
       admin.rpc("student_topic_practice_stats", { p_student_id: studentId, p_limit: 12 }),
@@ -588,6 +589,9 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
           "created_at",
           new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
         ),
+      admin.rpc("student_streak_stats", {
+        p_student_id: studentId,
+      }),
     ]);
 
     for (const result of [
@@ -597,6 +601,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       recentResult,
       finishedResult,
       monthResult,
+      streakResult,
     ]) {
       if (result.error) throw new Error(result.error.message);
     }
@@ -658,6 +663,12 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
             ? stats.correct_answers / (stats.correct_answers + stats.wrong_answers)
             : null,
         month_answers: monthResult.count ?? 0,
+        current_streak:
+          Number(streakResult.data?.[0]?.current_streak ?? 0),
+        longest_streak:
+          Number(streakResult.data?.[0]?.longest_streak ?? 0),
+        last_active_day:
+          streakResult.data?.[0]?.last_active_day ?? null,
       },
       topics: topicResult.data ?? [],
       daily: dailyResult.data ?? [],
