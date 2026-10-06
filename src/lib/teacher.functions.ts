@@ -40,9 +40,39 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
     ]);
     const { data: upcomingExams } = await sb.from("exams").select("id, title, status, available_from, available_until").is("deleted_at", null).order("created_at", { ascending: false }).limit(5);
     const { data: recentCatalogs } = await sb.from("catalogs").select("id, name, updated_at").is("deleted_at", null).order("updated_at", { ascending: false }).limit(5);
-    const { data: activity } = await sb.from("activity_events").select("id, event_type, created_at, details, students(first_name, last_name)").order("created_at", { ascending: false }).limit(10);
+    const [{ data: activity }, { data: dashboardSetting }] = await Promise.all([
+      sb
+        .from("activity_events")
+        .select("id, event_type, created_at, details, students(first_name, last_name)")
+        .order("created_at", { ascending: false })
+        .limit(10),
+      sb
+        .from("system_settings")
+        .select("value")
+        .eq("key", "dashboard")
+        .maybeSingle(),
+    ]);
+    const visibleWidgets =
+      dashboardSetting?.value &&
+      typeof dashboardSetting.value === "object" &&
+      Array.isArray((dashboardSetting.value as Record<string, unknown>)["visible_widgets"])
+        ? ((dashboardSetting.value as Record<string, unknown>)["visible_widgets"] as unknown[])
+            .filter((value): value is string => typeof value === "string")
+        : [
+            "students",
+            "active_today",
+            "groups",
+            "catalogs",
+            "exams",
+            "pending_reviews",
+            "online_now",
+            "recent_activity",
+            "upcoming_exams",
+            "recent_catalogs",
+          ];
     return {
       counts: { students, activeToday: active, groups, catalogs, questions, vocab, exams, pendingReviews, unreadInbox },
+      visibleWidgets,
       online: (online.data ?? []).map((o) => ({ ...(o.students as unknown as { id: string; first_name: string; last_name: string }), last_seen_at: o.last_seen_at, location: o.current_location })),
       upcomingExams: upcomingExams ?? [],
       recentCatalogs: recentCatalogs ?? [],
@@ -340,12 +370,28 @@ export const saveBranding = createServerFn({ method: "POST" })
         logo_url: z.string().url().nullable().or(z.literal("")),
         favicon_url: z.string().url().nullable().or(z.literal("")),
         login_image_url: z.string().url().nullable().or(z.literal("")),
+        teacher_login_button: z.string().max(80).default(""),
+        student_login_button: z.string().max(80).default(""),
+        setup_button: z.string().max(80).default(""),
         default_language: z.enum(["az", "en", "ru", "tr"]),
+        enabled_languages: z
+          .array(z.enum(["az", "en", "ru", "tr"]))
+          .min(1)
+          .max(4),
+      })
+      .superRefine((value, ctx) => {
+        if (!value.enabled_languages.includes(value.default_language)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["default_language"],
+            message: "Default language must be enabled.",
+          });
+        }
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { default_language, ...branding } = data;
+    const { default_language, enabled_languages, ...branding } = data;
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
 
@@ -401,9 +447,28 @@ export const saveBranding = createServerFn({ method: "POST" })
       .eq("key", "branding");
     if (brandingError) throw new Error(brandingError.message);
 
+    const { data: interfaceRow, error: interfaceReadError } =
+      await context.supabase
+        .from("system_settings")
+        .select("value")
+        .eq("key", "interface")
+        .maybeSingle();
+    if (interfaceReadError) throw new Error(interfaceReadError.message);
+
+    const interfaceValue =
+      interfaceRow?.value && typeof interfaceRow.value === "object"
+        ? (interfaceRow.value as Record<string, unknown>)
+        : {};
+
     const { error: interfaceError } = await context.supabase
       .from("system_settings")
-      .update({ value: { default_language } })
+      .update({
+        value: {
+          ...interfaceValue,
+          default_language,
+          enabled_languages: [...new Set(enabled_languages)],
+        } as never,
+      })
       .eq("key", "interface");
     if (interfaceError) throw new Error(interfaceError.message);
 
@@ -425,6 +490,60 @@ export const saveBranding = createServerFn({ method: "POST" })
       action: "settings_changed",
       summary: "Branding settings updated",
     });
+    return { ok: true };
+  });
+
+export const saveDashboardSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        visible_widgets: z
+          .array(
+            z.enum([
+              "students",
+              "active_today",
+              "groups",
+              "catalogs",
+              "exams",
+              "pending_reviews",
+              "online_now",
+              "recent_activity",
+              "upcoming_exams",
+              "recent_catalogs",
+            ]),
+          )
+          .max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      visible_widgets: [...new Set(data.visible_widgets)],
+    };
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "dashboard",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "dashboard_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "dashboard",
+      summary: "Teacher dashboard widgets updated",
+      details: value,
+    });
+
     return { ok: true };
   });
 
