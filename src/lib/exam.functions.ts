@@ -518,8 +518,22 @@ export const addExamItems = createServerFn({ method: "POST" })
       new Map(data.items.map((item) => [`${item.entity_type}:${item.entity_id}`, item])).values(),
     );
 
+    const { data: existingRows, error: existingError } = await context.supabase
+      .from("exam_items")
+      .select("entity_type,entity_id")
+      .eq("exam_id", data.examId)
+      .eq("section_id", data.sectionId);
+    if (existingError) throw new Error(existingError.message);
+    const existing = new Set(
+      (existingRows ?? [])
+        .filter((row) => !!row.entity_id)
+        .map((row) => `${row.entity_type}:${row.entity_id}`),
+    );
+    const pending = unique.filter((item) => !existing.has(`${item.entity_type}:${item.entity_id}`));
+    if (!pending.length) return { ok: true };
+
     const validated = [];
-    for (const item of unique) {
+    for (const item of pending) {
       const result = await validateExamEntity(context.supabase, item.entity_type, item.entity_id);
       validated.push({ ...item, question_version: result.version });
     }
@@ -594,6 +608,7 @@ export const searchExamContent = createServerFn({ method: "GET" })
     z
       .object({
         examId: z.string().uuid(),
+        sectionId: z.string().uuid().nullable().default(null),
         search: z.string().max(200).default(""),
         type: z.enum(["all", ...EXAM_ITEM_TYPES]).default("all"),
       })
@@ -601,6 +616,22 @@ export const searchExamContent = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }) => {
     const safe = data.search.trim().replace(/[,()%]/g, " ");
+    const { data: existingRows, error: existingError } = await context.supabase
+      .from("exam_items")
+      .select("section_id,entity_type,entity_id")
+      .eq("exam_id", data.examId);
+    if (existingError) throw new Error(existingError.message);
+    const inExam = new Set(
+      (existingRows ?? [])
+        .filter((row) => !!row.entity_id)
+        .map((row) => `${row.entity_type}:${row.entity_id}`),
+    );
+    const inSection = new Set(
+      (existingRows ?? [])
+        .filter((row) => row.section_id === data.sectionId && !!row.entity_id)
+        .map((row) => `${row.entity_type}:${row.entity_id}`),
+    );
+
     const results: Array<{
       entity_type: ExamItemType;
       entity_id: string;
@@ -608,6 +639,8 @@ export const searchExamContent = createServerFn({ method: "GET" })
       subtitle: string | null;
       language: string | null;
       level: string | null;
+      inExam: boolean;
+      inSection: boolean;
     }> = [];
 
     if (data.type === "all" || data.type === "question") {
@@ -630,6 +663,8 @@ export const searchExamContent = createServerFn({ method: "GET" })
           subtitle: row.question_type,
           language: row.learning_language,
           level: row.level,
+          inExam: inExam.has(`question:${row.id}`),
+          inSection: inSection.has(`question:${row.id}`),
         });
       }
     }
@@ -653,6 +688,8 @@ export const searchExamContent = createServerFn({ method: "GET" })
           subtitle: null,
           language: row.learning_language,
           level: row.level,
+          inExam: inExam.has(`reading:${row.id}`),
+          inSection: inSection.has(`reading:${row.id}`),
         });
       }
     }
@@ -676,6 +713,8 @@ export const searchExamContent = createServerFn({ method: "GET" })
           subtitle: null,
           language: row.learning_language,
           level: row.level,
+          inExam: inExam.has(`listening:${row.id}`),
+          inSection: inSection.has(`listening:${row.id}`),
         });
       }
     }
@@ -699,6 +738,8 @@ export const searchExamContent = createServerFn({ method: "GET" })
           subtitle: null,
           language: null,
           level: null,
+          inExam: inExam.has(`catalog:${row.id}`),
+          inSection: inSection.has(`catalog:${row.id}`),
         });
       }
     }
