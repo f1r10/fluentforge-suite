@@ -229,28 +229,46 @@ export type Database = {
       }
       backups: {
         Row: {
+          checksum_sha256: string | null
+          completed_at: string | null
           created_at: string
           error: string | null
           id: string
           kind: string
+          last_restored_at: string | null
+          manifest: Json
+          mime_type: string | null
+          restore_state: Json
           size_bytes: number | null
           status: Database["public"]["Enums"]["job_status"]
           storage_path: string | null
         }
         Insert: {
+          checksum_sha256?: string | null
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
           kind?: string
+          last_restored_at?: string | null
+          manifest?: Json
+          mime_type?: string | null
+          restore_state?: Json
           size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
         }
         Update: {
+          checksum_sha256?: string | null
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
           kind?: string
+          last_restored_at?: string | null
+          manifest?: Json
+          mime_type?: string | null
+          restore_state?: Json
           size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
