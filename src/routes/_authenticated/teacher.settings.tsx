@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding } from "@/lib/teacher.functions";
+import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
 import { ErrorText } from "@/components/app/common";
 import {
@@ -47,43 +49,264 @@ function BrandingForm() {
   const { data } = useSuspenseQuery(settingsQuery);
   const b = data["branding"] as Record<string, string | null>;
   const [f, setF] = useState({
-    system_name: b["system_name"] ?? "", short_name: b["short_name"] ?? "", login_title: b["login_title"] ?? "",
-    welcome_message: b["welcome_message"] ?? "", login_instructions: b["login_instructions"] ?? "", footer: b["footer"] ?? "",
-    support_text: b["support_text"] ?? "", accent_color: b["accent_color"] ?? "#1f5fbf", logo_url: b["logo_url"] ?? "",
-    login_image_url: b["login_image_url"] ?? "", default_language: String((data["interface"] as Record<string, unknown>)?.["default_language"] ?? "az") as "az",
+    system_name: b["system_name"] ?? "",
+    short_name: b["short_name"] ?? "",
+    login_title: b["login_title"] ?? "",
+    welcome_message: b["welcome_message"] ?? "",
+    login_instructions: b["login_instructions"] ?? "",
+    footer: b["footer"] ?? "",
+    support_text: b["support_text"] ?? "",
+    accent_color: b["accent_color"] ?? "#1f5fbf",
+    logo_url: b["logo_url"] ?? "",
+    favicon_url: b["favicon_url"] ?? "",
+    login_image_url: b["login_image_url"] ?? "",
+    default_language: String(
+      (data["interface"] as Record<string, unknown>)?.["default_language"] ??
+        "az",
+    ) as "az" | "en" | "ru" | "tr",
   });
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  const [assetBusy, setAssetBusy] = useState<
+    "logo" | "favicon" | null
+  >(null);
+
+  const set =
+    (k: keyof typeof f) =>
+    (
+      e: React.ChangeEvent<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      >,
+    ) =>
+      setF({ ...f, [k]: e.target.value });
+
+  async function uploadAsset(
+    kind: "logo" | "favicon",
+    file: File,
+  ) {
+    setAssetBusy(kind);
+    try {
+      const started = await beginBrandingAssetUpload({
+        data: {
+          kind,
+          filename: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+        },
+      });
+
+      const { error: uploadError } = await supabase.storage
+        .from(started.bucket)
+        .uploadToSignedUrl(started.path, started.token, file, {
+          contentType: started.contentType,
+          upsert: false,
+        });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const finalized = await finalizeBrandingAssetUpload({
+        data: {
+          kind,
+          path: started.path,
+        },
+      });
+
+      const key = kind === "logo" ? "logo_url" : "favicon_url";
+      setF((previous) => ({
+        ...previous,
+        [key]: finalized.url,
+      }));
+
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["branding"] }),
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+      ]);
+      toast.success(t("branding_asset_uploaded"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAssetBusy(null);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    try { await saveBranding({ data: f }); toast.success(t("save")); qc.invalidateQueries({ queryKey: ["branding"] }); qc.invalidateQueries({ queryKey: ["settings"] }); }
-    catch (err) { toast.error(String(err)); }
+    try {
+      await saveBranding({ data: f });
+      toast.success(t("save"));
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["branding"] }),
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+      ]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <h2 className="border-b border-border pb-2 text-lg font-semibold">Branding</h2>
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("branding")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("branding_hint")}
+        </p>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="System name"><Input value={f.system_name} onChange={set("system_name")} required /></Field>
-        <Field label="Short name"><Input value={f.short_name} onChange={set("short_name")} /></Field>
-        <Field label="Login title"><Input value={f.login_title} onChange={set("login_title")} /></Field>
-        <Field label="Default interface language">
-          <select value={f.default_language} onChange={set("default_language")} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
-            {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+        <Field label={t("system_name")}>
+          <Input
+            value={f.system_name}
+            onChange={set("system_name")}
+            required
+          />
+        </Field>
+        <Field label={t("short_name")}>
+          <Input value={f.short_name} onChange={set("short_name")} />
+        </Field>
+        <Field label={t("login_title")}>
+          <Input value={f.login_title} onChange={set("login_title")} />
+        </Field>
+        <Field label={t("default_interface_language")}>
+          <select
+            value={f.default_language}
+            onChange={set("default_language")}
+            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+          >
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
           </select>
         </Field>
-        <Field label="Logo URL"><Input type="url" value={f.logo_url} onChange={set("logo_url")} placeholder="https://" /></Field>
-        <Field label="Login image URL"><Input type="url" value={f.login_image_url} onChange={set("login_image_url")} placeholder="https://" /></Field>
-        <Field label="Accent color">
-          <div className="flex gap-2"><input type="color" value={f.accent_color} onChange={set("accent_color")} className="h-9 w-12 rounded border border-input" /><Input value={f.accent_color} onChange={set("accent_color")} /></div>
+
+        <BrandingAssetField
+          label={t("logo")}
+          url={f.logo_url}
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+          busy={assetBusy === "logo"}
+          previewClassName="h-14 max-w-48 object-contain"
+          hint={t("logo_upload_hint")}
+          onUpload={(file) => uploadAsset("logo", file)}
+          onUrlChange={(value) =>
+            setF((previous) => ({ ...previous, logo_url: value }))
+          }
+        />
+        <BrandingAssetField
+          label={t("favicon")}
+          url={f.favicon_url}
+          accept=".png,.webp,.ico,image/png,image/webp,image/x-icon,image/vnd.microsoft.icon"
+          busy={assetBusy === "favicon"}
+          previewClassName="h-10 w-10 object-contain"
+          hint={t("favicon_upload_hint")}
+          onUpload={(file) => uploadAsset("favicon", file)}
+          onUrlChange={(value) =>
+            setF((previous) => ({ ...previous, favicon_url: value }))
+          }
+        />
+
+        <Field label={t("login_image_url")}>
+          <Input
+            type="url"
+            value={f.login_image_url}
+            onChange={set("login_image_url")}
+            placeholder="https://"
+          />
         </Field>
-        <Field label="Footer"><Input value={f.footer} onChange={set("footer")} /></Field>
+        <Field label={t("accent_color")}>
+          <div className="flex gap-2">
+            <input
+              type="color"
+              value={f.accent_color}
+              onChange={set("accent_color")}
+              className="h-9 w-12 rounded border border-input"
+            />
+            <Input
+              value={f.accent_color}
+              onChange={set("accent_color")}
+            />
+          </div>
+        </Field>
+        <Field label={t("footer")}>
+          <Input value={f.footer} onChange={set("footer")} />
+        </Field>
       </div>
-      <Field label="Welcome message"><Textarea value={f.welcome_message} onChange={set("welcome_message")} /></Field>
-      <Field label="Login instructions"><Textarea value={f.login_instructions} onChange={set("login_instructions")} /></Field>
-      <Field label="Support / contact text"><Textarea value={f.support_text} onChange={set("support_text")} /></Field>
-      <Button type="submit">{t("save")}</Button>
+
+      <Field label={t("welcome_message")}>
+        <Textarea
+          value={f.welcome_message}
+          onChange={set("welcome_message")}
+        />
+      </Field>
+      <Field label={t("login_instructions")}>
+        <Textarea
+          value={f.login_instructions}
+          onChange={set("login_instructions")}
+        />
+      </Field>
+      <Field label={t("support_contact_text")}>
+        <Textarea
+          value={f.support_text}
+          onChange={set("support_text")}
+        />
+      </Field>
+      <Button type="submit" disabled={assetBusy !== null}>
+        {t("save")}
+      </Button>
     </form>
+  );
+}
+
+function BrandingAssetField({
+  label,
+  url,
+  accept,
+  busy,
+  previewClassName,
+  hint,
+  onUpload,
+  onUrlChange,
+}: {
+  label: string;
+  url: string;
+  accept: string;
+  busy: boolean;
+  previewClassName: string;
+  hint: string;
+  onUpload: (file: File) => Promise<void>;
+  onUrlChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <Field label={label}>
+      <div className="space-y-2 rounded-md border border-border p-3">
+        {url ? (
+          <div className="flex min-h-16 items-center rounded bg-muted/30 p-2">
+            <img src={url} alt="" className={previewClassName} />
+          </div>
+        ) : null}
+        <Input
+          type="file"
+          accept={accept}
+          disabled={busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void onUpload(file);
+            event.currentTarget.value = "";
+          }}
+        />
+        <p className="text-xs leading-5 text-muted-foreground">
+          {busy ? t("uploading") : hint}
+        </p>
+        <Input
+          type="url"
+          value={url}
+          onChange={(event) => onUrlChange(event.target.value)}
+          placeholder={t("image_url_optional")}
+          disabled={busy}
+        />
+      </div>
+    </Field>
   );
 }
 
