@@ -72,8 +72,8 @@ def _process_document_import(job: dict) -> None:
             extraction_method=extraction.method,
         )
 
-        items = detect_candidates(extraction)
         profile = request.get("profile") or {}
+        items = detect_candidates(extraction, profile=profile)
         _apply_profile(items, profile)
 
         auto_threshold = float(profile.get("auto_approve_confidence", 0.95))
