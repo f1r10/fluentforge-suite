@@ -23,9 +23,11 @@ describe("AI grading suggestion parser", () => {
 
   it("extracts JSON from a fenced provider response", () => {
     const result = parseAiSuggestionText(
-      ````json
-{"score":1,"confidence":0.5,"reason":"Partly correct","feedback":""}
-````,
+      [
+        "```json",
+        '{"score":1,"confidence":0.5,"reason":"Partly correct","feedback":""}',
+        "```",
+      ].join("\n"),
       2,
     );
     expect(result.score).toBe(1);
