@@ -31,6 +31,16 @@ const lockKey = 2026100601;
 try {
   await sql`select pg_advisory_lock(${lockKey})`;
 
+  if (process.env.RUNTIME_BACKEND === "postgres") {
+    const bootstrapPath = path.resolve(
+      process.env.RUNTIME_BOOTSTRAP_SQL?.trim() ||
+        "drizzle/bootstrap/postgres-runtime.sql",
+    );
+    const bootstrap = await readFile(bootstrapPath, "utf8");
+    console.log(`bootstrap ${bootstrapPath}`);
+    await sql.unsafe(bootstrap);
+  }
+
   await sql`
     create table if not exists public.fluentforge_schema_migrations (
       filename text primary key,
