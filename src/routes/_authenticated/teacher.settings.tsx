@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { changeCredentials, generateRecoveryCodes, getLanguageSettings, getRecoveryStatus, getSettings, getStorageUsage, saveBranding, saveDashboardSettings, saveLanguageSettings, saveMediaSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
+import { changeCredentials, generateRecoveryCodes, getLanguageSettings, getRecoveryStatus, getSettings, getStorageUsage, saveBranding, saveDashboardSettings, saveLanguageSettings, saveMediaSettings, saveMonitoringSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
 import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -46,6 +46,7 @@ function SettingsPage() {
       <DashboardSettings />
       <StudentDashboardSettings />
       <LanguageSettings />
+      <MonitoringSettings />
       <MediaSettings />
       <StorageUsage />
       <CredentialsForm />
@@ -797,6 +798,93 @@ function LanguageSettings() {
           {t("save")}
         </Button>
       </div>
+    </section>
+  );
+}
+
+function MonitoringSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(settingsQuery);
+  const monitoring = (data["monitoring"] ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const [showBrowserDevice, setShowBrowserDevice] = useState(
+    monitoring["show_browser_device"] !== false,
+  );
+  const [showIp, setShowIp] = useState(
+    monitoring["show_ip"] === true,
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveMonitoringSettings({
+        data: {
+          show_browser_device: showBrowserDevice,
+          show_ip: showIp,
+        },
+      });
+      await qc.invalidateQueries({ queryKey: ["settings"] });
+      await qc.invalidateQueries({ queryKey: ["live-student-sessions"] });
+      toast.success(t("monitoring_settings_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("monitoring_privacy")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("monitoring_privacy_hint")}
+        </p>
+      </div>
+
+      <label className="flex items-start gap-3 rounded-md border border-border p-3">
+        <Checkbox
+          checked={showBrowserDevice}
+          onCheckedChange={(checked) =>
+            setShowBrowserDevice(!!checked)
+          }
+          className="mt-0.5"
+        />
+        <span>
+          <span className="block text-sm font-medium">
+            {t("show_browser_device")}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t("show_browser_device_hint")}
+          </span>
+        </span>
+      </label>
+
+      <label className="flex items-start gap-3 rounded-md border border-border p-3">
+        <Checkbox
+          checked={showIp}
+          onCheckedChange={(checked) => setShowIp(!!checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="block text-sm font-medium">
+            {t("show_ip_addresses")}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t("show_ip_addresses_hint")}
+          </span>
+        </span>
+      </label>
+
+      <Button type="button" onClick={save} disabled={busy}>
+        {t("save")}
+      </Button>
     </section>
   );
 }
