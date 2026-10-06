@@ -569,3 +569,8 @@ function SummaryCell({ label, value }: { label: string; value: string | number }
     </div>
   );
 }
+
+
+function round(value: number) {
+  return Math.round(value * 100) / 100;
+}
