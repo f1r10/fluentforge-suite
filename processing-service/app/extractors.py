@@ -333,6 +333,7 @@ def detect_candidates(
     candidates: list[dict[str, Any]] = []
     spreadsheet_mapping = _spreadsheet_mapping(profile)
     expected_content = str((profile or {}).get("expected_content") or "auto")
+    global_answers = _extract_global_answer_key(extraction.full_text)
 
     for page in extraction.pages:
         page_number = page.get("page")
@@ -341,6 +342,7 @@ def detect_candidates(
             page.get("text", ""),
             page=page_number,
             question_crops=question_crops,
+            global_answers=global_answers,
         )
 
         context_item: dict[str, Any] | None = None
@@ -798,6 +800,65 @@ def _split_prompt_and_inline_options(
     return value.strip(), []
 
 
+def _extract_global_answer_key(text: str) -> dict[str, str]:
+    active = False
+    values: dict[str, list[str]] = {}
+    compact = re.compile(
+        r"(?<!\d)(\d{1,4})\s*[:.)-]?\s*(Not Given|True|False|Yes|No|[A-Ha-h]|T|F)\b",
+        re.IGNORECASE,
+    )
+    full_line = re.compile(r"^\s*(\d{1,4})\s*[:.)-]\s*(.+?)\s*$")
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        lowered = line.casefold()
+        if (
+            lowered.startswith("answer key")
+            or lowered.startswith("answers to")
+            or lowered == "answers"
+        ):
+            active = True
+            # Compact answers can appear on the same heading line.
+            line = re.sub(
+                r"^\s*(?:answer\s*key|answers(?:\s+to.*?)?)\s*[:\-]?\s*",
+                "",
+                line,
+                flags=re.IGNORECASE,
+            )
+
+        if not active or not line:
+            continue
+
+        matches = list(compact.finditer(line))
+        if matches:
+            for match in matches:
+                number = match.group(1)
+                value = match.group(2).strip()
+                folded = value.casefold()
+                if folded == "t":
+                    value = "True"
+                elif folded == "f":
+                    value = "False"
+                elif len(value) == 1 and value.isalpha():
+                    value = value.upper()
+                values.setdefault(number, []).append(value)
+            continue
+
+        line_match = full_line.match(line)
+        if line_match:
+            values.setdefault(line_match.group(1), []).append(
+                line_match.group(2).strip()
+            )
+
+    # Repeated numbers usually mean separate tasks/sections. Only propagate
+    # answers whose source number is unambiguous in the answer-key region.
+    return {
+        number: answers[0]
+        for number, answers in values.items()
+        if len(answers) == 1 and answers[0]
+    }
+
+
 def _join_wrapped_option_lines(lines: list[str]) -> list[str]:
     out: list[str] = []
     trailing_marker = re.compile(
@@ -835,6 +896,7 @@ def _questions_from_text(
     text: str,
     page: int | None,
     question_crops: dict[str, dict[str, float]] | None = None,
+    global_answers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     lines = _join_wrapped_option_lines(
         [line.rstrip() for line in text.splitlines()]
@@ -953,7 +1015,7 @@ def _questions_from_text(
         number = q.pop("_number")
         q.pop("_standalone_number", None)
         q.pop("_nested_numbering", None)
-        answer = answer_key.get(number)
+        answer = answer_key.get(number) or (global_answers or {}).get(number)
         if len(options) >= 2:
             correct_id = None
             if answer:
