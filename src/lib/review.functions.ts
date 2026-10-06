@@ -85,6 +85,13 @@ function plainAnswerKey(value: unknown) {
   return "—";
 }
 
+export const getAiReviewStatus = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async () => {
+    const { getAiProviderStatus } = await import("./ai.server");
+    return getAiProviderStatus();
+  });
+
 export const listManualReviews = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
@@ -102,7 +109,7 @@ export const listManualReviews = createServerFn({ method: "GET" })
     let query = context.supabase
       .from("manual_reviews")
       .select(
-        "id,status,final_score,reviewed_at,created_at,student_id,question_id,attempt_answers!inner(id,attempt_id,item_key,response,score,auto_score,question_version,flagged,time_spent_ms,exam_attempts!inner(id,exam_id,snapshot,status,score,max_score,result_released,exams!inner(id,title))),students!inner(id,first_name,last_name,username)",
+        "id,status,final_score,ai_suggestion,reviewed_at,created_at,student_id,question_id,attempt_answers!inner(id,attempt_id,item_key,response,score,auto_score,question_version,flagged,time_spent_ms,exam_attempts!inner(id,exam_id,snapshot,status,score,max_score,result_released,exams!inner(id,title))),students!inner(id,first_name,last_name,username)",
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
@@ -118,6 +125,7 @@ export const listManualReviews = createServerFn({ method: "GET" })
       id: string;
       status: "pending" | "reviewed";
       final_score: number | null;
+      ai_suggestion: unknown;
       reviewed_at: string | null;
       created_at: string;
       student_id: string;
@@ -156,6 +164,7 @@ export const listManualReviews = createServerFn({ method: "GET" })
         created_at: row.created_at,
         reviewed_at: row.reviewed_at,
         final_score: row.final_score,
+        ai_suggestion: row.ai_suggestion,
         student: {
           id: row.students.id,
           name: `${row.students.first_name} ${row.students.last_name}`,
@@ -362,6 +371,97 @@ async function recomputeAttempt(
     settings,
   };
 }
+
+export const generateAiReviewSuggestion = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({ reviewId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: review, error } = await admin
+      .from("manual_reviews")
+      .select(
+        "id,status,answer_id,question_id,attempt_answers!inner(id,attempt_id,item_key,response,exam_attempts!inner(id,snapshot))",
+      )
+      .eq("id", data.reviewId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!review) throw new Error("Review not found.");
+    if (review.status !== "pending") {
+      throw new Error("AI suggestions are only available for pending reviews.");
+    }
+
+    const typed = review as unknown as {
+      id: string;
+      status: "pending" | "reviewed";
+      answer_id: string | null;
+      question_id: string | null;
+      attempt_answers: {
+        id: string;
+        attempt_id: string;
+        item_key: string;
+        response: unknown;
+        exam_attempts: {
+          id: string;
+          snapshot: unknown;
+        };
+      };
+    };
+
+    const question = findQuestionByItemKey(
+      typed.attempt_answers.exam_attempts.snapshot,
+      typed.attempt_answers.item_key,
+    );
+    if (!question) {
+      throw new Error("Question snapshot is unavailable for AI review.");
+    }
+
+    const studentResponse = plainResponse(typed.attempt_answers.response);
+    const maxScore = questionMaxScore(question);
+    const { suggestOpenAnswerGrade } = await import("./ai.server");
+    const suggestion = await suggestOpenAnswerGrade({
+      questionType: question.question_type ?? "open_text",
+      prompt: question.prompt ?? "",
+      instructions: question.instructions ?? null,
+      referenceAnswer: plainAnswerKey(question.answer_key),
+      explanation: question.explanation ?? null,
+      studentResponse,
+      maxScore,
+    });
+
+    const { error: updateError } = await admin
+      .from("manual_reviews")
+      .update({
+        ai_suggestion: suggestion as never,
+      })
+      .eq("id", typed.id)
+      .eq("status", "pending");
+    if (updateError) throw new Error(updateError.message);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "manual_review_ai_suggested",
+      entity_type: "manual_review",
+      entity_id: typed.id,
+      summary: `AI suggested ${suggestion.score}/${maxScore} for a pending answer`,
+      details: {
+        answer_id: typed.answer_id,
+        attempt_id: typed.attempt_answers.attempt_id,
+        question_id: typed.question_id,
+        provider: suggestion.provider,
+        model: suggestion.model,
+        confidence: suggestion.confidence,
+        suggested_score: suggestion.score,
+        max_score: maxScore,
+      },
+    });
+
+    return suggestion;
+  });
 
 export const reviewManualAnswer = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
