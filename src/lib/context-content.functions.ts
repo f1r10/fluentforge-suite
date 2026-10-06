@@ -303,7 +303,7 @@ export const getListening = createServerFn({ method: "GET" })
     const { data: row, error } = await context.supabase
       .from("listenings")
       .select(
-        "id,title,media_id,transcript,transcript_segments,transcript_source,learning_language,level,playback_rules,status,metadata,listening_topics(topic_id),listening_tags(tags(name)),listening_sections(id,title,start_seconds,end_seconds,sort_order),listening_question_sets(id,section_id,title,instructions,sort_order)",
+        "id,title,media_id,transcript,transcript_segments,transcript_source,learning_language,level,playback_rules,status,metadata,media_assets(id,kind,original_filename,mime_type),listening_topics(topic_id),listening_tags(tags(name)),listening_sections(id,title,start_seconds,end_seconds,sort_order),listening_question_sets(id,section_id,title,instructions,sort_order)",
       )
       .eq("id", data.id)
       .is("deleted_at", null)
@@ -322,6 +322,12 @@ export const getListening = createServerFn({ method: "GET" })
       playback_rules: Record<string, unknown>;
       status: "active" | "draft" | "archived";
       metadata: Record<string, unknown>;
+      media_assets: {
+        id: string;
+        kind: string;
+        original_filename: string | null;
+        mime_type: string | null;
+      } | null;
       listening_topics: Array<{ topic_id: string }>;
       listening_tags: Array<{ tags: { name: string } }>;
       listening_sections: Array<{
@@ -342,6 +348,7 @@ export const getListening = createServerFn({ method: "GET" })
 
     return {
       ...typed,
+      media: typed.media_assets,
       topicIds: typed.listening_topics.map((x) => x.topic_id),
       tags: typed.listening_tags.map((x) => x.tags.name),
       sections: typed.listening_sections.sort((a, b) => a.sort_order - b.sort_order),
