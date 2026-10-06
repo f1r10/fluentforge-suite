@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { createRuntimeAdminClient, createRuntimePublicClient } from "@/runtime/server-client";
 
 export function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -23,14 +24,38 @@ export function decodeJwt(token: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 }
 
-export function publicClient() {
-  return createClient<Database>(process.env["SUPABASE_URL"]!, process.env["SUPABASE_PUBLISHABLE_KEY"]!, {
-    auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
-  });
+type SupabaseCompatibleClient = ReturnType<typeof createClient<Database>>;
+
+function postgresRuntime() {
+  return process.env["RUNTIME_BACKEND"] === "postgres";
 }
 
-export async function adminClient() {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+export function publicClient(): SupabaseCompatibleClient {
+  if (postgresRuntime()) {
+    return createRuntimePublicClient() as unknown as SupabaseCompatibleClient;
+  }
+
+  return createClient<Database>(
+    process.env["SUPABASE_URL"]!,
+    process.env["SUPABASE_PUBLISHABLE_KEY"]!,
+    {
+      auth: {
+        storage: undefined,
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    },
+  );
+}
+
+export async function adminClient(): Promise<SupabaseCompatibleClient> {
+  if (postgresRuntime()) {
+    return createRuntimeAdminClient() as unknown as SupabaseCompatibleClient;
+  }
+
+  const { supabaseAdmin } = await import(
+    "@/integrations/supabase/client.server"
+  );
   return supabaseAdmin;
 }
 
