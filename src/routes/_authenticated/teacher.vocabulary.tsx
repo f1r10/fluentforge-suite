@@ -22,6 +22,7 @@ import {
 import { LEVELS } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
 import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 
@@ -52,9 +53,12 @@ type EditorState = {
   tags: string;
 };
 
-const emptyEditor = (): EditorState => ({
+const emptyEditor = (
+  learningLanguage = "",
+  translationLanguage = "",
+): EditorState => ({
   word: "",
-  learning_language: "en",
+  learning_language: learningLanguage,
   definition: "",
   ipa: "",
   part_of_speech: "",
@@ -63,7 +67,9 @@ const emptyEditor = (): EditorState => ({
   level: "",
   notes: "",
   status: "active",
-  translations: [{ language: "az", value: "" }],
+  translations: translationLanguage
+    ? [{ language: translationLanguage, value: "" }]
+    : [],
   examples: [],
   topicIds: [],
   tags: "",
@@ -74,6 +80,12 @@ const selectClass = "h-9 w-full rounded-md border border-input bg-background px-
 function VocabularyPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const languages = useContentLanguages();
+
+  const defaultTranslationFor = (learningLanguage: string) =>
+    languages.translation.find(
+      (item) => item.code !== learningLanguage,
+    )?.code ?? "";
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const topicOpts = topicOptions(topics);
   const [search, setSearch] = useState("");
@@ -119,7 +131,8 @@ function VocabularyPage() {
       setEditor({
         id: v.id,
         word: v.word,
-        learning_language: v.learning_language ?? "en",
+        learning_language:
+          v.learning_language ?? languages.defaultLearningCode,
         definition: v.definition ?? "",
         ipa: v.ipa ?? "",
         part_of_speech: v.part_of_speech ?? "",
@@ -128,7 +141,14 @@ function VocabularyPage() {
         level: v.level ?? "",
         notes: v.notes ?? "",
         status: v.status,
-        translations: v.translations.length ? v.translations : [{ language: "az", value: "" }],
+        translations: v.translations.length
+          ? v.translations
+          : (() => {
+              const language = defaultTranslationFor(
+                v.learning_language ?? languages.defaultLearningCode,
+              );
+              return language ? [{ language, value: "" }] : [];
+            })(),
         examples: v.examples,
         topicIds: v.topicIds,
         tags: v.tags.join(", "),
@@ -195,9 +215,20 @@ function VocabularyPage() {
             language &&
             language !== editor.learning_language.toLowerCase(),
         );
-      const fallbackTargets = ["az", "en", "ru", "tr"].filter(
-        (language) => language !== editor.learning_language.toLowerCase(),
-      );
+      const configuredTargets = languages.translation
+        .map((item) => item.code.toLowerCase())
+        .filter(
+          (language) =>
+            language !== editor.learning_language.toLowerCase(),
+        );
+      const fallbackTargets = configuredTargets.length
+        ? configuredTargets
+        : languages.all
+            .map((item) => item.code.toLowerCase())
+            .filter(
+              (language) =>
+                language !== editor.learning_language.toLowerCase(),
+            );
 
       const suggestion = await suggestVocabularyEnrichmentForEditor({
         data: {
@@ -307,7 +338,18 @@ function VocabularyPage() {
           <h1 className="text-2xl font-bold">{t("vocabulary")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button onClick={() => { setEnrichment(null); setEditor(emptyEditor()); }}>
+        <Button
+          disabled={languages.isPending}
+          onClick={() => {
+            setEnrichment(null);
+            setEditor(
+              emptyEditor(
+                languages.defaultLearningCode,
+                defaultTranslationFor(languages.defaultLearningCode),
+              ),
+            );
+          }}
+        >
           <Plus className="h-4 w-4" />
           {t("add_vocabulary")}
         </Button>
@@ -331,10 +373,11 @@ function VocabularyPage() {
           }}
         >
           <option value="">{t("all")} — {t("language")}</option>
-          <option value="en">English</option>
-          <option value="az">Azərbaycanca</option>
-          <option value="ru">Русский</option>
-          <option value="tr">Türkçe</option>
+          {languages.all.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
         </select>
         <select
           className={selectClass}
@@ -579,15 +622,20 @@ function VocabularyPage() {
                     value={editor.learning_language}
                     onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}
                   >
-                    <option value="en">English</option>
-                    <option value="az">Azərbaycanca</option>
-                    <option value="ru">Русский</option>
-                    <option value="tr">Türkçe</option>
-                    <option value="de">Deutsch</option>
-                    <option value="fr">Français</option>
-                    <option value="es">Español</option>
-                    <option value="it">Italiano</option>
-                    <option value="ar">العربية</option>
+                    {editor.learning_language &&
+                      !languages.learning.some(
+                        (item) =>
+                          item.code === editor.learning_language,
+                      ) && (
+                        <option value={editor.learning_language}>
+                          {editor.learning_language}
+                        </option>
+                      )}
+                    {languages.learning.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="IPA">
@@ -655,7 +703,21 @@ function VocabularyPage() {
                     onClick={() =>
                       setEditor({
                         ...editor,
-                        translations: [...editor.translations, { language: "az", value: "" }],
+                        translations: [
+                          ...editor.translations,
+                          {
+                            language:
+                              languages.translation.find(
+                                (item) =>
+                                  item.code !== editor.learning_language &&
+                                  !editor.translations.some(
+                                    (translation) =>
+                                      translation.language === item.code,
+                                  ),
+                              )?.code ?? "",
+                            value: "",
+                          },
+                        ],
                       })
                     }
                   >
@@ -664,19 +726,40 @@ function VocabularyPage() {
                 </div>
                 {editor.translations.map((tr, index) => (
                   <div key={index} className="grid grid-cols-[120px_1fr_auto] gap-2">
-                    <Input
+                    <select
+                      className={selectClass}
                       value={tr.language}
-                      maxLength={10}
-                      placeholder="az"
                       onChange={(e) =>
                         setEditor({
                           ...editor,
                           translations: editor.translations.map((x, i) =>
-                            i === index ? { ...x, language: e.target.value } : x,
+                            i === index
+                              ? { ...x, language: e.target.value }
+                              : x,
                           ),
                         })
                       }
-                    />
+                    >
+                      <option value="">—</option>
+                      {tr.language &&
+                        !languages.translation.some(
+                          (item) => item.code === tr.language,
+                        ) && (
+                          <option value={tr.language}>
+                            {tr.language}
+                          </option>
+                        )}
+                      {languages.translation
+                        .filter(
+                          (item) =>
+                            item.code !== editor.learning_language,
+                        )
+                        .map((item) => (
+                          <option key={item.code} value={item.code}>
+                            {item.label}
+                          </option>
+                        ))}
+                    </select>
                     <Input
                       value={tr.value}
                       onChange={(e) =>
