@@ -108,14 +108,12 @@ async function gotoHydrated(page, path) {
     await studentPage.locator('form button[type="submit"]').click();
     await expectPath(studentPage, "**/student", "student access-key login");
 
-    const studentHeading = studentPage.locator("h1");
-    await studentHeading.waitFor({ timeout: 20000 });
-    const heading = ((await studentHeading.textContent()) || "").trim();
-    assert(
-      heading.includes(student.firstName) &&
-        heading.includes(student.lastName),
-      "Student dashboard did not identify the created student.",
-    );
+    await studentPage
+      .getByRole("heading", {
+        name: student.firstName + " " + student.lastName,
+        level: 1,
+      })
+      .waitFor({ timeout: 20000 });
     console.log("[ok] student dashboard rendered for the created student");
 
     await studentContext.close();
