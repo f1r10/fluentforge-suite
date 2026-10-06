@@ -11,6 +11,7 @@ import httpx
 
 from .extractors import detect_candidates, extract_document
 from .store import claim_next_job, update_job
+from .transcriber import transcribe
 
 
 _STOP = threading.Event()
@@ -34,9 +35,12 @@ def _loop() -> None:
             continue
 
         try:
-            if job["kind"] != "document_import":
+            if job["kind"] == "document_import":
+                _process_document_import(job)
+            elif job["kind"] == "transcription":
+                _process_transcription(job)
+            else:
                 raise ValueError(f"Unsupported job kind: {job['kind']}")
-            _process_document_import(job)
         except Exception as exc:  # worker boundary: persist failures, never crash loop
             update_job(
                 job["id"],
@@ -50,25 +54,12 @@ def _process_document_import(job: dict) -> None:
     request = job["request"]
     update_job(job["id"], progress=5)
 
-    source_url = str(request["source_url"])
-    _validate_source_url(source_url)
-
-    suffix = Path(request["filename"]).suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
-        temp_path = Path(handle.name)
+    temp_path = _download_source(
+        str(request["source_url"]),
+        request["filename"],
+    )
 
     try:
-        with httpx.stream("GET", source_url, timeout=120, follow_redirects=True) as response:
-            response.raise_for_status()
-            max_bytes = int(os.getenv("PROCESSING_MAX_SOURCE_BYTES", str(1024 * 1024 * 1024)))
-            total = 0
-            with temp_path.open("wb") as output:
-                for chunk in response.iter_bytes(1024 * 1024):
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise ValueError("Source file exceeds processing size limit")
-                    output.write(chunk)
-
         update_job(job["id"], progress=25)
         extraction = extract_document(
             temp_path,
@@ -113,6 +104,60 @@ def _process_document_import(job: dict) -> None:
         temp_path.unlink(missing_ok=True)
 
 
+
+
+def _process_transcription(job: dict) -> None:
+    request = job["request"]
+    update_job(job["id"], progress=5)
+
+    temp_path = _download_source(
+        str(request["source_url"]),
+        request["filename"],
+    )
+
+    try:
+        update_job(job["id"], progress=25)
+        result = transcribe(
+            temp_path,
+            language=request.get("language"),
+        )
+        update_job(
+            job["id"],
+            status="completed",
+            progress=100,
+            result=result,
+            extraction_method="faster_whisper",
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _download_source(url: str, filename: str) -> Path:
+    _validate_source_url(url)
+    suffix = Path(filename).suffix
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+        temp_path = Path(handle.name)
+
+    try:
+        with httpx.stream("GET", url, timeout=120, follow_redirects=True) as response:
+            response.raise_for_status()
+            max_bytes = int(
+                os.getenv(
+                    "PROCESSING_MAX_SOURCE_BYTES",
+                    str(1024 * 1024 * 1024),
+                )
+            )
+            total = 0
+            with temp_path.open("wb") as output:
+                for chunk in response.iter_bytes(1024 * 1024):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("Source file exceeds processing size limit")
+                    output.write(chunk)
+        return temp_path
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _apply_profile(items: list[dict], profile: dict) -> None:
