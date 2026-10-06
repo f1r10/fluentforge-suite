@@ -304,7 +304,7 @@ function ReadingsPage() {
 
       {editor && (
         <Dialog open onOpenChange={(open) => !open && setEditor(null)}>
-          <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
+          <DialogContent className="max-h-[94vh] max-w-6xl overflow-y-auto">
             <DialogHeader><DialogTitle>{editor.id ? t("edit_reading") : t("add_reading")}</DialogTitle></DialogHeader>
             <form onSubmit={save} className="space-y-5">
               <Field label={t("title")}><Input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} required autoFocus /></Field>
