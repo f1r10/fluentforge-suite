@@ -45,7 +45,7 @@ Do not reuse the database, JWT and storage secrets.
 docker compose \
   --env-file .env.postgres \
   -f docker-compose.postgres.yml \
-  up -d --build app
+  up -d --build app scheduler
 ```
 
 The dependency chain is deliberate:
@@ -142,7 +142,7 @@ docker compose \
 docker compose \
   --env-file .env.postgres \
   -f docker-compose.postgres.yml \
-  up -d app
+  up -d app scheduler
 ```
 
 The one-shot `migrate` service applies only pending migrations and rejects checksum drift for migrations already recorded in `public.fluentforge_schema_migrations`.
@@ -196,7 +196,7 @@ docker compose \
 docker compose \
   --env-file .env.production \
   -f docker-compose.production.yml \
-  up -d app processing-service
+  up -d app scheduler
 ```
 
 Use the same `/api/health` and `/api/ready` checks described above.
@@ -245,7 +245,7 @@ Gemini remains optional and is active only when `AI_PROVIDER=gemini` and its cre
 
 # Scheduled backups
 
-Both supplied production Compose stacks include an internal `scheduler` service.
+Both supplied production Compose stacks include an internal `scheduler` service. The startup commands above explicitly start it; starting only the `app` service does not automatically start reverse dependencies such as the scheduler.
 
 The scheduler calls:
 
@@ -310,3 +310,8 @@ Before a major upgrade, verify at least one recent scheduled/manual backup and t
 - Back up PostgreSQL and storage before upgrades.
 - Test restore on a separate empty installation.
 - Review CI security/performance acceptance results before production releases.
+
+
+# Release acceptance
+
+Before merging a production candidate to `main`, follow [`RELEASE_ACCEPTANCE.md`](./RELEASE_ACCEPTANCE.md). CI covers a fresh plain-PostgreSQL stack and a real Chromium teacher/student smoke path, but public TLS, host persistence, real media processing and restore drills still need a deployment-environment check.
