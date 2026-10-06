@@ -134,14 +134,14 @@ export function QuestionLabellingEditor({
 
           {preview?.url ? (
             <div
-              className="relative mx-auto w-full max-w-4xl cursor-crosshair overflow-hidden rounded-md border border-border bg-muted"
+              className="relative mx-auto w-fit max-w-full cursor-crosshair overflow-hidden rounded-md border border-border bg-muted"
               onClick={addLabel}
               title={t("click_image_to_add_label")}
             >
               <img
                 src={preview.url}
                 alt=""
-                className="block h-auto max-h-[65vh] w-full object-contain"
+                className="block h-auto max-h-[65vh] w-auto max-w-full object-contain"
                 draggable={false}
               />
               {labels.map((label, index) => (
