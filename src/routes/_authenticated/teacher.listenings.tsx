@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Pencil, Plus, X } from "lucide-react";
+import { FileAudio, Pencil, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/context-content.functions";
 import { LEVELS } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
+import { listMedia } from "@/lib/media.functions";
 import { useI18n } from "@/lib/i18n";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
@@ -41,6 +42,7 @@ type EditorState = {
   id?: string;
   title: string;
   media_id: string;
+  media_label: string;
   transcript: string;
   transcript_source: "none" | "manual" | "imported" | "auto";
   learning_language: string;
@@ -60,6 +62,7 @@ type EditorState = {
 const emptyEditor = (): EditorState => ({
   title: "",
   media_id: "",
+  media_label: "",
   transcript: "",
   transcript_source: "none",
   learning_language: "en",
@@ -93,6 +96,7 @@ function ListeningsPage() {
   const [page, setPage] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
 
   const { data, isFetching } = useQuery({
     queryKey: ["listenings", search, language, level, status, page],
@@ -113,6 +117,7 @@ function ListeningsPage() {
         id: row.id,
         title: row.title,
         media_id: row.media_id ?? "",
+        media_label: row.media?.original_filename ?? "",
         transcript: row.transcript ?? "",
         transcript_source: (row.transcript_source as EditorState["transcript_source"]) ?? "none",
         learning_language: row.learning_language ?? "en",
@@ -319,8 +324,31 @@ function ListeningsPage() {
                 </Field>
               </div>
 
-              <Field label={t("media_id")}>
-                <Input value={editor.media_id} onChange={(e) => setEditor({ ...editor, media_id: e.target.value })} placeholder={t("media_id_hint")} />
+              <Field label={t("media")}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1 rounded-md border border-border px-3 py-2 text-sm">
+                    {editor.media_id ? (
+                      <div className="flex items-center gap-2">
+                        <FileAudio className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{editor.media_label || editor.media_id}</span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">{t("no_media")}</span>
+                    )}
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => setMediaPickerOpen(true)}>
+                    {t("choose_media")}
+                  </Button>
+                  {editor.media_id && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setEditor({ ...editor, media_id: "", media_label: "" })}
+                    >
+                      {t("clear")}
+                    </Button>
+                  )}
+                </div>
               </Field>
               <Field label={t("transcript")}>
                 <Textarea rows={8} value={editor.transcript} onChange={(e) => setEditor({ ...editor, transcript: e.target.value })} />
@@ -430,7 +458,100 @@ function ListeningsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {editor && mediaPickerOpen && (
+        <ListeningMediaPicker
+          onClose={() => setMediaPickerOpen(false)}
+          onChoose={(media) => {
+            setEditor({
+              ...editor,
+              media_id: media.id,
+              media_label: media.original_filename ?? media.id,
+            });
+            setMediaPickerOpen(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ListeningMediaPicker({
+  onClose,
+  onChoose,
+}: {
+  onClose: () => void;
+  onChoose: (media: { id: string; original_filename: string | null }) => void;
+}) {
+  const { t } = useI18n();
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<"audio" | "video">("audio");
+  const [page, setPage] = useState(0);
+  const { data, isFetching } = useQuery({
+    queryKey: ["listening-media-picker", search, kind, page],
+    queryFn: () => listMedia({ data: { search, kind, includeDeleted: false, page } }),
+  });
+
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / (data?.pageSize ?? 40)));
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden">
+        <DialogHeader><DialogTitle>{t("choose_media")}</DialogTitle></DialogHeader>
+        <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              placeholder={t("search")}
+            />
+          </div>
+          <select
+            className={selectClass}
+            value={kind}
+            onChange={(e) => { setKind(e.target.value as typeof kind); setPage(0); }}
+          >
+            <option value="audio">{t("audio")}</option>
+            <option value="video">{t("video")}</option>
+          </select>
+        </div>
+        <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border">
+          {rows.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              {isFetching ? "…" : t("no_results")}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {rows.map((media) => (
+                <li key={media.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {media.original_filename ?? media.id}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {media.mime_type ?? t(media.kind)}
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => onChoose(media)}>{t("select")}</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">{page + 1} / {pages}</span>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((x) => x - 1)}>←</Button>
+            <Button type="button" variant="outline" size="sm" disabled={page + 1 >= pages} onClick={() => setPage((x) => x + 1)}>→</Button>
+          </div>
+        </div>
+        <DialogFooter><Button type="button" variant="outline" onClick={onClose}>{t("close")}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
