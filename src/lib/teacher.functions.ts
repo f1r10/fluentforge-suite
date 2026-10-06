@@ -96,21 +96,81 @@ async function issueKey(admin: Awaited<ReturnType<typeof import("./security.serv
 
 export const createStudent = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
-  .inputValidator((d) => z.object({ first_name: z.string().trim().min(1).max(80), last_name: z.string().trim().min(1).max(80), username: z.string().trim().min(3).max(40).regex(/^[a-z0-9._-]+$/), groupIds: z.array(z.string().uuid()).default([]) }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        first_name: z.string().trim().min(1).max(80),
+        last_name: z.string().trim().min(1).max(80),
+        username: z.string().trim().min(3).max(40).regex(/^[a-z0-9._-]+$/),
+        groupIds: z.array(z.string().uuid()).max(100).default([]),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { adminClient, randomToken, randomPassword, audit } = await import("./security.server");
     const admin = await adminClient();
-    const { data: exists } = await admin.from("students").select("id").eq("username", data.username).maybeSingle();
+    const username = data.username.toLowerCase();
+    const { data: exists } = await admin.from("students").select("id").ilike("username", username).maybeSingle();
     if (exists) throw new Error("This username is already taken.");
-    const { data: u, error } = await admin.auth.admin.createUser({ email: `student-${randomToken(14).toLowerCase()}@accounts.local`, password: randomPassword(), email_confirm: true });
+
+    const { data: u, error } = await admin.auth.admin.createUser({
+      email: `student-${randomToken(14).toLowerCase()}@accounts.local`,
+      password: randomPassword(),
+      email_confirm: true,
+    });
     if (error || !u.user) throw new Error(error?.message ?? "Could not create student");
-    await admin.from("user_roles").insert({ user_id: u.user.id, role: "student" });
-    const { data: st, error: e2 } = await admin.from("students").insert({ first_name: data.first_name, last_name: data.last_name, username: data.username, auth_user_id: u.user.id }).select("id").single();
-    if (e2) throw new Error(e2.message);
-    if (data.groupIds.length) await admin.from("group_memberships").insert(data.groupIds.map((g) => ({ group_id: g, student_id: st.id })));
-    const key = await issueKey(admin, st.id, data.username);
-    await audit(admin, { actor_type: "teacher", actor_id: context.userId, action: "student_created", entity_type: "student", entity_id: st.id, summary: `Created student ${data.first_name} ${data.last_name}` });
-    return { id: st.id, key };
+
+    let studentId: string | null = null;
+    try {
+      const { error: roleError } = await admin.from("user_roles").insert({
+        user_id: u.user.id,
+        role: "student",
+      });
+      if (roleError) throw new Error(roleError.message);
+
+      const { data: st, error: studentError } = await admin
+        .from("students")
+        .insert({
+          first_name: data.first_name,
+          last_name: data.last_name,
+          username,
+          auth_user_id: u.user.id,
+        })
+        .select("id")
+        .single();
+      if (studentError || !st) throw new Error(studentError?.message ?? "Could not create student profile");
+      studentId = st.id;
+
+      if (data.groupIds.length) {
+        const { error: groupError } = await admin.from("group_memberships").insert(
+          [...new Set(data.groupIds)].map((groupId) => ({
+            group_id: groupId,
+            student_id: st.id,
+          })),
+        );
+        if (groupError) throw new Error(groupError.message);
+      }
+
+      const key = await issueKey(admin, st.id, username);
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: context.userId,
+        action: "student_created",
+        entity_type: "student",
+        entity_id: st.id,
+        summary: `Created student ${data.first_name} ${data.last_name}`,
+      });
+      return { id: st.id, key };
+    } catch (studentError) {
+      // Supabase Auth is outside the public-schema transaction boundary.
+      // Compensate so a failed multi-step create does not leave a half-created student.
+      if (studentId) {
+        await admin.from("students").delete().eq("id", studentId);
+      }
+      await admin.from("user_roles").delete().eq("user_id", u.user.id);
+      await admin.auth.admin.deleteUser(u.user.id);
+      throw studentError;
+    }
   });
 
 export const regenerateKey = createServerFn({ method: "POST" })
@@ -125,6 +185,42 @@ export const regenerateKey = createServerFn({ method: "POST" })
     await admin.from("student_sessions").update({ revoked_at: new Date().toISOString() }).eq("student_id", st.id).is("revoked_at", null);
     await audit(admin, { actor_type: "teacher", actor_id: context.userId, action: "key_regenerated", entity_type: "student", entity_id: st.id, summary: `New access key for ${st.username}` });
     return { key };
+  });
+
+export const revokeStudentKey = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ studentId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const now = new Date().toISOString();
+    const { data: student } = await admin
+      .from("students")
+      .select("username")
+      .eq("id", data.studentId)
+      .maybeSingle();
+    if (!student) throw new Error("Student not found.");
+
+    await admin
+      .from("student_access_keys")
+      .update({ revoked_at: now })
+      .eq("student_id", data.studentId)
+      .is("revoked_at", null);
+    await admin
+      .from("student_sessions")
+      .update({ revoked_at: now })
+      .eq("student_id", data.studentId)
+      .is("revoked_at", null);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "key_revoked",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: `Access key revoked for ${student.username}`,
+    });
+    return { ok: true };
   });
 
 export const setStudentStatus = createServerFn({ method: "POST" })
