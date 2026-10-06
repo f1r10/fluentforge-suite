@@ -576,6 +576,7 @@ export type Database = {
           play_number: number
           request_id: string
           started_at: string
+          stream_token_hash: string | null
           student_id: string
         }
         Insert: {
@@ -587,6 +588,7 @@ export type Database = {
           play_number: number
           request_id: string
           started_at?: string
+          stream_token_hash?: string | null
           student_id: string
         }
         Update: {
@@ -598,6 +600,7 @@ export type Database = {
           play_number?: number
           request_id?: string
           started_at?: string
+          stream_token_hash?: string | null
           student_id?: string
         }
         Relationships: [
@@ -2660,6 +2663,7 @@ export type Database = {
           p_listening_id: string
           p_max_plays: number | null
           p_request_id: string
+          p_stream_token_hash: string
           p_student_id: string
         }
         Returns: {
