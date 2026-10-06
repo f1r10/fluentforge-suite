@@ -79,4 +79,4 @@
 - [ ] Performance/security acceptance testing
 
 ## Branding polish
-- [ ] Logo/favicon file upload (currently URL fields)
+- [x] Logo/favicon file upload: validated signed uploads, byte-signature checks, dynamic favicon/logo rendering and Backup/Restore portability
