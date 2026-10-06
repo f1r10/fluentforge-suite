@@ -566,6 +566,57 @@ export type Database = {
           },
         ]
       }
+      exam_listening_plays: {
+        Row: {
+          attempt_id: string
+          completed_at: string | null
+          expires_at: string
+          id: string
+          listening_id: string
+          play_number: number
+          request_id: string
+          started_at: string
+          student_id: string
+        }
+        Insert: {
+          attempt_id: string
+          completed_at?: string | null
+          expires_at: string
+          id?: string
+          listening_id: string
+          play_number: number
+          request_id: string
+          started_at?: string
+          student_id: string
+        }
+        Update: {
+          attempt_id?: string
+          completed_at?: string | null
+          expires_at?: string
+          id?: string
+          listening_id?: string
+          play_number?: number
+          request_id?: string
+          started_at?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_listening_plays_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_listening_plays_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exam_sections: {
         Row: {
           exam_id: string
@@ -2601,6 +2652,21 @@ export type Database = {
           p_time_spent_ms: number
         }
         Returns: Database["public"]["Tables"]["attempt_answers"]["Row"]
+      }
+      claim_exam_listening_play: {
+        Args: {
+          p_attempt_id: string
+          p_lease_seconds: number
+          p_listening_id: string
+          p_max_plays: number | null
+          p_request_id: string
+          p_student_id: string
+        }
+        Returns: {
+          expires_at: string
+          id: string
+          play_number: number
+        }[]
       }
       append_exam_violation: {
         Args: { p_attempt_id: string; p_event: Json }
