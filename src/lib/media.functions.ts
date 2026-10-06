@@ -191,10 +191,7 @@ export const listMedia = createServerFn({ method: "GET" })
 export const listYouTubeImports = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
-    const client = context.supabase as unknown as {
-      from: (table: string) => any;
-    };
-    const { data, error } = await client
+    const { data, error } = await context.supabase
       .from("media_import_jobs")
       .select(
         "id,source_url,status,progress,error,result,media_asset_id,created_at,updated_at,completed_at",
@@ -286,9 +283,7 @@ export const startYouTubeImport = createServerFn({ method: "POST" })
 
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
-    const jobs = admin as unknown as { from: (table: string) => any };
-
-    const { error: insertError } = await jobs
+    const { error: insertError } = await admin
       .from("media_import_jobs")
       .insert({
         id,
@@ -327,7 +322,7 @@ export const startYouTubeImport = createServerFn({ method: "POST" })
         );
       }
 
-      const { error: updateError } = await jobs
+      const { error: updateError } = await admin
         .from("media_import_jobs")
         .update({
           processor_job_id: processing.jobId,
@@ -363,7 +358,7 @@ export const startYouTubeImport = createServerFn({ method: "POST" })
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
-      await jobs
+      await admin
         .from("media_import_jobs")
         .update({
           status: "failed",
@@ -395,8 +390,7 @@ export const syncYouTubeImport = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
-    const jobs = admin as unknown as { from: (table: string) => any };
-    const { data: job, error: jobError } = await jobs
+    const { data: job, error: jobError } = await admin
       .from("media_import_jobs")
       .select("*")
       .eq("id", data.id)
@@ -420,7 +414,7 @@ export const syncYouTubeImport = createServerFn({ method: "POST" })
       const message =
         state.error ?? state.message ?? "YouTube import failed.";
       await admin.storage.from(BUCKET).remove([job.storage_path]);
-      await jobs
+      await admin
         .from("media_import_jobs")
         .update({
           status: "failed",
@@ -451,7 +445,7 @@ export const syncYouTubeImport = createServerFn({ method: "POST" })
     if (state.status !== "completed") {
       const status =
         state.status === "processing" ? "processing" : "queued";
-      await jobs
+      await admin
         .from("media_import_jobs")
         .update({
           status,
