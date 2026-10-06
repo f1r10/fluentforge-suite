@@ -1,4 +1,4 @@
-export type BrandingAssetKind = "logo" | "favicon";
+export type BrandingAssetKind = "logo" | "favicon" | "login_image";
 
 export function validateBrandingAssetRequest(
   kind: BrandingAssetKind,
@@ -9,9 +9,13 @@ export function validateBrandingAssetRequest(
   const extension = filename.toLowerCase().split(".").pop() ?? "";
   const normalizedMime = mimeType.toLowerCase();
 
-  if (kind === "logo") {
+  if (kind === "logo" || kind === "login_image") {
     if (sizeBytes > 5 * 1024 * 1024) {
-      throw new Error("Logo must be 5 MB or smaller.");
+      throw new Error(
+        kind === "logo"
+          ? "Logo must be 5 MB or smaller."
+          : "Login image must be 5 MB or smaller.",
+      );
     }
     const allowed: Record<string, string[]> = {
       png: ["image/png"],
@@ -23,7 +27,11 @@ export function validateBrandingAssetRequest(
       !allowed[extension] ||
       !allowed[extension]!.includes(normalizedMime)
     ) {
-      throw new Error("Logo must be PNG, JPEG or WebP.");
+      throw new Error(
+        kind === "logo"
+          ? "Logo must be PNG, JPEG or WebP."
+          : "Login image must be PNG, JPEG or WebP.",
+      );
     }
     return {
       extension: extension === "jpeg" ? "jpg" : extension,
@@ -64,7 +72,10 @@ export function verifyBrandingAssetBytes(
   path: string,
   bytes: Uint8Array,
 ) {
-  const maxBytes = kind === "logo" ? 5 * 1024 * 1024 : 1024 * 1024;
+  const maxBytes =
+    kind === "logo" || kind === "login_image"
+      ? 5 * 1024 * 1024
+      : 1024 * 1024;
   if (!bytes.byteLength || bytes.byteLength > maxBytes) {
     throw new Error("Uploaded branding file has an invalid size.");
   }
@@ -97,7 +108,11 @@ export function verifyBrandingAssetBytes(
     bytes[3] === 0x00;
 
   if (extension === "png" && isPng) return "png";
-  if (extension === "jpg" && kind === "logo" && isJpeg) return "jpeg";
+  if (
+    extension === "jpg" &&
+    (kind === "logo" || kind === "login_image") &&
+    isJpeg
+  ) return "jpeg";
   if (extension === "webp" && isWebp) return "webp";
   if (extension === "ico" && kind === "favicon" && isIco) return "ico";
 
