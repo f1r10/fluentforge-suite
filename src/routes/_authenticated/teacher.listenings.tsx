@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { FileAudio, Pencil, Plus, Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileAudio, Pencil, Plus, Search, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,6 +20,11 @@ import {
 import { LEVELS } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
 import { listMedia } from "@/lib/media.functions";
+import {
+  getListeningTranscriptionJob,
+  startListeningTranscription,
+  syncTranscriptionJob,
+} from "@/lib/transcription.functions";
 import { useI18n } from "@/lib/i18n";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
@@ -44,7 +49,7 @@ type EditorState = {
   media_id: string;
   media_label: string;
   transcript: string;
-  transcript_source: "none" | "manual" | "imported" | "auto";
+  transcript_source: "none" | "manual" | "imported" | "auto" | "local_whisper";
   learning_language: string;
   level: string;
   status: "active" | "draft" | "archived";
@@ -97,6 +102,8 @@ function ListeningsPage() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busy, setBusy] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
+  const [transcriptionProgress, setTranscriptionProgress] = useState(0);
 
   const { data, isFetching } = useQuery({
     queryKey: ["listenings", search, language, level, status, page],
@@ -111,8 +118,22 @@ function ListeningsPage() {
 
   async function openEdit(id: string) {
     try {
-      const row = await getListening({ data: { id } });
+      const [row, transcriptionJob] = await Promise.all([
+        getListening({ data: { id } }),
+        getListeningTranscriptionJob({ data: { listeningId: id } }),
+      ]);
       const rules = row.playback_rules ?? {};
+      if (
+        transcriptionJob &&
+        (transcriptionJob.status === "queued" ||
+          transcriptionJob.status === "processing")
+      ) {
+        setTranscriptionJobId(transcriptionJob.id);
+        setTranscriptionProgress(transcriptionJob.progress);
+      } else {
+        setTranscriptionJobId(null);
+        setTranscriptionProgress(transcriptionJob?.progress ?? 0);
+      }
       setEditor({
         id: row.id,
         title: row.title,
@@ -218,6 +239,69 @@ function ListeningsPage() {
     }
   }
 
+  async function startTranscription() {
+    if (!editor?.id || !editor.media_id) return;
+    try {
+      const result = await startListeningTranscription({
+        data: { listeningId: editor.id },
+      });
+      setTranscriptionJobId(result.jobId);
+      setTranscriptionProgress(0);
+      toast.success(t("transcription_started"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  useEffect(() => {
+    if (!transcriptionJobId || !editor?.id) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const state = await syncTranscriptionJob({
+          data: { jobId: transcriptionJobId },
+        });
+        if (cancelled) return;
+        setTranscriptionProgress(state.progress);
+
+        if (state.status === "completed") {
+          const row = await getListening({ data: { id: editor.id! } });
+          if (cancelled) return;
+          setEditor((current) =>
+            current
+              ? {
+                  ...current,
+                  transcript: row.transcript ?? "",
+                  transcript_source:
+                    (row.transcript_source as EditorState["transcript_source"]) ??
+                    "local_whisper",
+                }
+              : current,
+          );
+          setTranscriptionJobId(null);
+          await qc.invalidateQueries({ queryKey: ["listenings"] });
+          toast.success(t("transcription_completed"));
+        } else if (state.status === "failed") {
+          setTranscriptionJobId(null);
+          toast.error(t("transcription_failed"));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : String(err));
+          setTranscriptionJobId(null);
+        }
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(poll, 4_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [transcriptionJobId, editor?.id, qc, t]);
+
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -314,7 +398,7 @@ function ListeningsPage() {
                 </Field>
                 <Field label={t("transcript_source")}>
                   <select className={selectClass} value={editor.transcript_source} onChange={(e) => setEditor({ ...editor, transcript_source: e.target.value as EditorState["transcript_source"] })}>
-                    {(["none", "manual", "imported", "auto"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
+                    {(["none", "manual", "imported", "auto", "local_whisper"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
                   </select>
                 </Field>
                 <Field label={t("status")}>
@@ -350,6 +434,35 @@ function ListeningsPage() {
                   )}
                 </div>
               </Field>
+
+              {editor.id && editor.media_id && (
+                <div className="flex flex-wrap items-center gap-3 rounded-md border border-border p-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!!transcriptionJobId}
+                    onClick={startTranscription}
+                  >
+                    <WandSparkles className="h-4 w-4" />
+                    {transcriptionJobId ? t("transcribing") : t("transcribe_locally")}
+                  </Button>
+                  {transcriptionJobId && (
+                    <div className="min-w-48 flex-1">
+                      <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+                        <span>{t("local_whisper")}</span>
+                        <span>{transcriptionProgress}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full bg-foreground transition-all"
+                          style={{ width: `${transcriptionProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Field label={t("transcript")}>
                 <Textarea rows={8} value={editor.transcript} onChange={(e) => setEditor({ ...editor, transcript: e.target.value })} />
               </Field>
