@@ -864,7 +864,9 @@ export const startListeningPlayback = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { adminClient } = await import("./security.server");
+    const { adminClient, randomToken, sha256 } = await import(
+      "./security.server"
+    );
     const admin = await adminClient();
     const studentId = await currentStudentId(context.supabase);
     const attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
@@ -939,6 +941,9 @@ export const startListeningPlayback = createServerFn({ method: "POST" })
       Math.min(4 * 60 * 60, remainingSeconds, desiredLeaseSeconds),
     );
 
+    const streamToken = randomToken(48);
+    const streamTokenHash = sha256(streamToken);
+
     const { data: claimed, error: claimError } = await admin.rpc(
       "claim_exam_listening_play",
       {
@@ -948,6 +953,7 @@ export const startListeningPlayback = createServerFn({ method: "POST" })
         p_request_id: data.requestId,
         p_max_plays: maxPlays,
         p_lease_seconds: leaseSeconds,
+        p_stream_token_hash: streamTokenHash,
       },
     );
     if (claimError) {
@@ -960,18 +966,11 @@ export const startListeningPlayback = createServerFn({ method: "POST" })
     const lease = claimed?.[0];
     if (!lease) throw new Error("Could not create listening playback lease.");
 
-    let url = externalUrl;
-    if (storagePath) {
-      const { data: signed, error: signedError } = await admin.storage
-        .from("media")
-        .createSignedUrl(storagePath, leaseSeconds);
-      if (signedError || !signed) {
-        throw new Error(
-          signedError?.message ?? "Could not authorize listening playback.",
-        );
-      }
-      url = signed.signedUrl;
-    }
+    const url = storagePath
+      ? `/api/exam-listening-stream?lease=${encodeURIComponent(
+          lease.id,
+        )}&token=${encodeURIComponent(streamToken)}`
+      : externalUrl;
     if (!url) throw new Error("Listening media is not available.");
 
     await admin.from("activity_events").insert({
