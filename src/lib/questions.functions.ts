@@ -70,6 +70,40 @@ export const saveQuestion = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { sha256, adminClient, audit } = await import("./security.server");
     const { id, topicIds, tags, force, ...fields } = data;
+
+    const payloadMediaId =
+      fields.payload && typeof fields.payload === "object" &&
+      typeof (fields.payload as Record<string, unknown>)["media_id"] === "string"
+        ? ((fields.payload as Record<string, unknown>)["media_id"] as string)
+        : null;
+
+    if (payloadMediaId) {
+      const { data: media, error: mediaError } = await sb
+        .from("media_assets")
+        .select("id,kind")
+        .eq("id", payloadMediaId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (mediaError) throw new Error(mediaError.message);
+      if (!media) throw new Error("Selected media was not found.");
+
+      if (
+        ["image_labelling", "diagram_labelling", "map_labelling"].includes(
+          fields.question_type,
+        ) &&
+        media.kind !== "image"
+      ) {
+        throw new Error("Visual labelling questions require image media.");
+      }
+
+      if (
+        ["dictation", "listening_transcription"].includes(fields.question_type) &&
+        !["audio", "video"].includes(media.kind)
+      ) {
+        throw new Error("Dictation and listening transcription require audio or video media.");
+      }
+    }
+
     const content_hash = sha256(JSON.stringify([fields.question_type, fields.prompt.trim().toLowerCase().replace(/\s+/g, " "), fields.answer_key, fields.payload]));
 
     if (!force) {
