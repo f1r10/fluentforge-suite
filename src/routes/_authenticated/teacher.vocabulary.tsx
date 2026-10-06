@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +15,7 @@ import {
   listVocabulary,
   saveVocabularyEntry,
   setVocabularyStatus,
+  suggestVocabularyEnrichmentForEditor,
   trashVocabulary,
   type VocabularyInput,
 } from "@/lib/vocabulary.functions";
@@ -84,6 +85,10 @@ function VocabularyPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busyEditor, setBusyEditor] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichment, setEnrichment] = useState<
+    Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
+  >(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["vocabulary", search, language, level, status, topicId, page],
@@ -110,6 +115,7 @@ function VocabularyPage() {
   async function openEdit(id: string) {
     try {
       const v = await getVocabularyEntry({ data: { id } });
+      setEnrichment(null);
       setEditor({
         id: v.id,
         word: v.word,
@@ -174,6 +180,104 @@ function VocabularyPage() {
     }
   }
 
+  async function generateEnrichment() {
+    if (!editor?.word.trim()) {
+      toast.error(t("word_required_for_enrichment"));
+      return;
+    }
+
+    setEnriching(true);
+    try {
+      const currentTargets = editor.translations
+        .map((item) => item.language.trim().toLowerCase())
+        .filter(
+          (language) =>
+            language &&
+            language !== editor.learning_language.toLowerCase(),
+        );
+      const fallbackTargets = ["az", "en", "ru", "tr"].filter(
+        (language) => language !== editor.learning_language.toLowerCase(),
+      );
+
+      const suggestion = await suggestVocabularyEnrichmentForEditor({
+        data: {
+          word: editor.word,
+          learningLanguage: editor.learning_language,
+          targetLanguages: currentTargets.length
+            ? [...new Set(currentTargets)]
+            : fallbackTargets,
+          existing: {
+            definition: editor.definition || null,
+            ipa: editor.ipa || null,
+            partOfSpeech: editor.part_of_speech || null,
+            translations: editor.translations.filter(
+              (item) => item.language.trim() && item.value.trim(),
+            ),
+          },
+        },
+      });
+      setEnrichment(suggestion);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setEnriching(false);
+    }
+  }
+
+  function applyEnrichment() {
+    if (!editor || !enrichment) return;
+
+    const translationMap = new Map(
+      editor.translations
+        .filter((item) => item.language.trim())
+        .map((item) => [item.language.toLowerCase(), item]),
+    );
+    for (const item of enrichment.translations) {
+      const key = item.language.toLowerCase();
+      const existing = translationMap.get(key);
+      if (!existing?.value.trim()) {
+        translationMap.set(key, item);
+      }
+    }
+
+    const exampleKeys = new Set(
+      editor.examples.map((item) => item.sentence.trim().toLowerCase()),
+    );
+    const examples = [...editor.examples];
+    for (const item of enrichment.examples) {
+      const key = item.sentence.trim().toLowerCase();
+      if (!exampleKeys.has(key)) {
+        exampleKeys.add(key);
+        examples.push(item);
+      }
+    }
+
+    const mergeWords = (current: string, incoming: string[]) =>
+      [
+        ...new Set([
+          ...current
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+          ...incoming.map((value) => value.trim()).filter(Boolean),
+        ]),
+      ].join(", ");
+
+    setEditor({
+      ...editor,
+      definition: editor.definition || enrichment.definition || "",
+      ipa: editor.ipa || enrichment.ipa || "",
+      part_of_speech:
+        editor.part_of_speech || enrichment.part_of_speech || "",
+      synonyms: mergeWords(editor.synonyms, enrichment.synonyms),
+      antonyms: mergeWords(editor.antonyms, enrichment.antonyms),
+      translations: [...translationMap.values()],
+      examples,
+    });
+    setEnrichment(null);
+    toast.success(t("enrichment_applied"));
+  }
+
   async function bulkStatus(next: "active" | "draft" | "archived") {
     if (!selected.length) return;
     try {
@@ -203,7 +307,7 @@ function VocabularyPage() {
           <h1 className="text-2xl font-bold">{t("vocabulary")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button onClick={() => setEditor(emptyEditor())}>
+        <Button onClick={() => { setEnrichment(null); setEditor(emptyEditor()); }}>
           <Plus className="h-4 w-4" />
           {t("add_vocabulary")}
         </Button>
@@ -371,6 +475,94 @@ function VocabularyPage() {
             <DialogHeader>
               <DialogTitle>{editor.id ? t("edit_vocabulary") : t("add_vocabulary")}</DialogTitle>
             </DialogHeader>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
+              <div>
+                <div className="text-sm font-medium">
+                  {t("vocabulary_enrichment")}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t("vocabulary_enrichment_hint")}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={generateEnrichment}
+                disabled={enriching || !editor.word.trim()}
+              >
+                <Sparkles className="h-4 w-4" />
+                {enriching ? t("generating") : t("suggest_enrichment")}
+              </Button>
+            </div>
+
+            {enrichment && (
+              <div className="space-y-3 rounded-md border border-primary/30 bg-primary/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{t("ai_suggestion")}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {enrichment.provider} · {enrichment.model} · {t("confidence")}:{" "}
+                      {Math.round(enrichment.confidence * 100)}%
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEnrichment(null)}
+                    >
+                      {t("dismiss")}
+                    </Button>
+                    <Button type="button" size="sm" onClick={applyEnrichment}>
+                      {t("apply_suggestion")}
+                    </Button>
+                  </div>
+                </div>
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("definition")}
+                    </dt>
+                    <dd>{enrichment.definition || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">IPA / POS</dt>
+                    <dd>
+                      {enrichment.ipa || "—"} · {enrichment.part_of_speech || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("translations")}
+                    </dt>
+                    <dd>
+                      {enrichment.translations
+                        .map((item) => `${item.language}: ${item.value}`)
+                        .join(" · ") || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("examples")}
+                    </dt>
+                    <dd>
+                      {enrichment.examples
+                        .map((item) => item.sentence)
+                        .slice(0, 3)
+                        .join(" · ") || "—"}
+                    </dd>
+                  </div>
+                </dl>
+                {enrichment.notes && (
+                  <p className="text-xs text-muted-foreground">
+                    {enrichment.notes}
+                  </p>
+                )}
+              </div>
+            )}
+
             <form className="space-y-5" onSubmit={saveEditor}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t("word")}>
