@@ -712,6 +712,115 @@ export const saveStudentDashboardSettings = createServerFn({
     return { ok: true };
   });
 
+export const getLanguageSettings = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("languages")
+      .select(
+        "code,name,native_name,is_interface,is_learning,is_translation,sort_order",
+      )
+      .order("sort_order")
+      .order("name");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const saveLanguageSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        languages: z
+          .array(
+            z.object({
+              code: z
+                .string()
+                .trim()
+                .min(2)
+                .max(16)
+                .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
+              name: z.string().trim().min(1).max(100),
+              native_name: z.string().trim().max(100).nullable().default(null),
+              is_learning: z.boolean(),
+              is_translation: z.boolean(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .superRefine((value, ctx) => {
+        const normalized = value.languages.map((language) =>
+          language.code.toLowerCase(),
+        );
+        if (new Set(normalized).size !== normalized.length) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["languages"],
+            message: "Language codes must be unique.",
+          });
+        }
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const payload = data.languages.map((language) => ({
+      code: language.code.toLowerCase(),
+      name: language.name.trim(),
+      native_name: language.native_name?.trim() || null,
+      is_learning: language.is_learning,
+      is_translation: language.is_translation,
+    }));
+
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const { error } = await admin.rpc("save_language_settings", {
+      p_languages: payload as never,
+    });
+    if (error) throw new Error(error.message);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "language_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "languages",
+      summary: "Learning and translation languages updated",
+      details: {
+        learning_languages: payload
+          .filter((language) => language.is_learning)
+          .map((language) => language.code),
+        translation_languages: payload
+          .filter((language) => language.is_translation)
+          .map((language) => language.code),
+      },
+    });
+
+    return { ok: true };
+  });
+
+export const getStorageUsage = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async () => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const { data, error } = await admin.rpc("storage_usage_summary");
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []).map((row) => ({
+      category: row.category,
+      bytes: Number(row.bytes ?? 0),
+      items: Number(row.items ?? 0),
+    }));
+
+    return {
+      rows,
+      total_bytes: rows.reduce((sum, row) => sum + row.bytes, 0),
+      total_items: rows.reduce((sum, row) => sum + row.items, 0),
+      note: "Tracked storage excludes branding assets because their byte size is not persisted in the portable metadata schema.",
+    };
+  });
+
 export const changeCredentials = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ currentPassword: z.string().min(1), newUsername: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/), newPassword: z.string().min(8).max(200).or(z.literal("")) }).parse(d))
