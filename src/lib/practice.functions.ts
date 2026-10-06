@@ -336,7 +336,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const mediaResult = listeningMediaIds.length
       ? await admin
           .from("media_assets")
-          .select("id,kind,external_url,mime_type,duration_seconds")
+          .select("id,kind,storage_path,external_url,mime_type,duration_seconds")
           .in("id", listeningMediaIds)
           .is("deleted_at", null)
       : { data: [], error: null };
@@ -351,7 +351,14 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const vocabulary = new Map((vocabularyResult.data ?? []).map((entry) => [entry.id, entry]));
     const readings = new Map((readingsResult.data ?? []).map((reading) => [reading.id, reading]));
     const listenings = new Map((listeningsResult.data ?? []).map((listening) => [listening.id, listening]));
-    const media = new Map((mediaResult.data ?? []).map((asset) => [asset.id, asset]));
+    const { resolveMediaUrl } = await import("./media.server");
+    const resolvedMedia = await Promise.all(
+      (mediaResult.data ?? []).map(async (asset) => ({
+        ...asset,
+        external_url: await resolveMediaUrl(admin as never, asset, 60 * 60),
+      })),
+    );
+    const media = new Map(resolvedMedia.map((asset) => [asset.id, asset]));
 
     const readingQuestionsBySet = new Map<string, ReturnType<typeof publicQuestion>[]>();
     for (const question of readingQuestionsResult.data ?? []) {
