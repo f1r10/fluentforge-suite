@@ -58,7 +58,7 @@
 - [x] Answer/explanation visibility timing enforcement
 - [x] Teacher approval queue for after-approval results
 - [ ] AI-assisted open-answer grading suggestion (score/confidence/reason)
-- [ ] Full teacher attempt-monitoring / violation timeline UI
+- [x] Full teacher attempt-monitoring / violation timeline UI
 - [ ] Strict server-controlled listening play limits (requires private Media Library delivery)
 
 ## Processing / Operations
