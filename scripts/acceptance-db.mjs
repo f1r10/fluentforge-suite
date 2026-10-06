@@ -328,6 +328,160 @@ async function verifyPerformance() {
       returning id
     `;
 
+    const [grammarQuestion] = await sql`
+      insert into public.questions(
+        question_type,
+        prompt,
+        context_kind,
+        status
+      )
+      values (
+        'single_choice',
+        ${`Acceptance grammar ${suffix}`},
+        'none',
+        'active'
+      )
+      returning id
+    `;
+
+    const [readingQuestion] = await sql`
+      insert into public.questions(
+        question_type,
+        prompt,
+        context_kind,
+        status
+      )
+      values (
+        'short_answer',
+        ${`Acceptance reading ${suffix}`},
+        'reading',
+        'active'
+      )
+      returning id
+    `;
+
+    const [listeningQuestion] = await sql`
+      insert into public.questions(
+        question_type,
+        prompt,
+        context_kind,
+        status
+      )
+      values (
+        'listening_transcription',
+        ${`Acceptance listening ${suffix}`},
+        'listening',
+        'active'
+      )
+      returning id
+    `;
+
+    const [vocabulary] = await sql`
+      insert into public.vocabulary_entries(word, status)
+      values (${`acceptance-vocab-${suffix}`}, 'active')
+      returning id
+    `;
+
+    await sql`
+      insert into public.activity_events(
+        student_id,
+        category,
+        event_type,
+        entity_type,
+        entity_id,
+        is_correct
+      )
+      values
+        (
+          ${student.id},
+          'practice',
+          'practice_answer',
+          'question',
+          ${grammarQuestion.id},
+          true
+        ),
+        (
+          ${student.id},
+          'practice',
+          'practice_answer',
+          'question',
+          ${readingQuestion.id},
+          false
+        ),
+        (
+          ${student.id},
+          'practice',
+          'practice_answer',
+          'question',
+          ${listeningQuestion.id},
+          true
+        ),
+        (
+          ${student.id},
+          'practice',
+          'vocabulary_answer',
+          'vocabulary',
+          ${vocabulary.id},
+          true
+        )
+    `;
+
+    const domainRows = await sql`
+      select domain, attempts, correct, incorrect, accuracy
+      from public.student_domain_progress(${student.id})
+    `;
+    const domainMap = new Map(
+      domainRows.map((row) => [row.domain, row]),
+    );
+
+    for (const domain of [
+      "grammar",
+      "vocabulary",
+      "reading",
+      "listening",
+    ]) {
+      if (!domainMap.has(domain)) {
+        fail(`student_domain_progress missing ${domain} row.`);
+      }
+    }
+
+    const expectedDomainStats = {
+      grammar: { attempts: 1, correct: 1, incorrect: 0 },
+      vocabulary: { attempts: 1, correct: 1, incorrect: 0 },
+      reading: { attempts: 1, correct: 0, incorrect: 1 },
+      listening: { attempts: 1, correct: 1, incorrect: 0 },
+    };
+
+    for (const [domain, expected] of Object.entries(
+      expectedDomainStats,
+    )) {
+      const row = domainMap.get(domain);
+      if (
+        !row ||
+        Number(row.attempts) !== expected.attempts ||
+        Number(row.correct) !== expected.correct ||
+        Number(row.incorrect) !== expected.incorrect
+      ) {
+        fail(
+          `student_domain_progress returned unexpected ${domain} metrics.`,
+        );
+      }
+    }
+
+    if (
+      Object.entries(expectedDomainStats).every(([domain, expected]) => {
+        const row = domainMap.get(domain);
+        return (
+          row &&
+          Number(row.attempts) === expected.attempts &&
+          Number(row.correct) === expected.correct &&
+          Number(row.incorrect) === expected.incorrect
+        );
+      })
+    ) {
+      pass("Student domain progress metrics are correct");
+    }
+
     await sql.unsafe(`
       insert into public.questions(
         question_type,
