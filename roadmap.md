@@ -63,10 +63,12 @@
 - [ ] Strict server-controlled listening play limits (private delivery exists; counted streaming/proxy enforcement still required)
 
 ## Processing / Operations
-- [ ] Document import review pipeline
-- [ ] PDF/scanned PDF OCR and layout extraction
-- [ ] DOC/DOCX/XLS/XLSX/CSV import profiles
-- [ ] External Python/FastAPI processing worker
+- [x] Document import review pipeline: private source upload, queued extraction, confidence/duplicate review, approve/reject/edit, provenance and commit
+- [x] PDF/scanned PDF text extraction with Tesseract OCR fallback
+- [ ] Document layout/table/image association and structured section reconstruction
+- [x] Native DOCX/XLS/XLSX/CSV/TSV/TXT extraction + legacy DOC/RTF conversion
+- [ ] Reusable document import profiles and advanced field/section mappings
+- [x] External Python/FastAPI processing worker with durable local queue and CI
 - [ ] Local Whisper transcription
 - [ ] Optional local AI / Gemini adapters
 - [ ] Export packages and reports
