@@ -2704,11 +2704,18 @@ export type Database = {
         Returns: {
           catalog_id: string
           catalog_name: string
+          content_items: number
+          question_items: number
+          vocabulary_items: number
+          reading_items: number
+          listening_items: number
+          students_practiced: number
           sessions: number
-          total_answered: number
+          answer_attempts: number
           avg_accuracy: number | null
-          avg_score_percent: number | null
+          avg_time_ms: number | null
           last_activity: string | null
+          weak_topics: Json
         }[]
       }
       teacher_student_analytics: {

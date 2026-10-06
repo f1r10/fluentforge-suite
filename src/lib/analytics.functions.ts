@@ -55,14 +55,45 @@ export const getTeacherAnalytics = createServerFn({ method: "GET" })
       })),
       catalogs: (catalogsResult.data ?? []).map((row) => ({
         ...row,
+        content_items: Number(row.content_items ?? 0),
+        question_items: Number(row.question_items ?? 0),
+        vocabulary_items: Number(row.vocabulary_items ?? 0),
+        reading_items: Number(row.reading_items ?? 0),
+        listening_items: Number(row.listening_items ?? 0),
+        students_practiced: Number(row.students_practiced ?? 0),
         sessions: Number(row.sessions ?? 0),
-        total_answered: Number(row.total_answered ?? 0),
+        answer_attempts: Number(row.answer_attempts ?? 0),
         avg_accuracy:
           row.avg_accuracy == null ? null : Number(row.avg_accuracy),
-        avg_score_percent:
-          row.avg_score_percent == null
-            ? null
-            : Number(row.avg_score_percent),
+        avg_time_ms:
+          row.avg_time_ms == null ? null : Number(row.avg_time_ms),
+        weak_topics: Array.isArray(row.weak_topics)
+          ? row.weak_topics.flatMap((item) => {
+              if (
+                !item ||
+                typeof item !== "object" ||
+                Array.isArray(item)
+              ) {
+                return [];
+              }
+              const value = item as Record<string, unknown>;
+              if (typeof value["topic_name"] !== "string") return [];
+              return [
+                {
+                  topic_id:
+                    typeof value["topic_id"] === "string"
+                      ? value["topic_id"]
+                      : "",
+                  topic_name: value["topic_name"],
+                  attempts: Number(value["attempts"] ?? 0),
+                  accuracy:
+                    value["accuracy"] == null
+                      ? null
+                      : Number(value["accuracy"]),
+                },
+              ];
+            })
+          : [],
       })),
       students: (studentsResult.data ?? []).map((row) => ({
         ...row,
