@@ -463,6 +463,7 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
         answers: z.array(answerSchema).min(1).max(100),
         filters: generatorSchema,
         alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
+        presentedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
       })
       .parse(d),
   )
@@ -479,6 +480,40 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
       data.sessionId,
       gradedWithPrivate.filter((result) => !alreadyLogged.has(result.question_id)),
     );
+
+    const answeredIds = new Set(data.answers.map((answer) => answer.questionId));
+    const skippedIds = [
+      ...new Set(
+        data.presentedQuestionIds.filter(
+          (questionId) => !answeredIds.has(questionId),
+        ),
+      ),
+    ];
+    if (skippedIds.length) {
+      const skippedQuestions = await loadSelfPracticeQuestions(admin, skippedIds);
+      if (skippedQuestions.size !== skippedIds.length) {
+        throw new Error(
+          "One or more skipped questions are not valid for self-practice.",
+        );
+      }
+      const { error: skipError } = await admin.from("activity_events").insert(
+        skippedIds.map((questionId) => ({
+          student_id: studentId,
+          category: "practice",
+          event_type: "practice_question_skipped",
+          entity_type: "question",
+          entity_id: questionId,
+          is_correct: null,
+          duration_ms: 0,
+          details: {
+            practice_kind: "self",
+            session_id: data.sessionId,
+          } as never,
+        })),
+      );
+      if (skipError) throw new Error(skipError.message);
+    }
+
     const results = gradedWithPrivate.map(({ response, duration_ms, ...result }) => result);
     const graded = results.filter((result) => result.score != null);
     const score = graded.reduce((sum, result) => sum + (result.score ?? 0), 0);
