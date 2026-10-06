@@ -85,6 +85,23 @@ async function gotoHydrated(page, path) {
       "Student access key was not shown after creation.",
     );
     console.log("[ok] teacher created student and received one-time access key");
+
+    await gotoHydrated(page, "/teacher/sources");
+    const sourceInput = page.locator('input[type="file"]');
+    await sourceInput.setInputFiles({
+      name: "release-import-smoke.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from(
+        "1. Runtime source import works?\nA. Yes\nB. No\nAnswer: 1 A\n",
+        "utf8",
+      ),
+    });
+    await page
+      .getByText("release-import-smoke.txt", { exact: true })
+      .first()
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher source upload/import pipeline accepted a document");
+
     await teacherContext.close();
 
     const reloginContext = await browser.newContext();
@@ -115,6 +132,21 @@ async function gotoHydrated(page, path) {
       })
       .waitFor({ timeout: 20000 });
     console.log("[ok] student dashboard rendered for the created student");
+
+    const studentLibraryChecks = [
+      ["/student/questions", "Question Bank"],
+      ["/student/vocabulary", "Vocabulary"],
+      ["/student/readings", "Readings"],
+      ["/student/listenings", "Listenings"],
+      ["/student/practice", "Self-practice"],
+    ];
+    for (const [path, heading] of studentLibraryChecks) {
+      await gotoHydrated(studentPage, path);
+      await studentPage
+        .getByRole("heading", { name: heading, level: 1 })
+        .waitFor({ timeout: 20000 });
+      console.log("[ok] student learning area: " + path);
+    }
 
     await studentContext.close();
     console.log("FluentForge release browser acceptance passed.");
