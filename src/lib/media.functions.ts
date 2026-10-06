@@ -351,13 +351,13 @@ export const getMediaPreviewUrl = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { data: media, error } = await context.supabase
       .from("media_assets")
-      .select("id,storage_path,external_url")
+      .select("id,kind,mime_type,storage_path,external_url")
       .eq("id", data.id)
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!media) throw new Error("Media not found.");
-    if (media.external_url) return { url: media.external_url, expiresIn: null };
+    if (media.external_url) return { url: media.external_url, expiresIn: null, kind: media.kind, mimeType: media.mime_type };
     if (!media.storage_path) throw new Error("Media has no storage location.");
 
     const { adminClient } = await import("./security.server");
@@ -369,7 +369,7 @@ export const getMediaPreviewUrl = createServerFn({ method: "GET" })
       throw new Error(signedError?.message ?? "Could not create preview URL.");
     }
 
-    return { url: signed.signedUrl, expiresIn: 15 * 60 };
+    return { url: signed.signedUrl, expiresIn: 15 * 60, kind: media.kind, mimeType: media.mime_type };
   });
 
 export const trashMedia = createServerFn({ method: "POST" })
