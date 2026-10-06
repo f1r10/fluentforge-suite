@@ -225,7 +225,7 @@ export const saveYouTubeReference = createServerFn({ method: "POST" })
     const { data: media, error } = await admin
       .from("media_assets")
       .insert({
-        kind: "video",
+        kind: "other",
         storage_path: null,
         external_url: sourceUrl,
         original_filename: `YouTube ${videoId}`,
