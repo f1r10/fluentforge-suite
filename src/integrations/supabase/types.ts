@@ -2754,6 +2754,14 @@ export type Database = {
           current_mistakes: number
         }[]
       }
+      student_streak_stats: {
+        Args: { p_student_id: string }
+        Returns: {
+          current_streak: number
+          longest_streak: number
+          last_active_day: string | null
+        }[]
+      }
       student_topic_practice_stats: {
         Args: { p_student_id: string; p_limit?: number }
         Returns: {
