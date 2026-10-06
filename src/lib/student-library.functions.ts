@@ -575,3 +575,92 @@ export const getStudentListeningPractice = createServerFn({
     if (!listening) throw new Error("Listening is not available.");
     return listening;
   });
+
+
+export const listStudentVocabulary = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => browseSchema.parse(d ?? {}))
+  .handler(async ({ data, context }) => {
+    const studentId = await requireStudentId(context.supabase);
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const pageSize = 40;
+
+    let query = admin
+      .from("vocabulary_entries")
+      .select(
+        "id,word,definition,ipa,part_of_speech,learning_language,level,vocabulary_translations(language,value),vocabulary_examples(sentence,translation,sort_order)",
+        { count: "exact" },
+      )
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .order("word")
+      .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
+
+    if (data.language) {
+      query = query.eq("learning_language", data.language);
+    }
+    if (data.level) query = query.eq("level", data.level);
+    if (data.search.trim()) {
+      const safe = data.search.trim().replace(/[%,()]/g, " ");
+      query = query.ilike("word", `%${safe}%`);
+    }
+
+    const { data: rows, count, error } = await query;
+    if (error) throw new Error(error.message);
+
+    const ids = (rows ?? []).map((row) => row.id);
+    const stateResult = ids.length
+      ? await admin
+          .from("student_vocabulary_state")
+          .select(
+            "entry_id,state,correct_count,incorrect_count,correct_streak,last_result,last_mode,last_practiced_at",
+          )
+          .eq("student_id", studentId)
+          .in("entry_id", ids)
+      : { data: [], error: null };
+    if (stateResult.error) throw new Error(stateResult.error.message);
+
+    const states = new Map(
+      (stateResult.data ?? []).map((row) => [row.entry_id, row]),
+    );
+
+    return {
+      rows: (rows ?? []).map((entry) => ({
+        id: entry.id,
+        word: entry.word,
+        definition: entry.definition,
+        ipa: entry.ipa,
+        part_of_speech: entry.part_of_speech,
+        learning_language: entry.learning_language,
+        level: entry.level,
+        translations: (entry.vocabulary_translations ?? []) as Array<{
+          language: string;
+          value: string;
+        }>,
+        examples: (
+          (entry.vocabulary_examples ?? []) as Array<{
+            sentence: string;
+            translation: string | null;
+            sort_order: number;
+          }>
+        )
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((row) => ({
+            sentence: row.sentence,
+            translation: row.translation,
+          })),
+        learner_state: states.get(entry.id) ?? {
+          state: "new" as const,
+          correct_count: 0,
+          incorrect_count: 0,
+          correct_streak: 0,
+          last_result: null,
+          last_mode: null,
+          last_practiced_at: null,
+        },
+      })),
+      total: count ?? 0,
+      pageSize,
+    };
+  });
