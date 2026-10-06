@@ -130,6 +130,7 @@ function PracticePage() {
         data: {
           catalogId: id,
           sessionId,
+          presentedQuestionIds: questions.map((question) => question.id),
           answers: answered.map((question) => ({
             questionId: question.id,
             response: currentResponse(question),
