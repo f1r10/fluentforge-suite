@@ -564,6 +564,62 @@ export const saveDashboardSettings = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const saveStudentDashboardSettings = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        visible_widgets: z
+          .array(
+            z.enum([
+              "catalogs",
+              "exams",
+              "practice",
+              "today",
+              "accuracy",
+              "study_time",
+              "progress",
+              "weak_topics",
+              "history",
+              "favorites",
+            ]),
+          )
+          .max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      visible_widgets: [...new Set(data.visible_widgets)],
+    };
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "student_dashboard",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_dashboard_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "student_dashboard",
+      summary: "Student dashboard widgets updated",
+      details: value,
+    });
+
+    return { ok: true };
+  });
+
 export const changeCredentials = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ currentPassword: z.string().min(1), newUsername: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/), newPassword: z.string().min(8).max(200).or(z.literal("")) }).parse(d))
