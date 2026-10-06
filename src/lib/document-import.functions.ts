@@ -394,7 +394,14 @@ export const getSourcePreviewUrl = createServerFn({ method: "GET" })
       mime_type: string | null;
       original_filename: string;
     } | null;
-    if (!source?.storage_path) throw new Error("Source file is not available.");
+    if (!source?.storage_path) {
+      return {
+        url: null as string | null,
+        mimeType: source?.mime_type ?? null,
+        filename: source?.original_filename ?? "",
+        expiresIn: null as number | null,
+      };
+    }
 
     const { data: signed, error: signedError } = await admin.storage
       .from(SOURCE_BUCKET)
@@ -404,10 +411,10 @@ export const getSourcePreviewUrl = createServerFn({ method: "GET" })
     }
 
     return {
-      url: signed.signedUrl,
+      url: signed.signedUrl as string | null,
       mimeType: source.mime_type,
       filename: source.original_filename,
-      expiresIn: 15 * 60,
+      expiresIn: 15 * 60 as number | null,
     };
   });
 
