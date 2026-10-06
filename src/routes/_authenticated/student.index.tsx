@@ -1,13 +1,12 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, Bell, BookOpen, CheckCircle2, ChevronRight, ClipboardList, Clock3, Dumbbell, Flame, Heart, History, LogOut, Target, XCircle } from "lucide-react";
-import { getMyDashboardSettings, heartbeat, listMyFavorites, setMyLanguage } from "@/lib/student.functions";
+import { BarChart3, BookOpen, CheckCircle2, ChevronRight, ClipboardList, Clock3, Dumbbell, FileQuestion, Flame, Headphones, Heart, History, Target, XCircle } from "lucide-react";
+import { getMyDashboardSettings, heartbeat, listMyFavorites } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
 import { listStudentExams } from "@/lib/exam-attempt.functions";
-import { supabase } from "@/integrations/supabase/client";
-import { formatDateTime, LanguageSelect } from "@/components/app/common";
+import { formatDateTime } from "@/components/app/common";
 import { useI18n, type Lang } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/student/")({
@@ -18,8 +17,7 @@ export const Route = createFileRoute("/_authenticated/student/")({
 function StudentHome() {
   const { me } = Route.useRouteContext();
   const { t, setLang, lang } = useI18n();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
+
   const { data: catalogs = [], isLoading } = useQuery({
     queryKey: ["student-catalogs"],
     queryFn: () => listStudentCatalogs(),
@@ -71,36 +69,40 @@ function StudentHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function signOut() {
-    await qc.cancelQueries();
-    qc.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/", replace: true });
-  }
-
   return (
     <div className="mx-auto min-h-screen max-w-3xl px-4 py-5">
-      <header className="mb-8 flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm text-muted-foreground">{t("welcome")}</p>
-          <h1 className="text-xl font-bold">
-            {me.first_name} {me.last_name}
-          </h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <LanguageSelect onChange={(l) => setMyLanguage({ data: { language: l } }).catch(() => {})} />
-          <Link
-            to="/student/notifications"
-            aria-label={t("notifications")}
-            className="p-2 text-muted-foreground hover:text-foreground"
-          >
-            <Bell className="h-5 w-5" />
-          </Link>
-          <button onClick={signOut} aria-label={t("sign_out")} className="p-2 text-muted-foreground">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
+      <header className="mb-6">
+        <p className="text-sm text-muted-foreground">{t("welcome")}</p>
+        <h1 className="text-2xl font-bold">
+          {me.first_name} {me.last_name}
+        </h1>
       </header>
+
+      <section className="mb-8">
+        <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
+          <h2 className="font-semibold">{t("learning_library")}</h2>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <LibraryLink
+            to="/student/questions"
+            icon={<FileQuestion className="h-5 w-5" />}
+            title={t("browse_questions")}
+            description={t("question_bank_hint_student")}
+          />
+          <LibraryLink
+            to="/student/readings"
+            icon={<BookOpen className="h-5 w-5" />}
+            title={t("reading_library")}
+            description={t("reading_library_hint")}
+          />
+          <LibraryLink
+            to="/student/listenings"
+            icon={<Headphones className="h-5 w-5" />}
+            title={t("listening_library")}
+            description={t("listening_library_hint")}
+          />
+        </div>
+      </section>
 
       {visible.has("catalogs") && (
       <section className="mb-8">
@@ -422,6 +424,32 @@ function StudentHome() {
         </section>
       )}
     </div>
+  );
+}
+
+
+function LibraryLink({
+  to,
+  icon,
+  title,
+  description,
+}: {
+  to: "/student/questions" | "/student/readings" | "/student/listenings";
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="rounded-md border border-border p-4 hover:bg-muted/40"
+    >
+      <div className="mb-3 text-muted-foreground">{icon}</div>
+      <div className="font-medium">{title}</div>
+      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+        {description}
+      </div>
+    </Link>
   );
 }
 
