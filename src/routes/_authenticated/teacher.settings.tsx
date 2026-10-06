@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -438,13 +439,18 @@ function DashboardSettings() {
     "upcoming_exams",
     "recent_catalogs",
   ] as const;
-  const [visible, setVisible] = useState<string[]>(
-    Array.isArray(dashboard["visible_widgets"])
-      ? (dashboard["visible_widgets"] as unknown[]).filter(
-          (value): value is string => typeof value === "string",
-        )
-      : [...defaults],
-  );
+  const storedVisible = Array.isArray(dashboard["visible_widgets"])
+    ? (dashboard["visible_widgets"] as unknown[]).filter(
+        (value): value is string =>
+          typeof value === "string" &&
+          defaults.includes(value as (typeof defaults)[number]),
+      )
+    : [...defaults];
+  const [visible, setVisible] = useState<string[]>(storedVisible);
+  const [order, setOrder] = useState<string[]>([
+    ...storedVisible,
+    ...defaults.filter((key) => !storedVisible.includes(key)),
+  ]);
   const [busy, setBusy] = useState(false);
 
   const labels: Record<(typeof defaults)[number], string> = {
@@ -464,7 +470,11 @@ function DashboardSettings() {
     setBusy(true);
     try {
       await saveDashboardSettings({
-        data: { visible_widgets: visible as typeof defaults[number][] },
+        data: {
+          visible_widgets: order.filter((key) =>
+            visible.includes(key),
+          ) as Array<(typeof defaults)[number]>,
+        },
       });
       await qc.invalidateQueries({ queryKey: ["teacher-dashboard"] });
       await qc.invalidateQueries({ queryKey: ["settings"] });
@@ -474,6 +484,19 @@ function DashboardSettings() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function move(key: string, delta: -1 | 1) {
+    setOrder((previous) => {
+      const index = previous.indexOf(key);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= previous.length) {
+        return previous;
+      }
+      const next = [...previous];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
   }
 
   return (
@@ -487,24 +510,49 @@ function DashboardSettings() {
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {defaults.map((key) => (
-          <label
-            key={key}
-            className="flex items-center gap-2 rounded-md border border-border p-3 text-sm"
-          >
-            <Checkbox
-              checked={visible.includes(key)}
-              onCheckedChange={(checked) =>
-                setVisible((previous) =>
-                  checked
-                    ? [...new Set([...previous, key])]
-                    : previous.filter((item) => item !== key),
-                )
-              }
-            />
-            {labels[key]}
-          </label>
-        ))}
+        {order.map((rawKey, index) => {
+          const key = rawKey as (typeof defaults)[number];
+          return (
+            <div
+              key={key}
+              className="flex items-center gap-2 rounded-md border border-border p-3 text-sm"
+            >
+              <Checkbox
+                checked={visible.includes(key)}
+                onCheckedChange={(checked) =>
+                  setVisible((previous) =>
+                    checked
+                      ? [...new Set([...previous, key])]
+                      : previous.filter((item) => item !== key),
+                  )
+                }
+              />
+              <span className="min-w-0 flex-1">{labels[key]}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={index === 0}
+                onClick={() => move(key, -1)}
+                aria-label={t("move_up")}
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={index === order.length - 1}
+                onClick={() => move(key, 1)}
+                aria-label={t("move_down")}
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+        })}
       </div>
       <Button type="button" onClick={save} disabled={busy}>
         {t("save")}
