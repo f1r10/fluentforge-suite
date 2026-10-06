@@ -728,7 +728,12 @@ export const getReviewAttemptSummary = createServerFn({ method: "GET" })
       .single();
     if (error || !attempt) throw new Error(error?.message ?? "Attempt not found.");
 
-    const [{ count: pending }, answersResult, activityResult] = await Promise.all([
+    const [
+      { count: pending },
+      answersResult,
+      activityResult,
+      playsResult,
+    ] = await Promise.all([
       context.supabase
         .from("manual_reviews")
         .select("id,attempt_answers!inner(attempt_id)", { count: "exact", head: true })
@@ -745,10 +750,18 @@ export const getReviewAttemptSummary = createServerFn({ method: "GET" })
         .eq("attempt_id", data.attemptId)
         .eq("category", "exam")
         .order("created_at"),
+      context.supabase
+        .from("exam_listening_plays")
+        .select(
+          "id,listening_id,play_number,started_at,expires_at,completed_at",
+        )
+        .eq("attempt_id", data.attemptId)
+        .order("started_at"),
     ]);
 
     if (answersResult.error) throw new Error(answersResult.error.message);
     if (activityResult.error) throw new Error(activityResult.error.message);
+    if (playsResult.error) throw new Error(playsResult.error.message);
 
     const answers = answersResult.data ?? [];
     const autoGraded = answers.filter((answer) => answer.is_correct !== null);
@@ -767,6 +780,7 @@ export const getReviewAttemptSummary = createServerFn({ method: "GET" })
         time_spent_ms: answers.reduce((sum, answer) => sum + (answer.time_spent_ms ?? 0), 0),
       },
       answers,
+      listening_plays: playsResult.data ?? [],
       timeline: activityResult.data ?? [],
     };
   });
