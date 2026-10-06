@@ -97,6 +97,197 @@ export const listBackups = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+export const getBackupSchedule = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "backup_schedule")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+
+    const value =
+      data?.value && typeof data.value === "object"
+        ? (data.value as Record<string, unknown>)
+        : {};
+    return {
+      enabled: value["enabled"] === true,
+      interval_hours: clampInteger(value["interval_hours"], 1, 720, 24),
+      retention_count: clampInteger(value["retention_count"], 1, 50, 7),
+    };
+  });
+
+export const saveBackupSchedule = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        enabled: z.boolean(),
+        interval_hours: z.number().int().min(1).max(720),
+        retention_count: z.number().int().min(1).max(50),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "backup_schedule",
+          value: data as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "backup_schedule_changed",
+      entity_type: "system_setting",
+      entity_id: "backup_schedule",
+      summary: data.enabled
+        ? `Scheduled backups enabled every ${data.interval_hours} hour(s)`
+        : "Scheduled backups disabled",
+      details: data,
+    });
+    return { ok: true };
+  });
+
+export async function runScheduledBackupIfDue() {
+  const { adminClient, audit } = await import("./security.server");
+  const admin = await adminClient();
+
+  const { data: settingRow, error: settingError } = await admin
+    .from("system_settings")
+    .select("value")
+    .eq("key", "backup_schedule")
+    .maybeSingle();
+  if (settingError) throw new Error(settingError.message);
+
+  const setting =
+    settingRow?.value && typeof settingRow.value === "object"
+      ? (settingRow.value as Record<string, unknown>)
+      : {};
+  const enabled = setting["enabled"] === true;
+  const intervalHours = clampInteger(
+    setting["interval_hours"],
+    1,
+    720,
+    24,
+  );
+  const retentionCount = clampInteger(
+    setting["retention_count"],
+    1,
+    50,
+    7,
+  );
+
+  if (!enabled) {
+    return { status: "disabled" as const };
+  }
+
+  const { data: jobId, error: claimError } = await admin.rpc(
+    "claim_scheduled_backup",
+    { p_interval_hours: intervalHours },
+  );
+  if (claimError) throw new Error(claimError.message);
+  if (!jobId) {
+    return { status: "not_due" as const };
+  }
+
+  try {
+    const backup = await buildBackup(admin);
+    const json = Buffer.from(JSON.stringify(backup), "utf8");
+    if (json.byteLength > MAX_UNCOMPRESSED_PACKAGE_BYTES) {
+      throw new Error(
+        "Scheduled backup package is too large for the in-process backup engine.",
+      );
+    }
+
+    const { gzipSync } = await import("node:zlib");
+    const compressed = gzipSync(json, { level: 6 });
+    if (compressed.byteLength > MAX_BACKUP_FILE_BYTES) {
+      throw new Error("Compressed scheduled backup exceeds 512 MB.");
+    }
+
+    const checksum = await sha256Buffer(compressed);
+    const stamp = backup.created_at.replace(/[:.]/g, "-");
+    const storagePath = `scheduled/${stamp}-${jobId}.ffbackup`;
+    const { error: uploadError } = await admin.storage
+      .from(BACKUP_BUCKET)
+      .upload(storagePath, compressed, {
+        contentType: BACKUP_MIME,
+        upsert: false,
+      });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const completedAt = new Date().toISOString();
+    const { error: updateError } = await admin
+      .from("backups")
+      .update({
+        status: "completed",
+        storage_path: storagePath,
+        size_bytes: compressed.byteLength,
+        mime_type: BACKUP_MIME,
+        checksum_sha256: checksum,
+        manifest: backup.manifest as never,
+        completed_at: completedAt,
+        error: null,
+      })
+      .eq("id", jobId);
+    if (updateError) throw new Error(updateError.message);
+
+    await audit(admin, {
+      actor_type: "system",
+      action: "scheduled_backup_created",
+      entity_type: "backup",
+      entity_id: jobId,
+      summary: "Created scheduled FluentForge application backup",
+      details: {
+        interval_hours: intervalHours,
+        retention_count: retentionCount,
+        package_bytes: compressed.byteLength,
+        checksum_sha256: checksum,
+      },
+    });
+
+    await pruneScheduledBackups(admin, retentionCount, jobId);
+
+    return {
+      status: "completed" as const,
+      id: jobId,
+      sizeBytes: compressed.byteLength,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    await admin
+      .from("backups")
+      .update({
+        status: "failed",
+        error: message.slice(0, 5_000),
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+
+    const { notifyTeacher } = await import("./notifications.functions");
+    await notifyTeacher(admin, {
+      kind: "backup_warning",
+      title: "Scheduled backup failed",
+      body: message,
+      link: "/teacher/backups",
+      data: { backup_id: jobId },
+      dedupeKey: `scheduled-backup-failed:${jobId}`,
+    });
+
+    throw error;
+  }
+}
+
 export const createApplicationBackup = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
@@ -538,6 +729,48 @@ export const deleteBackup = createServerFn({ method: "POST" })
 
     return { ok: true };
   });
+
+async function pruneScheduledBackups(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  retentionCount: number,
+  currentId: string,
+) {
+  const { data: rows, error } = await admin
+    .from("backups")
+    .select("id,storage_path")
+    .eq("kind", "scheduled")
+    .eq("status", "completed")
+    .neq("id", currentId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  const stale = (rows ?? []).slice(Math.max(0, retentionCount - 1));
+  for (const row of stale) {
+    if (row.storage_path) {
+      const { error: removeError } = await admin.storage
+        .from(BACKUP_BUCKET)
+        .remove([row.storage_path]);
+      if (removeError) throw new Error(removeError.message);
+    }
+    const { error: deleteError } = await admin
+      .from("backups")
+      .delete()
+      .eq("id", row.id);
+    if (deleteError) throw new Error(deleteError.message);
+  }
+}
+
+function clampInteger(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(numeric)));
+}
 
 async function buildBackup(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
