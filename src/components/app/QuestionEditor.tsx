@@ -140,7 +140,20 @@ function validate(f: Form): string | null {
   return null;
 }
 
-export function QuestionEditor({ id, initial, topics }: { id?: string; initial?: Form; topics: TopicRow[] }) {
+export function QuestionEditor({
+  id,
+  initial,
+  topics,
+  onSaved,
+}: {
+  id?: string;
+  initial?: Form;
+  topics: TopicRow[];
+  onSaved?: (
+    questionId: string,
+    options: { next: boolean },
+  ) => Promise<void> | void;
+}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -178,6 +191,23 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       setDup(null);
       qc.invalidateQueries({ queryKey: ["questions"] });
       toast.success(t("save"));
+
+      if (onSaved && r.id) {
+        await onSaved(r.id, { next });
+        if (next) {
+          const keep = empty(f.question_type);
+          setF({
+            ...keep,
+            level: f.level,
+            learning_language: f.learning_language,
+            topicIds: f.topicIds,
+            tags: f.tags,
+          });
+          setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+        }
+        return;
+      }
+
       if (next) {
         const keep = empty(f.question_type);
         setF({ ...keep, level: f.level, learning_language: f.learning_language, topicIds: f.topicIds, tags: f.tags });
