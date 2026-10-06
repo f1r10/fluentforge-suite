@@ -2762,6 +2762,16 @@ export type Database = {
           last_active_day: string | null
         }[]
       }
+      student_domain_progress: {
+        Args: { p_student_id: string }
+        Returns: {
+          domain: string
+          attempts: number
+          correct: number
+          incorrect: number
+          accuracy: number | null
+        }[]
+      }
       student_topic_practice_stats: {
         Args: { p_student_id: string; p_limit?: number }
         Returns: {
