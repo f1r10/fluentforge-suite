@@ -278,38 +278,18 @@ jobs:
 
       - name: Verify plain PostgreSQL bootstrap invariants
         run: |
-          docker compose \
-            --env-file .env.postgres.ci \
-            -f docker-compose.postgres.yml \
-            exec -T postgres \
-            psql -U postgres -d fluentforge -v ON_ERROR_STOP=1 <<'SQL'
-          do $
-          begin
-            if not exists (
-              select 1 from pg_roles
-              where rolname = 'authenticated'
-            ) then
-              raise exception 'authenticated role missing';
-            end if;
+          dc() {
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              exec -T postgres \
+              psql -U postgres -d fluentforge -Atqc "$1"
+          }
 
-            if not exists (
-              select 1 from pg_roles
-              where rolname = 'service_role'
-                and rolbypassrls
-            ) then
-              raise exception 'service_role BYPASSRLS invariant missing';
-            end if;
-
-            if to_regclass('public.runtime_auth_users') is null then
-              raise exception 'runtime_auth_users missing';
-            end if;
-
-            if to_regclass('public.runtime_refresh_tokens') is null then
-              raise exception 'runtime_refresh_tokens missing';
-            end if;
-          end
-          $;
-          SQL
+          test "$(dc "select count(*) from pg_roles where rolname = 'authenticated'")" = "1"
+          test "$(dc "select count(*) from pg_roles where rolname = 'service_role' and rolbypassrls")" = "1"
+          test "$(dc "select (to_regclass('public.runtime_auth_users') is not null)::int")" = "1"
+          test "$(dc "select (to_regclass('public.runtime_refresh_tokens') is not null)::int")" = "1"
 
       - name: Stop Supabase-free stack
         if: always()
