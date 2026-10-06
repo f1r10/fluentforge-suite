@@ -154,7 +154,7 @@ function MonitoringPage() {
                 </td>
                 <td className="px-3 py-2">{row.exam.title}</td>
                 <td className="px-3 py-2">
-                  {row.reset_at ? t("reset") : t(row.status)}
+                  {row.reset_at ? t("attempt_reset") : t(row.status)}
                 </td>
                 <td className="hidden px-3 py-2 sm:table-cell">#{row.attempt_number}</td>
                 <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">
