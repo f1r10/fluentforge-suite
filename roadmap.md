@@ -68,14 +68,14 @@
 - [x] Document layout/table/image association, reading-order reconstruction and linked Reading/question context import
 - [x] Native DOCX/XLS/XLSX/CSV/TSV/TXT extraction + legacy DOC/RTF conversion
 - [x] Reusable document import profiles with language/level/status/content defaults and confidence policy
-- [ ] Advanced custom field/section mapping templates
+- [x] Advanced custom field/section mapping templates: reusable sheet allowlists, header/data rows, field/options/section mapping, tags/scoring metadata and provenance
 - [x] External Python/FastAPI processing worker with durable local queue and CI
 - [x] Local Whisper transcription via processing worker and Listening editor
 - [x] Optional AI adapters: disabled-by-default local OpenAI-compatible provider + optional Gemini provider
 - [x] Export Center: Questions, Vocabulary, Readings, Listenings, Catalogs, Exams, Students, Results, Logs and portable content package (JSON/XLSX/CSV)
 - [x] Validated application Backup/Restore: relational data + private media/source files, checksums, dry-run, empty-target guard and resumable restore
 - [x] Trash retention, expired export/upload cleanup, dependency-safe permanent cleanup and teacher retention controls
-- [ ] Production Docker/self-host deployment
+- [x] Production Docker/self-host deployment: hardened Node/worker images, Compose, health/readiness, migration runner, CI smoke test and self-hosting runbook
 - [ ] Performance/security acceptance testing
 
 ## Branding polish
