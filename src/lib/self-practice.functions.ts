@@ -446,6 +446,75 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     };
   });
 
+async function selectContextPracticeIds(
+  admin: Admin,
+  kind: "reading" | "listening",
+  count: number,
+  filters: SelfPracticeGenerator,
+) {
+  if (count <= 0) return [];
+
+  const table = kind === "reading" ? "readings" : "listenings";
+  const relationTable =
+    kind === "reading" ? "reading_topics" : "listening_topics";
+  const ownerColumn = kind === "reading" ? "reading_id" : "listening_id";
+
+  let allowedIds: string[] | null = null;
+
+  if (filters.catalogId) {
+    const { data: items, error } = await admin
+      .from("catalog_items")
+      .select("entity_id")
+      .eq("catalog_id", filters.catalogId)
+      .eq("entity_type", kind);
+    if (error) throw new Error(error.message);
+    allowedIds = (items ?? []).map((row) => row.entity_id);
+    if (!allowedIds.length) return [];
+  }
+
+  if (filters.topicIds.length) {
+    const { data: tagged, error } = await admin
+      .from(relationTable)
+      .select(ownerColumn)
+      .in("topic_id", filters.topicIds);
+    if (error) throw new Error(error.message);
+    const topicIds = [
+      ...new Set(
+        (tagged ?? [])
+          .map((row) => String((row as Record<string, unknown>)[ownerColumn] ?? ""))
+          .filter(Boolean),
+      ),
+    ];
+    if (!topicIds.length) return [];
+    allowedIds =
+      allowedIds == null
+        ? topicIds
+        : allowedIds.filter((id) => topicIds.includes(id));
+    if (!allowedIds.length) return [];
+  }
+
+  let query = admin
+    .from(table)
+    .select("id")
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .limit(1_000);
+
+  if (filters.language) {
+    query = query.eq("learning_language", filters.language);
+  }
+  if (filters.level) query = query.eq("level", filters.level);
+  if (filters.sourceFileId) {
+    query = query.eq("source_file_id", filters.sourceFileId);
+  }
+  if (allowedIds) query = query.in("id", allowedIds);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  return shuffle((data ?? []).map((row) => row.id)).slice(0, count);
+}
+
 export const generateSelfPractice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => generatorSchema.parse(d))
@@ -481,37 +550,64 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
       if (!source) throw new Error("Source not found.");
     }
 
-    const { data: selected, error: selectError } = await admin.rpc(
-      "select_self_practice_question_ids",
-      {
-        p_student_id: studentId,
-        p_count: data.count,
-        p_language: data.language,
-        p_level: data.level,
-        p_types: data.types.length ? data.types : null,
-        p_topic_ids: data.topicIds.length ? data.topicIds : null,
-        p_catalog_id: data.catalogId,
-        p_source_file_id: data.sourceFileId,
-        p_history_mode: data.historyMode,
-        p_exclude_answered: data.excludeAnswered,
-      },
-    );
+    let selected: Array<{ question_id: string }> = [];
+    if (data.count > 0) {
+      const result = await admin.rpc(
+        "select_self_practice_question_ids",
+        {
+          p_student_id: studentId,
+          p_count: data.count,
+          p_language: data.language,
+          p_level: data.level,
+          p_types: data.types.length ? data.types : null,
+          p_topic_ids: data.topicIds.length ? data.topicIds : null,
+          p_catalog_id: data.catalogId,
+          p_source_file_id: data.sourceFileId,
+          p_history_mode: data.historyMode,
+          p_exclude_answered: data.excludeAnswered,
+        },
+      );
+      if (result.error) throw new Error(result.error.message);
+      selected = (result.data ?? []) as Array<{ question_id: string }>;
+    }
 
-    if (selectError) throw new Error(selectError.message);
-
-    const ids = (selected ?? []).map((row) => row.question_id);
+    const ids = selected.map((row) => row.question_id);
     const loaded = await loadSelfPracticeQuestions(admin, ids);
     const ordered = ids
       .map((id) => loaded.get(id))
       .filter((question): question is LoadedQuestion => !!question);
 
     const { hydrateQuestionMedia } = await import("./media.server");
-    const hydrated = await hydrateQuestionMedia(admin, ordered, 6 * 60 * 60);
+    const hydrated = await hydrateQuestionMedia(
+      admin,
+      ordered,
+      6 * 60 * 60,
+    );
+
+    const [readingIds, listeningIds] = await Promise.all([
+      selectContextPracticeIds(admin, "reading", data.readingCount, data),
+      selectContextPracticeIds(
+        admin,
+        "listening",
+        data.listeningCount,
+        data,
+      ),
+    ]);
+    const {
+      loadReadingPracticeData,
+      loadListeningPracticeData,
+    } = await import("./student-library.functions");
+    const [readings, listenings] = await Promise.all([
+      loadReadingPracticeData(admin, readingIds),
+      loadListeningPracticeData(admin, listeningIds),
+    ]);
 
     return {
-      requested: data.count,
-      generated: hydrated.length,
+      requested: data.count + data.readingCount + data.listeningCount,
+      generated: hydrated.length + readings.length + listenings.length,
       questions: hydrated.map(publicQuestion),
+      readings,
+      listenings,
       filters: data,
     };
   });
