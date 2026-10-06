@@ -15,6 +15,7 @@ export const EXPORT_KINDS = [
   "activity",
   "results",
   "students",
+  "analytics",
   "content_package",
 ] as const;
 
@@ -110,6 +111,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
     { key: "student_vocabulary_state", table: "student_vocabulary_state" },
     { key: "vocabulary_learner_states", table: "vocabulary_learner_states" },
   ],
+  analytics: [],
   content_package: [
     { key: "questions", table: "questions", softDelete: true },
     { key: "question_versions", table: "question_versions" },
@@ -150,6 +152,7 @@ const PRIMARY_CSV_TABLE: Partial<Record<ExportKind, string>> = {
   activity: "activity_events",
   results: "exam_attempts",
   students: "students",
+  analytics: "student_analytics",
 };
 
 export const listExports = createServerFn({ method: "GET" })
@@ -206,10 +209,18 @@ export const createExport = createServerFn({ method: "POST" })
       const tables: Record<string, Record<string, unknown>[]> = {};
       const rowCounts: Record<string, number> = {};
 
-      for (const spec of TABLES[data.kind]) {
-        const rows = await fetchTable(admin, spec, data.includeTrash);
-        tables[spec.key] = rows;
-        rowCounts[spec.key] = rows.length;
+      if (data.kind === "analytics") {
+        const analytics = await fetchAnalytics(admin);
+        for (const [key, rows] of Object.entries(analytics)) {
+          tables[key] = rows;
+          rowCounts[key] = rows.length;
+        }
+      } else {
+        for (const spec of TABLES[data.kind]) {
+          const rows = await fetchTable(admin, spec, data.includeTrash);
+          tables[spec.key] = rows;
+          rowCounts[spec.key] = rows.length;
+        }
       }
 
       const exportedAt = new Date().toISOString();
@@ -330,6 +341,27 @@ export const getExportDownload = createServerFn({ method: "GET" })
       expiresIn: 15 * 60,
     };
   });
+
+async function fetchAnalytics(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+) {
+  const [questions, catalogs, students] = await Promise.all([
+    admin.rpc("teacher_question_analytics", { p_limit: 1000 }),
+    admin.rpc("teacher_catalog_analytics", { p_limit: 1000 }),
+    admin.rpc("teacher_student_analytics", { p_limit: 5000 }),
+  ]);
+
+  for (const result of [questions, catalogs, students]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  return {
+    question_analytics: (questions.data ?? []) as Record<string, unknown>[],
+    catalog_analytics: (catalogs.data ?? []) as Record<string, unknown>[],
+    student_analytics: (students.data ?? []) as Record<string, unknown>[],
+  };
+}
 
 async function fetchTable(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
