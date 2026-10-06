@@ -38,6 +38,7 @@ ANSWER_RE = re.compile(
     re.IGNORECASE,
 )
 ANSWER_PAIR_RE = re.compile(r"(\d{1,4})\s*[-.:)]?\s*([A-H]|True|False|Yes|No|Not Given)", re.IGNORECASE)
+LISTENING_TASK_RE = re.compile(r"^\s*Listening\s+Task\s+(\d+)\s*:?\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def extract_document(path: Path, filename: str, mime_type: str | None) -> Extraction:
@@ -338,6 +339,33 @@ def detect_candidates(
     for page in extraction.pages:
         page_number = page.get("page")
         question_crops = _question_crop_map(page)
+
+        if expected_content == "listenings":
+            listening_groups = _listening_task_groups(
+                page,
+                question_crops=question_crops,
+                global_answers=global_answers,
+            )
+            if listening_groups:
+                for context_item, grouped_questions in listening_groups:
+                    source_ref = str(context_item["payload"]["source_ref"])
+                    candidates.append(context_item)
+                    for index, question in enumerate(grouped_questions):
+                        payload = question.get("payload") or {}
+                        payload["import_context"] = {
+                            "kind": "listening",
+                            "source_ref": source_ref,
+                            "sort_order": index,
+                            "assets": _nearby_assets(page, question.get("crop")),
+                        }
+                        question["payload"] = payload
+                        question["confidence"] = min(
+                            0.98,
+                            float(question.get("confidence") or 0) + 0.03,
+                        )
+                    candidates.extend(grouped_questions)
+                continue
+
         questions = _questions_from_text(
             page.get("text", ""),
             page=page_number,
@@ -596,6 +624,71 @@ def _reading_candidate_from_page(
         },
         "confidence": 0.84,
     }
+
+
+def _listening_task_groups(
+    page: dict[str, Any],
+    question_crops: dict[str, dict[str, float]] | None,
+    global_answers: dict[str, str] | None,
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    text = str(page.get("text") or "")
+    matches = list(LISTENING_TASK_RE.finditer(text))
+    if not matches:
+        return []
+
+    page_number = page.get("page") or 1
+    groups: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        segment = text[match.end() : end].strip()
+        questions = _questions_from_text(
+            segment,
+            page=page.get("page"),
+            question_crops=question_crops,
+            global_answers=global_answers,
+        )
+        if not questions:
+            continue
+
+        task_number = match.group(1)
+        intro = _text_before_first_question(segment)
+        intro_lines = [
+            line.strip()
+            for line in intro.splitlines()
+            if line.strip() and not line.strip().lower().startswith(("http://", "https://", "(from "))
+        ]
+        source_ref = f"listening:page:{page_number}:task:{task_number}"
+
+        candidate = {
+            "item_type": "listening",
+            "page": page.get("page"),
+            "sheet": None,
+            "crop": _union_crops(
+                [
+                    question["crop"]
+                    for question in questions
+                    if question.get("crop")
+                ]
+            ),
+            "payload": {
+                "source_ref": source_ref,
+                "title": f"Listening Task {task_number}",
+                "transcript": "",
+                "status": "draft",
+                "metadata": {
+                    "reconstructed_from": "listening_task_layout",
+                    "source_page": page.get("page"),
+                    "task_number": task_number,
+                    "instructions": "\n".join(intro_lines)[:5_000],
+                    "audio_required": True,
+                },
+            },
+            "confidence": 0.82,
+        }
+        groups.append((candidate, questions))
+
+    return groups
 
 
 def _listening_candidate_from_page(
