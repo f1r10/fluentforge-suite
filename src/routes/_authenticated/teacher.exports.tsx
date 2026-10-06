@@ -33,6 +33,7 @@ const EXPORT_OPTIONS: Array<{
   { kind: "activity", titleKey: "export_activity", descriptionKey: "export_activity_hint" },
   { kind: "results", titleKey: "export_results", descriptionKey: "export_results_hint" },
   { kind: "students", titleKey: "export_students", descriptionKey: "export_students_hint" },
+  { kind: "analytics", titleKey: "export_analytics", descriptionKey: "export_analytics_hint" },
   { kind: "content_package", titleKey: "export_content_package", descriptionKey: "export_content_package_hint" },
 ];
 
