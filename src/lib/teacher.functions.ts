@@ -288,6 +288,98 @@ export const updateStudent = createServerFn({ method: "POST" })
   });
 
 // ---------- Groups ----------
+export const listStudentNotes = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({ studentId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: student, error: studentError } = await context.supabase
+      .from("students")
+      .select("id")
+      .eq("id", data.studentId)
+      .maybeSingle();
+    if (studentError) throw new Error(studentError.message);
+    if (!student) throw new Error("Student not found.");
+
+    const { data: notes, error } = await context.supabase
+      .from("student_notes")
+      .select("id,body,created_at,updated_at")
+      .eq("student_id", data.studentId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return notes ?? [];
+  });
+
+export const createStudentNote = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        studentId: z.string().uuid(),
+        body: z.string().trim().min(1).max(10_000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: note, error } = await context.supabase
+      .from("student_notes")
+      .insert({
+        student_id: data.studentId,
+        body: data.body,
+      })
+      .select("id,body,created_at,updated_at")
+      .single();
+    if (error || !note) {
+      throw new Error(error?.message ?? "Could not save note.");
+    }
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_note_created",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: "Created a private student note",
+      details: { note_id: note.id },
+    });
+
+    return note;
+  });
+
+export const deleteStudentNote = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        studentId: z.string().uuid(),
+        noteId: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("student_notes")
+      .delete()
+      .eq("id", data.noteId)
+      .eq("student_id", data.studentId);
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_note_deleted",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: "Deleted a private student note",
+      details: { note_id: data.noteId },
+    });
+
+    return { ok: true };
+  });
+
 export const listGroups = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
