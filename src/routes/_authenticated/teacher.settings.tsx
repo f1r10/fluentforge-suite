@@ -3,10 +3,11 @@ import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding } from "@/lib/teacher.functions";
+import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding, saveDashboardSettings } from "@/lib/teacher.functions";
 import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -32,6 +33,7 @@ function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-10">
       <h1 className="text-2xl font-bold">{t("settings")}</h1>
       <BrandingForm />
+      <DashboardSettings />
       <CredentialsForm />
       <RecoveryCodes />
       <MaintenanceSettings />
@@ -60,13 +62,31 @@ function BrandingForm() {
     logo_url: b["logo_url"] ?? "",
     favicon_url: b["favicon_url"] ?? "",
     login_image_url: b["login_image_url"] ?? "",
+    teacher_login_button: b["teacher_login_button"] ?? "",
+    student_login_button: b["student_login_button"] ?? "",
+    setup_button: b["setup_button"] ?? "",
     default_language: String(
       (data["interface"] as Record<string, unknown>)?.["default_language"] ??
         "az",
     ) as "az" | "en" | "ru" | "tr",
+    enabled_languages: Array.isArray(
+      (data["interface"] as Record<string, unknown>)?.["enabled_languages"],
+    )
+      ? (
+          (data["interface"] as Record<string, unknown>)[
+            "enabled_languages"
+          ] as unknown[]
+        ).filter(
+          (value): value is "az" | "en" | "ru" | "tr" =>
+            typeof value === "string" &&
+            ["az", "en", "ru", "tr"].includes(value),
+        )
+      : (["az", "en", "ru", "tr"] as Array<
+          "az" | "en" | "ru" | "tr"
+        >),
   });
   const [assetBusy, setAssetBusy] = useState<
-    "logo" | "favicon" | null
+    "logo" | "favicon" | "login_image" | null
   >(null);
 
   const set =
@@ -79,7 +99,7 @@ function BrandingForm() {
       setF({ ...f, [k]: e.target.value });
 
   async function uploadAsset(
-    kind: "logo" | "favicon",
+    kind: "logo" | "favicon" | "login_image",
     file: File,
   ) {
     setAssetBusy(kind);
@@ -108,7 +128,12 @@ function BrandingForm() {
         },
       });
 
-      const key = kind === "logo" ? "logo_url" : "favicon_url";
+      const key =
+        kind === "logo"
+          ? "logo_url"
+          : kind === "favicon"
+            ? "favicon_url"
+            : "login_image_url";
       setF((previous) => ({
         ...previous,
         [key]: finalized.url,
@@ -171,12 +196,57 @@ function BrandingForm() {
             onChange={set("default_language")}
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
           >
-            {LANGS.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-              </option>
-            ))}
+            {LANGS.filter((l) => f.enabled_languages.includes(l.code)).map(
+              (l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ),
+            )}
           </select>
+        </Field>
+        <Field label={t("enabled_interface_languages")}>
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-border p-3">
+            {LANGS.map((language) => {
+              const checked = f.enabled_languages.includes(language.code);
+              return (
+                <label
+                  key={language.code}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(next) => {
+                      const enabled = !!next;
+                      setF((previous) => {
+                        const languages = enabled
+                          ? [
+                              ...new Set([
+                                ...previous.enabled_languages,
+                                language.code,
+                              ]),
+                            ]
+                          : previous.enabled_languages.filter(
+                              (code) => code !== language.code,
+                            );
+                        if (!languages.length) return previous;
+                        return {
+                          ...previous,
+                          enabled_languages: languages,
+                          default_language: languages.includes(
+                            previous.default_language,
+                          )
+                            ? previous.default_language
+                            : languages[0]!,
+                        };
+                      });
+                    }}
+                  />
+                  {language.label}
+                </label>
+              );
+            })}
+          </div>
         </Field>
 
         <BrandingAssetField
@@ -204,12 +274,40 @@ function BrandingForm() {
           }
         />
 
-        <Field label={t("login_image_url")}>
+        <BrandingAssetField
+          label={t("login_background")}
+          url={f.login_image_url}
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+          busy={assetBusy === "login_image"}
+          previewClassName="h-24 w-full rounded object-cover"
+          hint={t("login_background_upload_hint")}
+          onUpload={(file) => uploadAsset("login_image", file)}
+          onUrlChange={(value) =>
+            setF((previous) => ({
+              ...previous,
+              login_image_url: value,
+            }))
+          }
+        />
+        <Field label={t("teacher_login_button_text")}>
           <Input
-            type="url"
-            value={f.login_image_url}
-            onChange={set("login_image_url")}
-            placeholder="https://"
+            value={f.teacher_login_button}
+            onChange={set("teacher_login_button")}
+            placeholder={t("use_default_text")}
+          />
+        </Field>
+        <Field label={t("student_login_button_text")}>
+          <Input
+            value={f.student_login_button}
+            onChange={set("student_login_button")}
+            placeholder={t("use_default_text")}
+          />
+        </Field>
+        <Field label={t("setup_button_text")}>
+          <Input
+            value={f.setup_button}
+            onChange={set("setup_button")}
+            placeholder={t("use_default_text")}
           />
         </Field>
         <Field label={t("accent_color")}>
@@ -307,6 +405,98 @@ function BrandingAssetField({
         />
       </div>
     </Field>
+  );
+}
+
+function DashboardSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(settingsQuery);
+  const dashboard = (data["dashboard"] ?? {}) as Record<string, unknown>;
+  const defaults = [
+    "students",
+    "active_today",
+    "groups",
+    "catalogs",
+    "exams",
+    "pending_reviews",
+    "online_now",
+    "recent_activity",
+    "upcoming_exams",
+    "recent_catalogs",
+  ] as const;
+  const [visible, setVisible] = useState<string[]>(
+    Array.isArray(dashboard["visible_widgets"])
+      ? (dashboard["visible_widgets"] as unknown[]).filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [...defaults],
+  );
+  const [busy, setBusy] = useState(false);
+
+  const labels: Record<(typeof defaults)[number], string> = {
+    students: t("students"),
+    active_today: t("active_today"),
+    groups: t("groups"),
+    catalogs: t("catalogs"),
+    exams: t("exams"),
+    pending_reviews: t("pending_reviews"),
+    online_now: t("online_now"),
+    recent_activity: t("recent_activity"),
+    upcoming_exams: t("upcoming_exams"),
+    recent_catalogs: t("recent_catalogs"),
+  };
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveDashboardSettings({
+        data: { visible_widgets: visible as typeof defaults[number][] },
+      });
+      await qc.invalidateQueries({ queryKey: ["teacher-dashboard"] });
+      await qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(t("dashboard_settings_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("dashboard_widgets")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("dashboard_widgets_hint")}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {defaults.map((key) => (
+          <label
+            key={key}
+            className="flex items-center gap-2 rounded-md border border-border p-3 text-sm"
+          >
+            <Checkbox
+              checked={visible.includes(key)}
+              onCheckedChange={(checked) =>
+                setVisible((previous) =>
+                  checked
+                    ? [...new Set([...previous, key])]
+                    : previous.filter((item) => item !== key),
+                )
+              }
+            />
+            {labels[key]}
+          </label>
+        ))}
+      </div>
+      <Button type="button" onClick={save} disabled={busy}>
+        {t("save")}
+      </Button>
+    </section>
   );
 }
 
