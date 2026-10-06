@@ -369,7 +369,15 @@ function ContextQuestionPicker({
                       size="sm"
                       variant={alreadyHere ? "outline" : "default"}
                       disabled={alreadyHere || busyId === row.id}
-                      onClick={() => attach(row.id)}
+                      onClick={() => {
+                        if (
+                          linkedElsewhere &&
+                          !confirm(t("move_question_context_confirm"))
+                        ) {
+                          return;
+                        }
+                        void attach(row.id);
+                      }}
                     >
                       {alreadyHere ? t("already_added") : t("add")}
                     </Button>
