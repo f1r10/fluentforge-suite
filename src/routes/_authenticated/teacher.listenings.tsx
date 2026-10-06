@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { FileAudio, Pencil, Plus, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { FileAudio, FileUp, Pencil, Plus, Search, Trash2, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -327,15 +327,23 @@ function ListeningsPage() {
           <h1 className="text-2xl font-bold">{t("listenings")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button
-          disabled={languages.isPending}
-          onClick={() =>
-            setEditor(emptyEditor(languages.defaultLearningCode))
-          }
-        >
-          <Plus className="h-4 w-4" />
-          {t("add_listening")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <a href="/teacher/sources?target=listenings">
+              <FileUp className="h-4 w-4" />
+              {t("import_document")}
+            </a>
+          </Button>
+          <Button
+            disabled={languages.isPending}
+            onClick={() =>
+              setEditor(emptyEditor(languages.defaultLearningCode))
+            }
+          >
+            <Plus className="h-4 w-4" />
+            {t("add_listening")}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
