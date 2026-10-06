@@ -295,7 +295,7 @@ function SelfPracticePage() {
   async function finish(skipConfirmation = false) {
     if (!sessionId) return;
     const answered = allQuestions.filter((question) => hasPracticeResponse(question, responseFor(question)));
-    if (!answered.length) {
+    if (!answered.length && !skipConfirmation) {
       toast.error(t("answer_required"));
       return;
     }
