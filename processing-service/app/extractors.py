@@ -318,8 +318,12 @@ def _extract_image(path: Path) -> Extraction:
     return Extraction("image_ocr", [{"page": 1, "text": text, "method": "ocr"}], [], text, {"pages": 1})
 
 
-def detect_candidates(extraction: Extraction) -> list[dict[str, Any]]:
+def detect_candidates(
+    extraction: Extraction,
+    profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
+    spreadsheet_mapping = _spreadsheet_mapping(profile)
 
     for page in extraction.pages:
         page_number = page.get("page")
@@ -410,9 +414,17 @@ def detect_candidates(extraction: Extraction) -> list[dict[str, Any]]:
             )
 
     for sheet in extraction.sheets:
-        candidates.extend(_questions_from_sheet(sheet))
+        if spreadsheet_mapping:
+            include_sheets = spreadsheet_mapping.get("include_sheets") or []
+            if include_sheets and str(sheet.get("sheet") or "") not in include_sheets:
+                continue
+        candidates.extend(_questions_from_sheet(sheet, spreadsheet_mapping))
 
-    if not candidates and extraction.full_text.strip():
+    if (
+        not candidates
+        and extraction.full_text.strip()
+        and not (spreadsheet_mapping and extraction.sheets)
+    ):
         candidates.append(
             {
                 "item_type": "raw_text",
@@ -723,73 +735,251 @@ def _questions_from_text(
     return out
 
 
-def _questions_from_sheet(sheet: dict[str, Any]) -> list[dict[str, Any]]:
+def _spreadsheet_mapping(
+    profile: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not profile:
+        return None
+    mapping = profile.get("spreadsheet_mapping")
+    if not isinstance(mapping, dict):
+        return None
+    columns = mapping.get("columns")
+    if not isinstance(columns, dict) or not str(columns.get("prompt") or "").strip():
+        return None
+    return mapping
+
+
+def _normalize_header(value: Any) -> str:
+    return "_".join(str(value or "").strip().lower().split())
+
+
+def _questions_from_sheet(
+    sheet: dict[str, Any],
+    mapping: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     rows = sheet.get("rows") or []
     if len(rows) < 2:
         return []
 
-    headers = [str(value).strip().lower().replace(" ", "_") for value in rows[0]]
-    prompt_names = {"question", "prompt", "sual", "text"}
-    type_names = {"type", "question_type", "tip"}
-    correct_names = {"correct", "correct_answer", "answer", "cavab"}
+    if mapping:
+        header_row = max(1, int(mapping.get("header_row") or 1))
+        header_index = header_row - 1
+        if header_index >= len(rows):
+            return []
+        first_data_row = mapping.get("first_data_row")
+        data_index = (
+            max(header_row + 1, int(first_data_row)) - 1
+            if first_data_row is not None
+            else header_index + 1
+        )
+        column_config = mapping.get("columns") or {}
+    else:
+        header_index = 0
+        data_index = 1
+        column_config = {}
 
-    def find(names: set[str]) -> int | None:
-        for idx, header in enumerate(headers):
-            if header in names:
-                return idx
+    headers = [_normalize_header(value) for value in rows[header_index]]
+
+    def find(
+        configured: str,
+        defaults: set[str] | None = None,
+    ) -> int | None:
+        configured_key = _normalize_header(configured)
+        if configured_key:
+            try:
+                return headers.index(configured_key)
+            except ValueError:
+                return None
+
+        for name in defaults or set():
+            key = _normalize_header(name)
+            if key in headers:
+                return headers.index(key)
         return None
 
-    prompt_idx = find(prompt_names)
+    prompt_idx = find(
+        str(column_config.get("prompt") or ""),
+        None if mapping else {"question", "prompt", "sual", "text"},
+    )
     if prompt_idx is None:
         return []
-    type_idx = find(type_names)
-    correct_idx = find(correct_names)
+
+    type_idx = find(
+        str(column_config.get("question_type") or ""),
+        None if mapping else {"type", "question_type", "tip"},
+    )
+    correct_idx = find(
+        str(column_config.get("correct_answer") or ""),
+        None if mapping else {"correct", "correct_answer", "answer", "cavab"},
+    )
 
     option_indexes: list[tuple[str, int]] = []
     for letter in "abcdefgh":
-        for candidate in (f"option_{letter}", letter):
-            if candidate in headers:
-                option_indexes.append((letter, headers.index(candidate)))
-                break
+        configured = str(column_config.get(f"option_{letter}") or "")
+        if mapping:
+            idx = find(configured) if configured else None
+        else:
+            idx = find("", {f"option_{letter}", letter})
+        if idx is not None:
+            option_indexes.append((letter, idx))
+
+    field_indexes = {
+        field: find(str(column_config.get(field) or ""))
+        for field in [
+            "instructions",
+            "explanation",
+            "points",
+            "difficulty",
+            "learning_language",
+            "level",
+            "tags",
+            "section",
+        ]
+    }
+
+    separator = str(mapping.get("multi_value_separator") or "|") if mapping else "|"
+    sheet_name = str(sheet.get("sheet") or "")
+    sheet_as_section = bool(mapping and mapping.get("sheet_as_section"))
+
+    def cell(row: list[Any], index: int | None) -> str:
+        if index is None or index >= len(row):
+            return ""
+        return str(row[index] or "").strip()
+
+    def split_values(value: str) -> list[str]:
+        if not value:
+            return []
+        return [
+            part.strip()
+            for part in value.split(separator)
+            if part.strip()
+        ]
 
     out: list[dict[str, Any]] = []
-    for row in rows[1:]:
-        if prompt_idx >= len(row) or not str(row[prompt_idx]).strip():
+    for row_number, row in enumerate(rows[data_index:], start=data_index + 1):
+        prompt = cell(row, prompt_idx)
+        if not prompt:
             continue
-        prompt = str(row[prompt_idx]).strip()
-        requested_type = str(row[type_idx]).strip() if type_idx is not None and type_idx < len(row) else ""
-        options = [
-            {"id": letter, "text": str(row[idx]).strip()}
-            for letter, idx in option_indexes
-            if idx < len(row) and str(row[idx]).strip()
-        ]
-        correct = str(row[correct_idx]).strip() if correct_idx is not None and correct_idx < len(row) else ""
 
-        if requested_type:
-            question_type = requested_type
-        else:
-            question_type = "single_choice" if len(options) >= 2 else "short_answer"
+        requested_type = cell(row, type_idx)
+        options = [
+            {"id": letter, "text": cell(row, idx)}
+            for letter, idx in option_indexes
+            if cell(row, idx)
+        ]
+        correct_raw = cell(row, correct_idx)
+        correct_tokens = split_values(correct_raw)
 
         if len(options) >= 2:
-            answer_key = {"correct": [correct.lower()]} if correct else {"correct": []}
-            payload = {"options": options}
+            by_id = {option["id"].lower(): option["id"] for option in options}
+            by_text = {
+                option["text"].strip().casefold(): option["id"]
+                for option in options
+            }
+            correct_ids: list[str] = []
+            unresolved = 0
+            for token in correct_tokens:
+                lowered = token.strip().lower()
+                option_id = by_id.get(lowered)
+                if option_id is None:
+                    option_id = by_text.get(token.strip().casefold())
+                if option_id is None:
+                    unresolved += 1
+                    continue
+                if option_id not in correct_ids:
+                    correct_ids.append(option_id)
+
+            question_type = requested_type or (
+                "multiple_choice" if len(correct_ids) > 1 else "single_choice"
+            )
+            answer_key = {"correct": correct_ids}
+            payload: dict[str, Any] = {"options": options}
+            confidence = (
+                0.96
+                if correct_ids and unresolved == 0
+                else 0.72
+                if correct_raw
+                else 0.68
+            )
         else:
-            answer_key = {"blanks": [[correct]]} if correct else {"blanks": [[]]}
+            answers = correct_tokens or ([correct_raw] if correct_raw else [])
+            question_type = requested_type or "short_answer"
+            answer_key = {"blanks": [answers]}
             payload = {"blank_count": 1}
+            confidence = 0.94 if answers else 0.68
+
+        question_payload: dict[str, Any] = {
+            "question_type": question_type,
+            "prompt": prompt,
+            "payload": payload,
+            "answer_key": answer_key,
+            "status": "draft",
+        }
+
+        instructions = cell(row, field_indexes["instructions"])
+        explanation = cell(row, field_indexes["explanation"])
+        language = cell(row, field_indexes["learning_language"])
+        level = cell(row, field_indexes["level"])
+        tags = split_values(cell(row, field_indexes["tags"]))
+        section = cell(row, field_indexes["section"])
+        if not section and sheet_as_section:
+            section = sheet_name
+
+        if instructions:
+            question_payload["instructions"] = instructions
+        if explanation:
+            question_payload["explanation"] = explanation
+        if language:
+            question_payload["learning_language"] = language
+        if level:
+            question_payload["level"] = level
+        if tags:
+            question_payload["tags"] = tags[:100]
+
+        points_raw = cell(row, field_indexes["points"])
+        if points_raw:
+            try:
+                points = float(points_raw.replace(",", "."))
+                if 0 < points <= 10_000:
+                    question_payload["scoring"] = {
+                        "points": points,
+                        "partial": False,
+                        "negative": 0,
+                    }
+            except ValueError:
+                confidence = min(confidence, 0.75)
+
+        difficulty_raw = cell(row, field_indexes["difficulty"])
+        if difficulty_raw:
+            try:
+                difficulty = int(float(difficulty_raw))
+                if 1 <= difficulty <= 5:
+                    question_payload["difficulty"] = difficulty
+                else:
+                    confidence = min(confidence, 0.75)
+            except ValueError:
+                confidence = min(confidence, 0.75)
+
+        if mapping:
+            question_payload["import_mapping"] = {
+                "sheet": sheet_name,
+                "row": row_number,
+                "header_row": header_index + 1,
+                "section": section or None,
+            }
+            if section:
+                question_payload["import_context"] = {
+                    "kind": "independent",
+                    "section": section,
+                }
 
         out.append(
             {
                 "item_type": "question",
                 "page": None,
-                "sheet": sheet["sheet"],
-                "payload": {
-                    "question_type": question_type,
-                    "prompt": prompt,
-                    "payload": payload,
-                    "answer_key": answer_key,
-                    "status": "draft",
-                },
-                "confidence": 0.92 if correct else 0.68,
+                "sheet": sheet_name,
+                "payload": question_payload,
+                "confidence": confidence,
             }
         )
     return out
