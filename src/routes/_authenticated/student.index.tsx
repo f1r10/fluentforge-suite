@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, BookOpen, CheckCircle2, ChevronRight, ClipboardList, Clock3, Dumbbell, FileQuestion, Flame, Headphones, Heart, History, Target, XCircle } from "lucide-react";
+import { BarChart3, BookOpen, BookType, CheckCircle2, ChevronRight, ClipboardList, Clock3, Dumbbell, FileQuestion, Flame, Headphones, Heart, History, Target, XCircle } from "lucide-react";
 import { getMyDashboardSettings, heartbeat, listMyFavorites } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
@@ -82,12 +82,18 @@ function StudentHome() {
         <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
           <h2 className="font-semibold">{t("learning_library")}</h2>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <LibraryLink
             to="/student/questions"
             icon={<FileQuestion className="h-5 w-5" />}
             title={t("browse_questions")}
             description={t("question_bank_hint_student")}
+          />
+          <LibraryLink
+            to="/student/vocabulary"
+            icon={<BookType className="h-5 w-5" />}
+            title={t("vocabulary")}
+            description={t("vocabulary_library_hint")}
           />
           <LibraryLink
             to="/student/readings"
@@ -434,7 +440,11 @@ function LibraryLink({
   title,
   description,
 }: {
-  to: "/student/questions" | "/student/readings" | "/student/listenings";
+  to:
+    | "/student/questions"
+    | "/student/vocabulary"
+    | "/student/readings"
+    | "/student/listenings";
   icon: React.ReactNode;
   title: string;
   description: string;
