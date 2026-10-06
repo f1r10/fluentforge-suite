@@ -74,6 +74,10 @@ export function PracticeQuestionCard({
       {question.instructions && <p className="mb-2 text-xs text-muted-foreground">{question.instructions}</p>}
       <p className="mb-4 font-medium">{question.prompt}</p>
 
+      {!isSpatialLabelling(question.question_type) && (
+        <QuestionStimulusMedia question={question} />
+      )}
+
       <PracticeQuestionAnswer question={question} response={response} onChange={onChange} />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -460,6 +464,66 @@ function formatAnswerKey(value: unknown, question: PracticeQuestion) {
   }
 
   return typeof answer["model_answer"] === "string" ? answer["model_answer"] : "—";
+}
+
+function QuestionStimulusMedia({
+  question,
+}: {
+  question: PracticeQuestion;
+}) {
+  const { t } = useI18n();
+  const payload = question.payload ?? {};
+  const mediaId =
+    typeof payload["media_id"] === "string" ? payload["media_id"] : null;
+
+  if (!mediaId) return null;
+
+  const media =
+    payload["media"] && typeof payload["media"] === "object"
+      ? (payload["media"] as Record<string, unknown>)
+      : null;
+  const url =
+    typeof media?.["external_url"] === "string"
+      ? media["external_url"]
+      : null;
+  const kind =
+    typeof media?.["kind"] === "string"
+      ? media["kind"]
+      : null;
+
+  if (!url) {
+    return (
+      <div className="mb-4 rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+        {t("media_not_available")}
+      </div>
+    );
+  }
+
+  if (kind === "audio") {
+    return <audio src={url} controls className="mb-4 w-full" />;
+  }
+
+  if (kind === "video") {
+    return (
+      <video
+        src={url}
+        controls
+        className="mb-4 max-h-[65vh] w-full rounded-md bg-black"
+      />
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="mx-auto mb-4 max-h-[65vh] max-w-full rounded-md border border-border object-contain"
+      />
+    );
+  }
+
+  return null;
 }
 
 function isSpatialLabelling(type: string) {
