@@ -1,9 +1,10 @@
-import { CheckCircle2, Eye, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, Heart, RotateCcw, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { submitVocabularyPracticeAnswer } from "@/lib/practice.functions";
+import { toggleFavorite } from "@/lib/student.functions";
 import type {
   VocabularyLearnerState,
   VocabularyPracticeMode,
@@ -52,6 +53,8 @@ export function VocabularyPracticeCard({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState(entry.learner_state);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [favorited, setFavorited] = useState<boolean | null>(null);
   const startedAt = useRef(Date.now());
 
   const target =
@@ -155,6 +158,26 @@ export function VocabularyPracticeCard({
     startedAt.current = Date.now();
   }
 
+  async function toggleSaved() {
+    setFavoriteBusy(true);
+    try {
+      const result = await toggleFavorite({
+        data: {
+          entityType: "vocabulary",
+          entityId: entry.id,
+        },
+      });
+      setFavorited(result.favorited);
+      toast.success(
+        result.favorited ? t("favorite_saved") : t("favorite_removed"),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
   return (
     <section className="rounded-md border border-border p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -172,9 +195,24 @@ export function VocabularyPracticeCard({
             </div>
           )}
         </div>
-        <span className="rounded-md bg-muted px-2 py-1 text-xs">
-          {state.correct_count} ✓ · {state.incorrect_count} ✕
-        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={favoriteBusy}
+            onClick={toggleSaved}
+            aria-pressed={favorited === true}
+          >
+            <Heart
+              className={`h-4 w-4 ${favorited ? "fill-current" : ""}`}
+            />
+            {t("favorite")}
+          </Button>
+          <span className="rounded-md bg-muted px-2 py-1 text-xs">
+            {state.correct_count} ✓ · {state.incorrect_count} ✕
+          </span>
+        </div>
       </div>
 
       {mode === "flashcard" ? (
