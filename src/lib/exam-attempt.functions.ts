@@ -392,6 +392,16 @@ function sanitizeAttemptSnapshot(snapshot: AttemptSnapshot) {
             delete listening["transcript"];
             delete listening["transcript_segments"];
           }
+
+          if (listening["media"] && typeof listening["media"] === "object") {
+            const media = {
+              ...(listening["media"] as Record<string, unknown>),
+            };
+            delete media["storage_path"];
+            delete media["external_url"];
+            listening["media"] = media;
+          }
+
           return {
             ...block,
             listening,
@@ -418,11 +428,14 @@ async function hydrateAttemptMediaUrls(
   snapshot: ReturnType<typeof sanitizeAttemptSnapshot>,
   deadlineAt: string | null,
 ) {
-  const { hydrateQuestionMedia, resolveMediaUrl } = await import("./media.server");
+  const { hydrateQuestionMedia } = await import("./media.server");
   const remainingSeconds = deadlineAt
     ? Math.max(0, Math.ceil((new Date(deadlineAt).getTime() - Date.now()) / 1000))
     : 60 * 60;
-  const expiresIn = Math.max(15 * 60, Math.min(26 * 60 * 60, remainingSeconds + 10 * 60));
+  const expiresIn = Math.max(
+    15 * 60,
+    Math.min(26 * 60 * 60, remainingSeconds + 10 * 60),
+  );
 
   const questionRefs: Array<{ payload: unknown }> = [];
   for (const section of snapshot.sections) {
@@ -446,32 +459,24 @@ async function hydrateAttemptMediaUrls(
     questionRefs[index]!.payload = question.payload;
   });
 
+  return snapshot;
+}
+
+function findAttemptListening(
+  snapshot: AttemptSnapshot,
+  listeningId: string,
+) {
   for (const section of snapshot.sections) {
     for (const block of section.blocks) {
-      if (block.kind !== "listening") continue;
-      const media =
-        block.listening["media"] && typeof block.listening["media"] === "object"
-          ? (block.listening["media"] as Record<string, unknown>)
-          : null;
-      if (!media) continue;
-
-      const url = await resolveMediaUrl(
-        admin as never,
-        {
-          storage_path:
-            typeof media["storage_path"] === "string" ? media["storage_path"] : null,
-          external_url:
-            typeof media["external_url"] === "string" ? media["external_url"] : null,
-        },
-        expiresIn,
-      );
-
-      media["external_url"] = url;
-      delete media["storage_path"];
+      if (
+        block.kind === "listening" &&
+        String(block.listening["id"] ?? "") === listeningId
+      ) {
+        return block.listening;
+      }
     }
   }
-
-  return snapshot;
+  return null;
 }
 
 function scoring(value: Record<string, unknown>): Scoring {
