@@ -49,6 +49,83 @@ function assertSourceType(filename: string) {
   }
 }
 
+export const listImportProfiles = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("import_profiles")
+      .select("id,name,kind,config,created_at")
+      .eq("kind", "document")
+      .order("name");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const saveImportProfile = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid().optional(),
+        name: z.string().trim().min(1).max(120),
+        config: z.object({
+          expected_content: z
+            .enum(["auto", "questions", "vocabulary", "mixed"])
+            .default("auto"),
+          learning_language: z.string().max(10).nullable().default(null),
+          level: z.string().max(20).nullable().default(null),
+          status: z.enum(["draft", "active"]).default("draft"),
+          auto_approve_confidence: z.number().min(0.5).max(1).default(0.95),
+        }),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    if (data.id) {
+      const { error } = await context.supabase
+        .from("import_profiles")
+        .update({ name: data.name, config: data.config as never })
+        .eq("id", data.id)
+        .eq("kind", "document");
+      if (error) throw new Error(error.message);
+      return { id: data.id };
+    }
+
+    const { data: created, error } = await context.supabase
+      .from("import_profiles")
+      .insert({
+        name: data.name,
+        kind: "document",
+        config: data.config as never,
+      })
+      .select("id")
+      .single();
+    if (error || !created) {
+      throw new Error(error?.message ?? "Could not save import profile.");
+    }
+    return { id: created.id };
+  });
+
+export const deleteImportProfile = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { count } = await context.supabase
+      .from("import_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("profile_id", data.id);
+    if ((count ?? 0) > 0) {
+      throw new Error("This profile is referenced by import history and cannot be deleted.");
+    }
+    const { error } = await context.supabase
+      .from("import_profiles")
+      .delete()
+      .eq("id", data.id)
+      .eq("kind", "document");
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const createSourceUploadSession = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
