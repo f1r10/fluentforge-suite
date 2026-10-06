@@ -1,10 +1,6 @@
 /**
  * Boundary for CPU/GPU-heavy document, OCR, AI, transcription and media work.
- *
- * The core TanStack application depends only on this contract. A later production
- * adapter may call an external Python/FastAPI service backed by Redis/workers and
- * S3-compatible object storage. Phase 1 intentionally ships a placeholder adapter
- * that reports unsupported work instead of fabricating results.
+ * The core application depends only on this contract.
  */
 export type ProcessingJobStatus =
   | "queued"
@@ -14,16 +10,32 @@ export type ProcessingJobStatus =
   | "failed"
   | "not_implemented";
 
+export type ProcessingImportItem = {
+  item_type: "question" | "vocabulary" | "reading" | "listening" | "raw_text";
+  page?: number | null;
+  sheet?: string | null;
+  payload: Record<string, unknown>;
+  confidence?: number | null;
+};
+
 export type ProcessingJobRef = {
   jobId: string;
   status: ProcessingJobStatus;
+  progress?: number;
+  extractionMethod?: string | null;
   message?: string;
+  error?: string | null;
+  stats?: Record<string, unknown>;
+  items?: ProcessingImportItem[];
 };
 
 export interface ProcessingService {
   submitDocumentImport(input: {
     sourceFileId: string;
-    profileId?: string | null;
+    sourceUrl: string;
+    filename: string;
+    mimeType?: string | null;
+    profile?: Record<string, unknown> | null;
     mode?: "review" | "auto";
   }): Promise<ProcessingJobRef>;
 
@@ -82,10 +94,106 @@ export class PlaceholderProcessingService implements ProcessingService {
   processMedia = notImplemented;
 }
 
-/**
- * Server-side factory. Later this can choose HttpProcessingService when
- * PROCESSING_SERVICE_URL is configured.
- */
+class HttpProcessingService implements ProcessingService {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly sharedSecret: string | null,
+  ) {}
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const headers = new Headers(init?.headers);
+      headers.set("content-type", "application/json");
+      if (this.sharedSecret) {
+        headers.set("x-processing-key", this.sharedSecret);
+      }
+
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+          `Processing service error ${response.status}: ${body.slice(0, 1000)}`,
+        );
+      }
+      return (await response.json()) as T;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async submitDocumentImport(input: {
+    sourceFileId: string;
+    sourceUrl: string;
+    filename: string;
+    mimeType?: string | null;
+    profile?: Record<string, unknown> | null;
+    mode?: "review" | "auto";
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/document-import", {
+      method: "POST",
+      body: JSON.stringify({
+        source_file_id: input.sourceFileId,
+        source_url: input.sourceUrl,
+        filename: input.filename,
+        mime_type: input.mimeType ?? null,
+        mode: input.mode ?? "review",
+        profile: input.profile ?? null,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
+  async getImportStatus(jobId: string) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+      progress: number;
+      extraction_method?: string | null;
+      error?: string | null;
+      stats?: Record<string, unknown>;
+      items?: ProcessingImportItem[];
+    }>(`/v1/jobs/${encodeURIComponent(jobId)}`);
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+      progress: result.progress,
+      extractionMethod: result.extraction_method ?? null,
+      error: result.error ?? null,
+      stats: result.stats ?? {},
+      items: result.items ?? [],
+    };
+  }
+
+  runOCR = notImplemented;
+  extractQuestions = notImplemented;
+  extractVocabulary = notImplemented;
+  transcribeMedia = notImplemented;
+  enrichVocabulary = notImplemented;
+  analyzeDuplicates = notImplemented;
+  processMedia = notImplemented;
+}
+
 export function getProcessingService(): ProcessingService {
-  return new PlaceholderProcessingService();
+  const rawUrl = process.env.PROCESSING_SERVICE_URL?.trim();
+  if (!rawUrl) return new PlaceholderProcessingService();
+
+  const baseUrl = rawUrl.replace(/\/+$/, "");
+  return new HttpProcessingService(
+    baseUrl,
+    process.env.PROCESSING_SHARED_SECRET?.trim() || null,
+  );
 }
