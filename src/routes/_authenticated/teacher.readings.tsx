@@ -1,0 +1,335 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { Pencil, Plus, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { listTopics } from "@/lib/questions.functions";
+import {
+  getReading,
+  listReadings,
+  saveReading,
+  saveReadingQuestionSet,
+} from "@/lib/context-content.functions";
+import { LEVELS } from "@/lib/question-types";
+import { topicOptions } from "@/components/app/topics";
+import { useI18n } from "@/lib/i18n";
+
+const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
+const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+
+type Status = "active" | "draft" | "archived" | "all";
+type QuestionSet = { id?: string; title: string; instructions: string; sort_order: number };
+type EditorState = {
+  id?: string;
+  title: string;
+  body: string;
+  learning_language: string;
+  level: string;
+  status: "active" | "draft" | "archived";
+  display_layout: "stacked" | "split" | "tabbed";
+  topicIds: string[];
+  tags: string;
+  questionSets: QuestionSet[];
+};
+
+const emptyEditor = (): EditorState => ({
+  title: "",
+  body: "",
+  learning_language: "en",
+  level: "",
+  status: "active",
+  display_layout: "stacked",
+  topicIds: [],
+  tags: "",
+  questionSets: [],
+});
+
+export const Route = createFileRoute("/_authenticated/teacher/readings")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(topicsQuery),
+  component: ReadingsPage,
+});
+
+function ReadingsPage() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data: topics } = useSuspenseQuery(topicsQuery);
+  const topicOpts = topicOptions(topics);
+  const [search, setSearch] = useState("");
+  const [language, setLanguage] = useState("");
+  const [level, setLevel] = useState("");
+  const [status, setStatus] = useState<Status>("active");
+  const [page, setPage] = useState(0);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["readings", search, language, level, status, page],
+    queryFn: () => listReadings({ data: { search, language, level, status, page } }),
+    placeholderData: keepPreviousData,
+  });
+
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 40;
+  const rows = data?.rows ?? [];
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  async function openEdit(id: string) {
+    try {
+      const row = await getReading({ data: { id } });
+      setEditor({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        learning_language: row.learning_language ?? "en",
+        level: row.level ?? "",
+        status: row.status,
+        display_layout: (row.display_layout as EditorState["display_layout"]) ?? "stacked",
+        topicIds: row.topicIds,
+        tags: row.tags.join(", "),
+        questionSets: row.questionSets.map((x) => ({
+          id: x.id,
+          title: x.title ?? "",
+          instructions: x.instructions ?? "",
+          sort_order: x.sort_order,
+        })),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editor) return;
+    setBusy(true);
+    try {
+      const saved = await saveReading({
+        data: {
+          id: editor.id,
+          title: editor.title,
+          body: editor.body,
+          learning_language: editor.learning_language || null,
+          level: editor.level || null,
+          status: editor.status,
+          display_layout: editor.display_layout,
+          topicIds: editor.topicIds,
+          tags: editor.tags.split(",").map((x) => x.trim()).filter(Boolean),
+        },
+      });
+
+      for (let i = 0; i < editor.questionSets.length; i++) {
+        const set = editor.questionSets[i]!;
+        await saveReadingQuestionSet({
+          data: {
+            id: set.id,
+            readingId: saved.id,
+            title: set.title || null,
+            instructions: set.instructions || null,
+            sort_order: i,
+          },
+        });
+      }
+
+      setEditor(null);
+      await qc.invalidateQueries({ queryKey: ["readings"] });
+      toast.success(t("save"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t("readings")}</h1>
+          <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
+        </div>
+        <Button onClick={() => setEditor(emptyEditor())}>
+          <Plus className="h-4 w-4" />
+          {t("add_reading")}
+        </Button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <Input
+          value={search}
+          placeholder={t("search")}
+          onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+        />
+        <select className={selectClass} value={language} onChange={(e) => { setLanguage(e.target.value); setPage(0); }}>
+          <option value="">{t("all")} — {t("language")}</option>
+          <option value="en">English</option>
+          <option value="az">Azərbaycanca</option>
+          <option value="ru">Русский</option>
+          <option value="tr">Türkçe</option>
+        </select>
+        <select className={selectClass} value={level} onChange={(e) => { setLevel(e.target.value); setPage(0); }}>
+          <option value="">{t("all")} — {t("level")}</option>
+          {LEVELS.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
+        <select className={selectClass} value={status} onChange={(e) => { setStatus(e.target.value as Status); setPage(0); }}>
+          {(["active", "draft", "archived", "all"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
+        </select>
+      </div>
+
+      <div className="overflow-x-auto rounded-md border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">{t("title")}</th>
+              <th className="hidden px-3 py-2 font-medium sm:table-cell">{t("language")}</th>
+              <th className="hidden px-3 py-2 font-medium md:table-cell">{t("level")}</th>
+              <th className="hidden px-3 py-2 font-medium md:table-cell">{t("word_count")}</th>
+              <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("question_sets")}</th>
+              <th className="px-3 py-2 font-medium">{t("status")}</th>
+              <th className="w-14" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.length === 0 && (
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">{isFetching ? "…" : t("no_results")}</td></tr>
+            )}
+            {rows.map((row) => (
+              <tr key={row.id} className="hover:bg-muted/30">
+                <td className="px-3 py-2">
+                  <button className="text-left font-medium hover:underline" onClick={() => openEdit(row.id)}>{row.title}</button>
+                  <div className="text-xs text-muted-foreground">{t(row.display_layout)}</div>
+                </td>
+                <td className="hidden px-3 py-2 sm:table-cell">{row.learning_language ?? "—"}</td>
+                <td className="hidden px-3 py-2 md:table-cell">{row.level ?? "—"}</td>
+                <td className="hidden px-3 py-2 md:table-cell">{row.word_count ?? 0}</td>
+                <td className="hidden px-3 py-2 lg:table-cell">{row.questionSets}</td>
+                <td className="px-3 py-2">{t(row.status)}</td>
+                <td className="px-2 py-1">
+                  <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{page + 1} / {pages}</span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((x) => x - 1)}>←</Button>
+          <Button variant="outline" size="sm" disabled={page + 1 >= pages} onClick={() => setPage((x) => x + 1)}>→</Button>
+        </div>
+      </div>
+
+      {editor && (
+        <Dialog open onOpenChange={(open) => !open && setEditor(null)}>
+          <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
+            <DialogHeader><DialogTitle>{editor.id ? t("edit_reading") : t("add_reading")}</DialogTitle></DialogHeader>
+            <form onSubmit={save} className="space-y-5">
+              <Field label={t("title")}><Input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} required autoFocus /></Field>
+              <Field label={t("passage")}><Textarea rows={14} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} /></Field>
+
+              <div className="grid gap-4 sm:grid-cols-4">
+                <Field label={t("language")}>
+                  <select className={selectClass} value={editor.learning_language} onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}>
+                    <option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
+                    <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option>
+                  </select>
+                </Field>
+                <Field label={t("level")}>
+                  <select className={selectClass} value={editor.level} onChange={(e) => setEditor({ ...editor, level: e.target.value })}>
+                    <option value="">—</option>{LEVELS.map((x) => <option key={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label={t("layout")}>
+                  <select className={selectClass} value={editor.display_layout} onChange={(e) => setEditor({ ...editor, display_layout: e.target.value as EditorState["display_layout"] })}>
+                    <option value="stacked">{t("stacked")}</option><option value="split">{t("split")}</option><option value="tabbed">{t("tabbed")}</option>
+                  </select>
+                </Field>
+                <Field label={t("status")}>
+                  <select className={selectClass} value={editor.status} onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}>
+                    {(["active", "draft", "archived"] as const).map((x) => <option key={x}>{t(x)}</option>)}
+                  </select>
+                </Field>
+              </div>
+
+              <Field label={t("topics")}>
+                <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                  {topicOpts.map((x) => (
+                    <label key={x.id} className="flex items-center gap-2 text-sm" style={{ paddingLeft: x.depth * 16 }}>
+                      <Checkbox
+                        checked={editor.topicIds.includes(x.id)}
+                        onCheckedChange={(checked) => setEditor({
+                          ...editor,
+                          topicIds: checked ? [...editor.topicIds, x.id] : editor.topicIds.filter((id) => id !== x.id),
+                        })}
+                      />
+                      {x.name}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Tags"><Input value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} placeholder="ielts, academic" /></Field>
+
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>{t("question_sets")}</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setEditor({
+                    ...editor,
+                    questionSets: [...editor.questionSets, { title: "", instructions: "", sort_order: editor.questionSets.length }],
+                  })}>
+                    <Plus className="h-4 w-4" />{t("add")}
+                  </Button>
+                </div>
+                {editor.questionSets.length === 0 && <p className="text-sm text-muted-foreground">{t("no_question_sets")}</p>}
+                {editor.questionSets.map((set, index) => (
+                  <div key={set.id ?? index} className="grid gap-2 rounded-md border border-border p-3 md:grid-cols-[1fr_2fr_auto]">
+                    <Input
+                      value={set.title}
+                      placeholder={t("title")}
+                      onChange={(e) => setEditor({
+                        ...editor,
+                        questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, title: e.target.value } : x),
+                      })}
+                    />
+                    <Input
+                      value={set.instructions}
+                      placeholder={t("instructions")}
+                      onChange={(e) => setEditor({
+                        ...editor,
+                        questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
+                      })}
+                    />
+                    <Button type="button" variant="ghost" size="icon" onClick={() => setEditor({
+                      ...editor,
+                      questionSets: editor.questionSets.filter((_, i) => i !== index),
+                    })}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </section>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
+                <Button type="submit" disabled={busy}>{t("save")}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
+}
