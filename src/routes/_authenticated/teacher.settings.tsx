@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding, saveDashboardSettings } from "@/lib/teacher.functions";
+import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding, saveDashboardSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
 import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -34,6 +34,7 @@ function SettingsPage() {
       <h1 className="text-2xl font-bold">{t("settings")}</h1>
       <BrandingForm />
       <DashboardSettings />
+      <StudentDashboardSettings />
       <CredentialsForm />
       <RecoveryCodes />
       <MaintenanceSettings />
@@ -471,6 +472,105 @@ function DashboardSettings() {
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {t("dashboard_widgets_hint")}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {defaults.map((key) => (
+          <label
+            key={key}
+            className="flex items-center gap-2 rounded-md border border-border p-3 text-sm"
+          >
+            <Checkbox
+              checked={visible.includes(key)}
+              onCheckedChange={(checked) =>
+                setVisible((previous) =>
+                  checked
+                    ? [...new Set([...previous, key])]
+                    : previous.filter((item) => item !== key),
+                )
+              }
+            />
+            {labels[key]}
+          </label>
+        ))}
+      </div>
+      <Button type="button" onClick={save} disabled={busy}>
+        {t("save")}
+      </Button>
+    </section>
+  );
+}
+
+function StudentDashboardSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(settingsQuery);
+  const dashboard = (data["student_dashboard"] ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const defaults = [
+    "catalogs",
+    "exams",
+    "practice",
+    "today",
+    "accuracy",
+    "study_time",
+    "progress",
+    "weak_topics",
+    "history",
+    "favorites",
+  ] as const;
+  const raw = Array.isArray(dashboard["visible_widgets"])
+    ? dashboard["visible_widgets"]
+    : Array.isArray(dashboard["widgets"])
+      ? dashboard["widgets"]
+      : defaults;
+  const [visible, setVisible] = useState<string[]>(
+    (raw as unknown[]).filter(
+      (value): value is string => typeof value === "string",
+    ),
+  );
+  const [busy, setBusy] = useState(false);
+
+  const labels: Record<(typeof defaults)[number], string> = {
+    catalogs: t("catalogs"),
+    exams: t("exams"),
+    practice: t("self_practice"),
+    today: t("today"),
+    accuracy: t("accuracy"),
+    study_time: t("study_time"),
+    progress: t("progress"),
+    weak_topics: t("weak_topics"),
+    history: t("practice_history"),
+    favorites: t("favorites"),
+  };
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveStudentDashboardSettings({
+        data: {
+          visible_widgets: visible as Array<(typeof defaults)[number]>,
+        },
+      });
+      await qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(t("student_dashboard_settings_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("student_dashboard_widgets")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("student_dashboard_widgets_hint")}
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
