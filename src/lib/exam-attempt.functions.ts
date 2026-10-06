@@ -1322,6 +1322,40 @@ async function submitAttemptInternal(
     } as never,
   });
 
+  const { notifyStudent, notifyTeacher } = await import(
+    "./notifications.functions"
+  );
+  await notifyTeacher(admin, {
+    kind: manual.length > 0 ? "grading_required" : "exam_completed",
+    title:
+      manual.length > 0
+        ? "Exam requires manual grading"
+        : "Exam completed",
+    body: `${snapshot.exam.title}: attempt submitted${manual.length > 0 ? ` with ${manual.length} answer(s) needing review` : ""}.`,
+    link: manual.length > 0 ? "/teacher/reviews" : "/teacher/monitoring",
+    data: {
+      exam_id: attempt.exam_id,
+      attempt_id: attempt.id,
+      student_id: studentId,
+      pending_reviews: manual.length,
+    },
+    dedupeKey: `attempt-submitted:${attempt.id}`,
+  });
+
+  if (canReleaseImmediately) {
+    await notifyStudent(admin, studentId, {
+      kind: "exam_result",
+      title: "Exam result available",
+      body: `Your result for ${snapshot.exam.title} is available.`,
+      link: `/student/attempts/${attempt.id}`,
+      data: {
+        exam_id: attempt.exam_id,
+        attempt_id: attempt.id,
+      },
+      dedupeKey: `exam-result:${attempt.id}`,
+    });
+  }
+
   return updated;
 }
 
@@ -1390,6 +1424,18 @@ export const getExamResult = createServerFn({ method: "GET" })
       if ((pending ?? 0) === 0) {
         await admin.from("exam_attempts").update({ result_released: true }).eq("id", attempt.id);
         attempt = { ...attempt, result_released: true };
+        const { notifyStudent } = await import("./notifications.functions");
+        await notifyStudent(admin, studentId, {
+          kind: "exam_result",
+          title: "Exam result available",
+          body: `Your result for ${snapshot.exam.title} is available.`,
+          link: `/student/attempts/${attempt.id}`,
+          data: {
+            exam_id: attempt.exam_id,
+            attempt_id: attempt.id,
+          },
+          dedupeKey: `exam-result:${attempt.id}`,
+        });
       }
     }
 
