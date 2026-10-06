@@ -14,6 +14,10 @@ const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const SCRYPT_KEY_BYTES = 32;
 
+// The auth facade accepts the PostgREST-compatible fluent client assembled by
+// the runtime provider; keeping this boundary structural avoids coupling auth
+// primitives to one generated database client type.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DataClient = any;
 
 type RuntimeUser = {
