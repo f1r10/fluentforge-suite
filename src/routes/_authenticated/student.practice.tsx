@@ -218,6 +218,7 @@ function SelfPracticePage() {
           sessionId,
           filters,
           alreadyLoggedQuestionIds: Object.keys(feedback),
+          presentedQuestionIds: questions.map((question) => question.id),
           answers: answered.map((question) => ({
             questionId: question.id,
             response: responseFor(question),
