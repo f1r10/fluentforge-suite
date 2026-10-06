@@ -451,6 +451,41 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
       .eq("id", job.id);
 
     if (
+      mappedStatus === "needs_review" ||
+      mappedStatus === "completed" ||
+      mappedStatus === "failed"
+    ) {
+      const { notifyTeacher } = await import("./notifications.functions");
+      const itemCount = state.items?.length ?? 0;
+      await notifyTeacher(admin, {
+        kind:
+          mappedStatus === "failed"
+            ? "import_failed"
+            : mappedStatus === "needs_review"
+              ? "import_review_required"
+              : "import_processing_completed",
+        title:
+          mappedStatus === "failed"
+            ? "Document import failed"
+            : mappedStatus === "needs_review"
+              ? "Document import is ready for review"
+              : "Document processing completed",
+        body:
+          mappedStatus === "failed"
+            ? state.error ?? state.message ?? "The processing worker reported an error."
+            : `${itemCount} extracted item(s) are available.`,
+        link: "/teacher/sources",
+        data: {
+          import_job_id: job.id,
+          processor_job_id: job.processor_job_id,
+          status: mappedStatus,
+          item_count: itemCount,
+        },
+        dedupeKey: `import-job:${job.id}:${mappedStatus}`,
+      });
+    }
+
+    if (
       (mappedStatus === "needs_review" || mappedStatus === "completed") &&
       state.items
     ) {
@@ -916,6 +951,21 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         skipped,
         original_deleted: originalDeleted,
       },
+    });
+
+    const { notifyTeacher } = await import("./notifications.functions");
+    await notifyTeacher(admin, {
+      kind: "import_committed",
+      title: "Document import completed",
+      body: `Imported ${importedQuestions} question(s) and ${importedReadings} reading(s). ${skipped} item(s) skipped.`,
+      link: "/teacher/sources",
+      data: {
+        import_job_id: job.id,
+        imported_questions: importedQuestions,
+        imported_readings: importedReadings,
+        skipped,
+      },
+      dedupeKey: `import-committed:${job.id}`,
     });
 
     return {
