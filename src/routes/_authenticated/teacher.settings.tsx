@@ -9,12 +9,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding } from "@/lib/teacher.functions";
 import { LANGS, useI18n } from "@/lib/i18n";
 import { ErrorText } from "@/components/app/common";
+import {
+  getMaintenanceSettings,
+  runMaintenanceCleanup,
+  saveMaintenanceSettings,
+} from "@/lib/maintenance.functions";
 
 const settingsQuery = queryOptions({ queryKey: ["settings"], queryFn: () => getSettings() });
 const recoveryQuery = queryOptions({ queryKey: ["recovery"], queryFn: () => getRecoveryStatus() });
+const maintenanceQuery = queryOptions({ queryKey: ["maintenance"], queryFn: () => getMaintenanceSettings() });
 
 export const Route = createFileRoute("/_authenticated/teacher/settings")({
-  loader: ({ context }) => Promise.all([context.queryClient.ensureQueryData(settingsQuery), context.queryClient.ensureQueryData(recoveryQuery)]),
+  loader: ({ context }) => Promise.all([context.queryClient.ensureQueryData(settingsQuery), context.queryClient.ensureQueryData(recoveryQuery), context.queryClient.ensureQueryData(maintenanceQuery)]),
   component: SettingsPage,
 });
 
@@ -26,6 +32,7 @@ function SettingsPage() {
       <BrandingForm />
       <CredentialsForm />
       <RecoveryCodes />
+      <MaintenanceSettings />
     </div>
   );
 }
@@ -129,6 +136,173 @@ function RecoveryCodes() {
         </div>
       )}
       <Button variant="outline" onClick={generate}>Create new recovery codes</Button>
+    </section>
+  );
+}
+
+
+function MaintenanceSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(maintenanceQuery);
+  const [form, setForm] = useState(data.settings);
+  const [saving, setSaving] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await saveMaintenanceSettings({ data: form });
+      await qc.invalidateQueries({ queryKey: ["maintenance"] });
+      toast.success(t("maintenance_settings_saved"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cleanup() {
+    if (!confirm(t("maintenance_cleanup_confirm"))) return;
+    setCleaning(true);
+    try {
+      const result = await runMaintenanceCleanup({
+        data: { confirmation: "PERMANENTLY DELETE" },
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["maintenance"] }),
+        qc.invalidateQueries({ queryKey: ["media-library"] }),
+        qc.invalidateQueries({ queryKey: ["exports"] }),
+        qc.invalidateQueries({ queryKey: ["questions"] }),
+        qc.invalidateQueries({ queryKey: ["catalogs-detailed"] }),
+      ]);
+      const total = Object.values(result.result).reduce(
+        (sum, value) => sum + Number(value || 0),
+        0,
+      );
+      toast.success(`${t("maintenance_cleanup_complete")}: ${total}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  const previewEntries = [
+    ["questions", data.preview.questions],
+    ["vocabulary", data.preview.vocabulary],
+    ["readings", data.preview.readings],
+    ["listenings", data.preview.listenings],
+    ["catalogs", data.preview.catalogs],
+    ["media", data.preview.media],
+    ["source_originals", data.preview.source_originals],
+    ["expired_exports", data.preview.expired_exports],
+    ["media_upload_sessions", data.preview.media_upload_sessions],
+    ["source_upload_sessions", data.preview.source_upload_sessions],
+  ] as const;
+  const pending = previewEntries.reduce((sum, [, count]) => sum + count, 0);
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("maintenance_retention")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("maintenance_retention_hint")}
+        </p>
+      </div>
+
+      <form onSubmit={save} className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label={t("trash_retention_days")}>
+            <Input
+              type="number"
+              min={1}
+              max={3650}
+              value={form.trash_retention_days}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  trash_retention_days: Number(e.target.value) || 1,
+                })
+              }
+            />
+          </Field>
+          <Field label={t("temp_session_grace_hours")}>
+            <Input
+              type="number"
+              min={1}
+              max={720}
+              value={form.temp_session_grace_hours}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  temp_session_grace_hours: Number(e.target.value) || 1,
+                })
+              }
+            />
+          </Field>
+          <Field label={t("export_retention_hours")}>
+            <Input
+              type="number"
+              min={1}
+              max={720}
+              value={form.export_retention_hours}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  export_retention_hours: Number(e.target.value) || 1,
+                })
+              }
+            />
+          </Field>
+        </div>
+        <Button type="submit" variant="outline" disabled={saving}>
+          {t("save")}
+        </Button>
+      </form>
+
+      <div className="rounded-md border border-border p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="font-medium">{t("cleanup_preview")}</div>
+            <div className="text-xs text-muted-foreground">
+              {t("cleanup_preview_hint")}
+            </div>
+          </div>
+          <div className="text-xl font-bold">{pending}</div>
+        </div>
+
+        <div className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2">
+          {previewEntries.map(([key, count]) => (
+            <div
+              key={key}
+              className="flex items-center justify-between bg-background px-3 py-2 text-sm"
+            >
+              <span>{t(`cleanup_${key}`)}</span>
+              <strong>{count}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-md border border-destructive/40 p-4">
+        <div className="font-medium text-destructive">{t("permanent_cleanup")}</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("permanent_cleanup_hint")}
+        </p>
+        <Button
+          type="button"
+          variant="destructive"
+          className="mt-3"
+          disabled={cleaning || pending === 0}
+          onClick={cleanup}
+        >
+          {cleaning ? t("cleaning") : t("run_cleanup")}
+        </Button>
+      </div>
     </section>
   );
 }
