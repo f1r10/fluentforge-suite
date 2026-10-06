@@ -101,6 +101,54 @@ async function configuredMaxVideoMb(
     : 700;
 }
 
+function normalizeYouTubeUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("Enter a valid YouTube URL.");
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Only HTTP(S) YouTube URLs are accepted.");
+  }
+
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const allowed = new Set([
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+  ]);
+  if (!allowed.has(host)) {
+    throw new Error("Only YouTube URLs are accepted.");
+  }
+  if (url.searchParams.has("list")) {
+    throw new Error("Import one YouTube video at a time, not a playlist.");
+  }
+
+  return url.toString();
+}
+
+function youtubeVideoId(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (host === "youtu.be") {
+      return url.pathname.split("/").filter(Boolean)[0] ?? null;
+    }
+    if (url.pathname === "/watch") return url.searchParams.get("v");
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (["shorts", "embed", "live"].includes(parts[0] ?? "")) {
+      return parts[1] ?? null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export const listMedia = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
@@ -137,6 +185,442 @@ export const listMedia = createServerFn({ method: "GET" })
       rows: rows ?? [],
       total: count ?? 0,
       pageSize: PAGE_SIZE,
+    };
+  });
+
+export const listYouTubeImports = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const client = context.supabase as unknown as {
+      from: (table: string) => any;
+    };
+    const { data, error } = await client
+      .from("media_import_jobs")
+      .select(
+        "id,source_url,status,progress,error,result,media_asset_id,created_at,updated_at,completed_at",
+      )
+      .eq("source_kind", "youtube")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const saveYouTubeReference = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        url: z.string().trim().min(1).max(2_000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const sourceUrl = normalizeYouTubeUrl(data.url);
+    const videoId = youtubeVideoId(sourceUrl);
+    if (!videoId) throw new Error("Could not determine the YouTube video id.");
+
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const { data: media, error } = await admin
+      .from("media_assets")
+      .insert({
+        kind: "video",
+        storage_path: null,
+        external_url: sourceUrl,
+        original_filename: `YouTube ${videoId}`,
+        mime_type: "text/html",
+        size_bytes: null,
+        checksum: null,
+        metadata: {
+          source: "youtube",
+          youtube_video_id: videoId,
+          reference_only: true,
+          embed_url: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
+            videoId,
+          )}`,
+        },
+      })
+      .select("id")
+      .single();
+    if (error || !media) {
+      throw new Error(error?.message ?? "Could not save YouTube reference.");
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "youtube_reference_saved",
+      entity_type: "media",
+      entity_id: media.id,
+      summary: "Saved a YouTube reference without downloading media",
+      details: {
+        source_url: sourceUrl,
+        video_id: videoId,
+      },
+    });
+
+    return { id: media.id };
+  });
+
+export const startYouTubeImport = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        url: z.string().trim().min(1).max(2_000),
+        rightsConfirmed: z.literal(true),
+        preferredHeight: z.number().int().min(144).max(2160).default(1080),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const sourceUrl = normalizeYouTubeUrl(data.url);
+    const maxVideoMb = await configuredMaxVideoMb(context.supabase);
+    const maxAllowedBytes = maxVideoMb * MiB;
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const yyyy = now.getUTCFullYear();
+    const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const storagePath = `video/${yyyy}/${mm}/${id}-youtube.mp4`;
+
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const jobs = admin as unknown as { from: (table: string) => any };
+
+    const { error: insertError } = await jobs
+      .from("media_import_jobs")
+      .insert({
+        id,
+        source_kind: "youtube",
+        source_url: sourceUrl,
+        storage_path: storagePath,
+        status: "queued",
+        progress: 0,
+        rights_confirmed_at: now.toISOString(),
+      });
+    if (insertError) throw new Error(insertError.message);
+
+    try {
+      const { data: signed, error: signedError } = await admin.storage
+        .from(BUCKET)
+        .createSignedUploadUrl(storagePath);
+      if (signedError || !signed?.signedUrl) {
+        throw new Error(
+          signedError?.message ?? "Could not authorize media import upload.",
+        );
+      }
+
+      const { getProcessingService } = await import("./processing.service");
+      const processing = await getProcessingService().importYouTube({
+        sourceUrl,
+        uploadUrl: signed.signedUrl,
+        maxBytes: maxAllowedBytes,
+        preferredHeight: data.preferredHeight,
+      });
+      if (
+        processing.status === "not_implemented" ||
+        !processing.jobId
+      ) {
+        throw new Error(
+          processing.message ?? "YouTube processing service is unavailable.",
+        );
+      }
+
+      const { error: updateError } = await jobs
+        .from("media_import_jobs")
+        .update({
+          processor_job_id: processing.jobId,
+          status:
+            processing.status === "processing"
+              ? "processing"
+              : "queued",
+          progress: processing.progress ?? 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (updateError) throw new Error(updateError.message);
+
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: context.userId,
+        action: "youtube_import_started",
+        entity_type: "media_import",
+        entity_id: id,
+        summary: "Started authorized YouTube media import",
+        details: {
+          source_url: sourceUrl,
+          max_video_mb: maxVideoMb,
+          preferred_height: data.preferredHeight,
+        },
+      });
+
+      return {
+        id,
+        status: processing.status,
+        maxVideoMb,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      await jobs
+        .from("media_import_jobs")
+        .update({
+          status: "failed",
+          progress: 100,
+          error: message.slice(0, 5_000),
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      const { notifyTeacher } = await import("./notifications.functions");
+      await notifyTeacher(admin, {
+        kind: "media_import_failed",
+        title: "YouTube import could not start",
+        body: message,
+        link: "/teacher/media",
+        data: { media_import_job_id: id, source_url: sourceUrl },
+        dedupeKey: `youtube-import-failed:${id}`,
+      });
+      throw error;
+    }
+  });
+
+export const syncYouTubeImport = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({ id: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const jobs = admin as unknown as { from: (table: string) => any };
+    const { data: job, error: jobError } = await jobs
+      .from("media_import_jobs")
+      .select("*")
+      .eq("id", data.id)
+      .eq("source_kind", "youtube")
+      .maybeSingle();
+    if (jobError) throw new Error(jobError.message);
+    if (!job) throw new Error("YouTube import job not found.");
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+    if (!job.processor_job_id) {
+      throw new Error("YouTube import is not linked to a processing job.");
+    }
+
+    const { getProcessingService } = await import("./processing.service");
+    const state = await getProcessingService().getImportStatus(
+      job.processor_job_id,
+    );
+
+    if (state.status === "failed" || state.status === "not_implemented") {
+      const message =
+        state.error ?? state.message ?? "YouTube import failed.";
+      await admin.storage.from(BUCKET).remove([job.storage_path]);
+      await jobs
+        .from("media_import_jobs")
+        .update({
+          status: "failed",
+          progress: 100,
+          error: message.slice(0, 5_000),
+          result: (state.result ?? {}) as never,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+
+      const { notifyTeacher } = await import("./notifications.functions");
+      await notifyTeacher(admin, {
+        kind: "media_import_failed",
+        title: "YouTube import failed",
+        body: message,
+        link: "/teacher/media",
+        data: {
+          media_import_job_id: job.id,
+          source_url: job.source_url,
+        },
+        dedupeKey: `youtube-import-failed:${job.id}`,
+      });
+
+      return { ...job, status: "failed", progress: 100, error: message };
+    }
+
+    if (state.status !== "completed") {
+      const status =
+        state.status === "processing" ? "processing" : "queued";
+      await jobs
+        .from("media_import_jobs")
+        .update({
+          status,
+          progress: state.progress ?? 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+      return {
+        ...job,
+        status,
+        progress: state.progress ?? 0,
+      };
+    }
+
+    const result = state.result ?? {};
+    const checksum =
+      typeof result["checksum_sha256"] === "string" &&
+      /^[a-f0-9]{64}$/i.test(result["checksum_sha256"])
+        ? result["checksum_sha256"].toLowerCase()
+        : null;
+    const sizeBytes = Number(result["size_bytes"] ?? 0);
+    const maxVideoMb = await configuredMaxVideoMb(context.supabase);
+    if (
+      !Number.isFinite(sizeBytes) ||
+      sizeBytes <= 0 ||
+      sizeBytes > maxVideoMb * MiB
+    ) {
+      await admin.storage.from(BUCKET).remove([job.storage_path]);
+      throw new Error("Imported media size is invalid.");
+    }
+
+    let mediaId: string | null = null;
+    if (checksum) {
+      const { data: existing, error: existingError } = await admin
+        .from("media_assets")
+        .select("id")
+        .eq("checksum", checksum)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (existing) {
+        mediaId = existing.id;
+        await admin.storage.from(BUCKET).remove([job.storage_path]);
+      }
+    }
+
+    if (!mediaId) {
+      const title =
+        typeof result["title"] === "string"
+          ? result["title"]
+          : "YouTube video";
+      const filename =
+        typeof result["filename"] === "string"
+          ? result["filename"].slice(0, 255)
+          : `${safeFilename(title)}.mp4`;
+      const mimeType =
+        typeof result["mime_type"] === "string"
+          ? result["mime_type"].slice(0, 255)
+          : "video/mp4";
+
+      const { data: media, error: mediaError } = await admin
+        .from("media_assets")
+        .insert({
+          kind: "video",
+          storage_path: job.storage_path,
+          external_url: null,
+          original_filename: filename,
+          mime_type: mimeType,
+          size_bytes: Math.floor(sizeBytes),
+          checksum,
+          duration_seconds:
+            typeof result["duration_seconds"] === "number"
+              ? result["duration_seconds"]
+              : null,
+          width:
+            typeof result["width"] === "number"
+              ? Math.floor(result["width"])
+              : null,
+          height:
+            typeof result["height"] === "number"
+              ? Math.floor(result["height"])
+              : null,
+          metadata: {
+            source: "youtube",
+            source_url: job.source_url,
+            youtube_video_id:
+              typeof result["source_id"] === "string"
+                ? result["source_id"]
+                : null,
+            title,
+            uploader:
+              typeof result["uploader"] === "string"
+                ? result["uploader"]
+                : null,
+            channel:
+              typeof result["channel"] === "string"
+                ? result["channel"]
+                : null,
+            thumbnail:
+              typeof result["thumbnail"] === "string"
+                ? result["thumbnail"]
+                : null,
+            processor_job_id: job.processor_job_id,
+            imported_at: new Date().toISOString(),
+            rights_confirmed_at: job.rights_confirmed_at,
+          },
+        } as never)
+        .select("id")
+        .single();
+      if (mediaError || !media) {
+        throw new Error(
+          mediaError?.message ?? "Could not finalize YouTube media.",
+        );
+      }
+      mediaId = media.id;
+    }
+
+    const completedAt = new Date().toISOString();
+    await jobs
+      .from("media_import_jobs")
+      .update({
+        status: "completed",
+        progress: 100,
+        media_asset_id: mediaId,
+        result: result as never,
+        error: null,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", job.id);
+
+    const { notifyTeacher } = await import("./notifications.functions");
+    await notifyTeacher(admin, {
+      kind: "media_import_completed",
+      title: "YouTube import completed",
+      body:
+        typeof result["title"] === "string"
+          ? result["title"]
+          : "The video is available in Media Library.",
+      link: "/teacher/media",
+      data: {
+        media_import_job_id: job.id,
+        media_asset_id: mediaId,
+      },
+      dedupeKey: `youtube-import-completed:${job.id}`,
+    });
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "youtube_import_completed",
+      entity_type: "media",
+      entity_id: mediaId,
+      summary: "Completed authorized YouTube media import",
+      details: {
+        media_import_job_id: job.id,
+        source_url: job.source_url,
+        checksum,
+        size_bytes: sizeBytes,
+      },
+    });
+
+    return {
+      ...job,
+      status: "completed",
+      progress: 100,
+      media_asset_id: mediaId,
+      result,
+      completed_at: completedAt,
     };
   });
 
