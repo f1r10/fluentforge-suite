@@ -415,3 +415,102 @@ def test_checkbox_pdf_options_and_true_false_are_reconstructed():
         {"id": "true", "text": "True"},
         {"id": "false", "text": "False"},
     ]
+
+
+def test_number_on_own_line_and_nested_numbered_statements_stay_one_question():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1.\n"
+                    "Choose the correct variant.\n"
+                    "How … to get to the airport?\n"
+                    "1. long it is\n"
+                    "2. did you\n"
+                    "3. are you going\n"
+                    "4. long does it take you\n"
+                    "5. much does it\n"
+                    "A) 1, 2\nB) 2, 3\nC) 3, 4\nD) 4, 5\nE) 1, 5\n"
+                    "2.\n"
+                    "Choose the correct variant.\n"
+                    "This is my nephew.\n"
+                    "A) brother B) cousin C) nephew\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert "1. long it is" in questions[0]["payload"]["prompt"]
+    assert "5. much does it" in questions[0]["payload"]["prompt"]
+    assert len(questions[0]["payload"]["payload"]["options"]) == 5
+    assert questions[1]["payload"]["prompt"].startswith("Choose the correct variant.")
+
+
+def test_answer_section_numbered_rows_are_not_imported_as_questions():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1. I ____ for Mike. (to work)\n"
+                    "2. She ____ here. (to work)\n"
+                    "Answers to the present simple test\n"
+                    "1. work\n"
+                    "2. works\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert questions[0]["payload"]["prompt"] == "I ____ for Mike. (to work)"
+    assert questions[1]["payload"]["prompt"] == "She ____ here. (to work)"
+
+
+def test_private_use_checkbox_glyph_is_normalized():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1. Do you work on Saturdays?\n"
+                    "A \uf020 Yes, I work B \uf020 Yes, I do C \uf020 Yes, I am\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    question = [item for item in items if item["item_type"] == "question"][0]
+
+    assert [option["text"] for option in question["payload"]["payload"]["options"]] == [
+        "Yes, I work",
+        "Yes, I do",
+        "Yes, I am",
+    ]
