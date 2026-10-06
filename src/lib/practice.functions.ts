@@ -1005,6 +1005,7 @@ export const finishPractice = createServerFn({ method: "POST" })
         catalogId: z.string().uuid(),
         sessionId: z.string().uuid(),
         answers: z.array(answerInputSchema).max(500),
+        presentedQuestionIds: z.array(z.string().uuid()).max(500).default([]),
       })
       .parse(d),
   )
@@ -1022,6 +1023,44 @@ export const finishPractice = createServerFn({ method: "POST" })
       data.answers,
       catalog.settings.show_explanations,
     );
+
+    const answeredIds = new Set(data.answers.map((answer) => answer.questionId));
+    const skippedIds = [
+      ...new Set(
+        data.presentedQuestionIds.filter(
+          (questionId) => !answeredIds.has(questionId),
+        ),
+      ),
+    ];
+    if (skippedIds.length) {
+      const allowed = await loadAllowedQuestions(
+        admin,
+        data.catalogId,
+        skippedIds,
+      );
+      if (allowed.size !== skippedIds.length) {
+        throw new Error(
+          "One or more skipped questions are not available in this catalog.",
+        );
+      }
+      const { error: skipError } = await admin.from("activity_events").insert(
+        skippedIds.map((questionId) => ({
+          student_id: studentId,
+          category: "practice",
+          event_type: "practice_question_skipped",
+          entity_type: "question",
+          entity_id: questionId,
+          is_correct: null,
+          duration_ms: 0,
+          details: {
+            practice_kind: "catalog",
+            catalog_id: data.catalogId,
+            session_id: data.sessionId,
+          } as never,
+        })),
+      );
+      if (skipError) throw new Error(skipError.message);
+    }
 
     const graded = results.filter((result) => result.score != null);
     const score = graded.reduce((sum, result) => sum + (result.score ?? 0), 0);
