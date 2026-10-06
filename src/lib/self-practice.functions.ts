@@ -214,10 +214,8 @@ async function loadSelfPracticeQuestions(admin: Admin, ids: string[]) {
   return new Map((data ?? []).map((row) => [row.id, row as LoadedQuestion]));
 }
 
-async function gradeAndLog(
+async function gradeAnswers(
   admin: Admin,
-  studentId: string,
-  sessionId: string,
   answers: Array<z.infer<typeof answerSchema>>,
 ) {
   const loaded = await loadSelfPracticeQuestions(
@@ -229,7 +227,7 @@ async function gradeAndLog(
     throw new Error("One or more questions are no longer available for self-practice.");
   }
 
-  const results = answers.map((answer) => {
+  return answers.map((answer) => {
     const question = loaded.get(answer.questionId)!;
     const grade = gradeQuestion(question, answer.response);
     return {
@@ -243,32 +241,48 @@ async function gradeAndLog(
       duration_ms: answer.duration_ms,
     };
   });
+}
 
-  if (results.length) {
-    const { error } = await admin.from("activity_events").insert(
-      results.map((result) => ({
-        student_id: studentId,
-        category: "practice",
-        event_type: "practice_answer",
-        entity_type: "question",
-        entity_id: result.question_id,
-        is_correct: result.is_correct,
-        response: result.response as never,
-        duration_ms: result.duration_ms,
-        details: {
-          practice_kind: "self",
-          session_id: sessionId,
-          score: result.score,
-          max_score: result.max_score,
-          question_version: result.question_version,
-          question_type: result.question_type,
-          needs_review: result.needs_review,
-        } as never,
-      })),
-    );
-    if (error) throw new Error(error.message);
-  }
+async function logPracticeAnswers(
+  admin: Admin,
+  studentId: string,
+  sessionId: string,
+  results: Awaited<ReturnType<typeof gradeAnswers>>,
+) {
+  if (!results.length) return;
 
+  const { error } = await admin.from("activity_events").insert(
+    results.map((result) => ({
+      student_id: studentId,
+      category: "practice",
+      event_type: "practice_answer",
+      entity_type: "question",
+      entity_id: result.question_id,
+      is_correct: result.is_correct,
+      response: result.response as never,
+      duration_ms: result.duration_ms,
+      details: {
+        practice_kind: "self",
+        session_id: sessionId,
+        score: result.score,
+        max_score: result.max_score,
+        question_version: result.question_version,
+        question_type: result.question_type,
+        needs_review: result.needs_review,
+      } as never,
+    })),
+  );
+  if (error) throw new Error(error.message);
+}
+
+async function gradeAndLog(
+  admin: Admin,
+  studentId: string,
+  sessionId: string,
+  answers: Array<z.infer<typeof answerSchema>>,
+) {
+  const results = await gradeAnswers(admin, answers);
+  await logPracticeAnswers(admin, studentId, sessionId, results);
   return results.map(({ response, duration_ms, ...result }) => result);
 }
 
@@ -415,6 +429,7 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
         sessionId: z.string().uuid(),
         answers: z.array(answerSchema).min(1).max(100),
         filters: generatorSchema,
+        alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
       })
       .parse(d),
   )
@@ -423,7 +438,15 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
 
-    const results = await gradeAndLog(admin, studentId, data.sessionId, data.answers);
+    const gradedWithPrivate = await gradeAnswers(admin, data.answers);
+    const alreadyLogged = new Set(data.alreadyLoggedQuestionIds);
+    await logPracticeAnswers(
+      admin,
+      studentId,
+      data.sessionId,
+      gradedWithPrivate.filter((result) => !alreadyLogged.has(result.question_id)),
+    );
+    const results = gradedWithPrivate.map(({ response, duration_ms, ...result }) => result);
     const graded = results.filter((result) => result.score != null);
     const score = graded.reduce((sum, result) => sum + (result.score ?? 0), 0);
     const maxScore = graded.reduce((sum, result) => sum + result.max_score, 0);
