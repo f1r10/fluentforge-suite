@@ -138,7 +138,7 @@ function QuestionBank() {
       />
 
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 shadow-sm md:left-56">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 shadow-sm md:left-64">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 text-sm">
             <strong>{selected.size} {t("selected")}</strong>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>{t("clear")}</Button>
