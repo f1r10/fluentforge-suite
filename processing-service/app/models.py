@@ -31,6 +31,10 @@ class YouTubeImportRequest(BaseModel):
     preferred_height: int = Field(default=1080, ge=144, le=2160)
 
 
+class PdfReportRequest(BaseModel):
+    html: str = Field(min_length=1, max_length=8_000_000)
+
+
 class JobCreated(BaseModel):
     job_id: str
     status: JobStatus
