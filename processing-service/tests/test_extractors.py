@@ -277,3 +277,107 @@ def test_custom_mapping_does_not_fallback_to_raw_text_when_selected_sheet_has_no
     items = detect_candidates(extraction, profile=profile)
 
     assert items == []
+
+
+def test_inline_pdf_style_options_are_split():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "SECTION I: Grammar\n"
+                    "1. George is ................ than Nick.\n"
+                    "a) tall b) taller c) tallest\n"
+                    "2. What time ..... Calais tomorrow afternoon? "
+                    "a) do the ferry reach b) is the ferry reaching c) does the ferry reach\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert [option["text"] for option in questions[0]["payload"]["payload"]["options"]] == [
+        "tall",
+        "taller",
+        "tallest",
+    ]
+    assert questions[1]["payload"]["prompt"] == "What time ..... Calais tomorrow afternoon?"
+    assert len(questions[1]["payload"]["payload"]["options"]) == 3
+
+
+def test_explicit_listening_import_creates_context_and_links_questions():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 4,
+                "text": (
+                    "Listening Task 1\n"
+                    "Listen to the recording and choose the correct answer.\n"
+                    "1. Where is the speaker going?\n"
+                    "A) London B) Paris C) Rome\n"
+                    "2. When does the train leave?\n"
+                    "A) Monday B) Tuesday C) Wednesday\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "listenings"})
+    listenings = [item for item in items if item["item_type"] == "listening"]
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(listenings) == 1
+    assert len(questions) == 2
+    source_ref = listenings[0]["payload"]["source_ref"]
+    assert listenings[0]["payload"]["metadata"]["audio_required"] is True
+    for question in questions:
+        assert question["payload"]["import_context"]["kind"] == "listening"
+        assert question["payload"]["import_context"]["source_ref"] == source_ref
+
+
+def test_questions_target_does_not_create_reading_context():
+    from app.extractors import Extraction
+
+    passage = (
+        "A long reading passage with enough words to normally be detected as reading context. "
+        "It contains several sentences so that the automatic reading heuristic would ordinarily "
+        "create a reading entity before the questions that follow. Students should read it carefully."
+    )
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    f"{passage}\n"
+                    "1. What should students do?\n"
+                    "A) Read carefully B) Ignore it\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+
+    assert not [item for item in items if item["item_type"] == "reading"]
+    questions = [item for item in items if item["item_type"] == "question"]
+    assert len(questions) == 1
+    assert questions[0]["payload"].get("import_context", {}).get("kind") != "reading"
