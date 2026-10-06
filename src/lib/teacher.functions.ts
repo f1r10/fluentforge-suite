@@ -670,16 +670,19 @@ export const saveStudentDashboardSettings = createServerFn({
               "exams",
               "practice",
               "today",
+              "correctness",
               "accuracy",
               "study_time",
               "streak",
               "progress",
+              "domain_progress",
               "weak_topics",
               "history",
               "favorites",
+              "completed_exams",
             ]),
           )
-          .max(11),
+          .max(14),
       })
       .parse(d),
   )
