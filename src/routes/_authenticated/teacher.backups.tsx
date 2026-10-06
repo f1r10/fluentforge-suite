@@ -11,6 +11,7 @@ import {
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +26,11 @@ import {
   deleteBackup,
   finalizeBackupUpload,
   getBackupDownload,
+  getBackupSchedule,
   getRestorePreview,
   listBackups,
   restoreApplicationBackup,
+  saveBackupSchedule,
 } from "@/lib/backup.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateTime } from "@/components/app/common";
@@ -53,6 +56,10 @@ function BackupsPage() {
   const { data: backups = [], isFetching } = useQuery({
     queryKey: ["backups"],
     queryFn: () => listBackups(),
+  });
+  const { data: backupSchedule } = useQuery({
+    queryKey: ["backup-schedule"],
+    queryFn: () => getBackupSchedule(),
   });
 
   async function createBackup() {
@@ -132,6 +139,15 @@ function BackupsPage() {
           {t("backup_restore_hint")}
         </p>
       </div>
+
+      {backupSchedule && (
+        <BackupSchedulePanel
+          schedule={backupSchedule}
+          onChanged={() =>
+            qc.invalidateQueries({ queryKey: ["backup-schedule"] })
+          }
+        />
+      )}
 
       <section className="grid gap-4 rounded-md border border-border p-5 lg:grid-cols-2">
         <div className="space-y-3">
@@ -305,6 +321,109 @@ function BackupsPage() {
         />
       )}
     </div>
+  );
+}
+
+function BackupSchedulePanel({
+  schedule,
+  onChanged,
+}: {
+  schedule: Awaited<ReturnType<typeof getBackupSchedule>>;
+  onChanged: () => Promise<unknown>;
+}) {
+  const { t } = useI18n();
+  const [enabled, setEnabled] = useState(schedule.enabled);
+  const [intervalHours, setIntervalHours] = useState(
+    schedule.interval_hours,
+  );
+  const [retentionCount, setRetentionCount] = useState(
+    schedule.retention_count,
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveBackupSchedule({
+        data: {
+          enabled,
+          interval_hours: intervalHours,
+          retention_count: retentionCount,
+        },
+      });
+      await onChanged();
+      toast.success(t("backup_schedule_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4 rounded-md border border-border p-5">
+      <div>
+        <h2 className="font-semibold">{t("scheduled_backups")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("scheduled_backups_hint")}
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={enabled}
+          onCheckedChange={(checked) => setEnabled(!!checked)}
+        />
+        {t("enable_scheduled_backups")}
+      </label>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            {t("backup_interval_hours")}
+          </label>
+          <Input
+            type="number"
+            min={1}
+            max={720}
+            value={intervalHours}
+            disabled={!enabled}
+            onChange={(event) =>
+              setIntervalHours(
+                Math.max(
+                  1,
+                  Math.min(720, Number(event.target.value) || 1),
+                ),
+              )
+            }
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            {t("scheduled_backup_retention")}
+          </label>
+          <Input
+            type="number"
+            min={1}
+            max={50}
+            value={retentionCount}
+            disabled={!enabled}
+            onChange={(event) =>
+              setRetentionCount(
+                Math.max(
+                  1,
+                  Math.min(50, Number(event.target.value) || 1),
+                ),
+              )
+            }
+          />
+        </div>
+      </div>
+
+      <Button type="button" onClick={save} disabled={busy}>
+        {t("save")}
+      </Button>
+    </section>
   );
 }
 
