@@ -798,12 +798,47 @@ def _split_prompt_and_inline_options(
     return value.strip(), []
 
 
+def _join_wrapped_option_lines(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    trailing_marker = re.compile(
+        r"(?<!\\w)[A-Ha-h]\\s*(?:[\\.)]|[\\ue000-\\uf8ff☐☑□❏])\\s*$"
+    )
+    index = 0
+    while index < len(lines):
+        line = lines[index].rstrip()
+        if (
+            trailing_marker.search(line)
+            and index + 1 < len(lines)
+            and lines[index + 1].strip()
+        ):
+            line = f"{line} {lines[index + 1].strip()}"
+            index += 1
+        out.append(line)
+        index += 1
+    return out
+
+
+def _is_section_boundary(line: str) -> bool:
+    value = line.strip().casefold()
+    if not value:
+        return False
+    return bool(
+        re.match(
+            r"^(?:exercise\\s+\\d+|section\\s+[ivx0-9]+|reading\\s+task|listening\\s+task|read\\s+the\\s+(?:passage|text|article)|read\\s+and\\s+answer|©|www\\.)",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _questions_from_text(
     text: str,
     page: int | None,
     question_crops: dict[str, dict[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
-    lines = [line.rstrip() for line in text.splitlines()]
+    lines = _join_wrapped_option_lines(
+        [line.rstrip() for line in text.splitlines()]
+    )
     questions: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     answer_key: dict[str, str] = {}
@@ -832,6 +867,7 @@ def _questions_from_text(
             current = {
                 "_number": number_only.group(1),
                 "_standalone_number": True,
+                "_nested_numbering": False,
                 "prompt": "",
                 "options": [],
             }
@@ -845,15 +881,27 @@ def _questions_from_text(
             # then include numbered statements (1..5) inside that question.
             # While such a standalone-number question has not reached A/B/C
             # options yet, numbered inline lines belong to its prompt.
+            incoming_number = int(question_match.group(1))
+            current_number = (
+                int(current["_number"]) if current is not None else None
+            )
             if (
                 current
-                and current.get("_standalone_number")
                 and not current["options"]
+                and (
+                    current.get("_standalone_number")
+                    or current.get("_nested_numbering")
+                    or (
+                        current_number is not None
+                        and incoming_number <= current_number
+                    )
+                )
             ):
                 addition = f"{question_match.group(1)}. {question_body}"
                 current["prompt"] = (
                     f"{current['prompt']}\n{addition}".strip()
                 )
+                current["_nested_numbering"] = True
                 continue
 
             if current:
@@ -862,9 +910,16 @@ def _questions_from_text(
             current = {
                 "_number": question_match.group(1),
                 "_standalone_number": False,
+                "_nested_numbering": False,
                 "prompt": prompt,
                 "options": inline_options,
             }
+            continue
+
+        if _is_section_boundary(line):
+            if current:
+                questions.append(current)
+                current = None
             continue
 
         inline_options = _options_from_line(line)
@@ -880,7 +935,14 @@ def _questions_from_text(
             continue
 
         if current and line.strip():
-            current["prompt"] = f"{current['prompt']}\n{line.strip()}".strip()
+            if current["options"]:
+                current["options"][-1]["text"] = (
+                    f"{current['options'][-1]['text']} {line.strip()}".strip()
+                )
+            else:
+                current["prompt"] = (
+                    f"{current['prompt']}\n{line.strip()}".strip()
+                )
 
     if current:
         questions.append(current)
@@ -890,6 +952,7 @@ def _questions_from_text(
         options = q["options"]
         number = q.pop("_number")
         q.pop("_standalone_number", None)
+        q.pop("_nested_numbering", None)
         answer = answer_key.get(number)
         if len(options) >= 2:
             correct_id = None
