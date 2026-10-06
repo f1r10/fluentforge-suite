@@ -35,6 +35,9 @@ function StudentVocabularyPage() {
   const [level, setLevel] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [practiceSessionId, setPracticeSessionId] = useState(() =>
+    crypto.randomUUID(),
+  );
   const [mode, setMode] =
     useState<VocabularyPracticeMode>("flashcard");
 
@@ -117,7 +120,10 @@ function StudentVocabularyPage() {
               <button
                 type="button"
                 key={row.id}
-                onClick={() => setSelectedId(row.id)}
+                onClick={() => {
+                  setPracticeSessionId(crypto.randomUUID());
+                  setSelectedId(row.id);
+                }}
                 className="flex w-full items-start gap-3 p-4 text-left hover:bg-muted/30"
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
@@ -173,7 +179,7 @@ function StudentVocabularyPage() {
             </DialogHeader>
             <VocabularyPracticeCard
               catalogId={null}
-              sessionId={crypto.randomUUID()}
+              sessionId={practiceSessionId}
               entry={selected}
               allEntries={rows}
               mode={mode}
