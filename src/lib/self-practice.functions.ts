@@ -552,7 +552,14 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
 
-    const [statsResult, topicResult, dailyResult, recentResult, finishedResult] = await Promise.all([
+    const [
+      statsResult,
+      topicResult,
+      dailyResult,
+      recentResult,
+      finishedResult,
+      monthResult,
+    ] = await Promise.all([
       admin.rpc("student_practice_stats", { p_student_id: studentId }),
       admin.rpc("student_topic_practice_stats", { p_student_id: studentId, p_limit: 12 }),
       admin.rpc("student_practice_daily_stats", { p_student_id: studentId, p_days: 14 }),
@@ -571,9 +578,26 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
         .eq("event_type", "practice_finished")
         .order("created_at", { ascending: false })
         .limit(20),
+      admin
+        .from("activity_events")
+        .select("id", { count: "exact", head: true })
+        .eq("student_id", studentId)
+        .eq("category", "practice")
+        .eq("event_type", "practice_answer")
+        .gte(
+          "created_at",
+          new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        ),
     ]);
 
-    for (const result of [statsResult, topicResult, dailyResult, recentResult, finishedResult]) {
+    for (const result of [
+      statsResult,
+      topicResult,
+      dailyResult,
+      recentResult,
+      finishedResult,
+      monthResult,
+    ]) {
       if (result.error) throw new Error(result.error.message);
     }
 
@@ -633,6 +657,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
           stats.correct_answers + stats.wrong_answers > 0
             ? stats.correct_answers / (stats.correct_answers + stats.wrong_answers)
             : null,
+        month_answers: monthResult.count ?? 0,
       },
       topics: topicResult.data ?? [],
       daily: dailyResult.data ?? [],
