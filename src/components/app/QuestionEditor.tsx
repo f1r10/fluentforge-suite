@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { topicOptions, type TopicRow } from "@/components/app/topics";
 import { QuestionLabellingEditor, type SpatialLabel } from "@/components/app/QuestionLabellingEditor";
 import { QuestionMediaAttachment } from "@/components/app/QuestionMediaAttachment";
 import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
 
 type Opt = { id: string; text: string };
 type Pair = { left: string; right: string };
@@ -32,7 +33,7 @@ const sel = "h-9 w-full rounded-md border border-input bg-background px-2 text-s
 
 function empty(type = "single_choice"): Form {
   return {
-    question_type: type, prompt: "", instructions: "", explanation: "", teacher_notes: "", level: "", learning_language: "en", status: "active",
+    question_type: type, prompt: "", instructions: "", explanation: "", teacher_notes: "", level: "", learning_language: "", status: "active",
     grading_mode: TYPE_BY_ID[type]?.defaultGrading ?? "automatic", points: 1, partial: false, negative: 0,
     case_sensitive: false, ignore_punctuation: false, ignore_diacritics: false,
     options: [{ id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }], correct: [], blanks: [""],
@@ -143,11 +144,29 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
   const { t } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const languages = useContentLanguages();
   const [f, setF] = useState<Form>(initial ?? empty());
   const [busy, setBusy] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
   const def = TYPE_BY_ID[f.question_type]!;
   const set = (patch: Partial<Form>) => setF({ ...f, ...patch });
+
+  useEffect(() => {
+    if (id || initial || f.learning_language) return;
+    setF((current) =>
+      current.learning_language
+        ? current
+        : {
+            ...current,
+            learning_language: languages.defaultLearningCode,
+          },
+    );
+  }, [
+    id,
+    initial,
+    f.learning_language,
+    languages.defaultLearningCode,
+  ]);
 
   async function save(next: boolean, force = false) {
     const err = validate(f);
@@ -324,7 +343,20 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
         <div className="space-y-2">
           <Label>{t("language")}</Label>
           <select value={f.learning_language} onChange={(e) => set({ learning_language: e.target.value })} className={sel}>
-            <option value="">—</option><option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
+            <option value="">—</option>
+            {f.learning_language &&
+              !languages.learning.some(
+                (language) => language.code === f.learning_language,
+              ) && (
+                <option value={f.learning_language}>
+                  {f.learning_language}
+                </option>
+              )}
+            {languages.learning.map((language) => (
+              <option key={language.code} value={language.code}>
+                {language.label}
+              </option>
+            ))}
           </select>
         </div>
       </div>
