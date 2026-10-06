@@ -138,3 +138,142 @@ def test_pdf_short_intro_does_not_create_false_reading(tmp_path: Path):
 
     assert not [item for item in items if item["item_type"] == "reading"]
     assert len([item for item in items if item["item_type"] == "question"]) == 1
+
+
+def test_custom_spreadsheet_mapping_uses_header_row_fields_and_section(
+    tmp_path: Path,
+):
+    source = tmp_path / "mapped.csv"
+    source.write_text(
+        "metadata,,,,,,,,,,,,,,\n"
+        "Prompt Text,Kind,Choice One,Choice Two,Correct Value,Teacher Note,Rationale,Marks,Diff,Lang,CEFR,Labels,Unit\n"
+        "Pick both,multiple_choice,Alpha,Beta,A|Beta,Choose all,Two valid choices,3.5,4,en,B2,grammar|exam,Unit 7\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/csv")
+    profile = {
+        "spreadsheet_mapping": {
+            "header_row": 2,
+            "first_data_row": 3,
+            "include_sheets": ["mapped"],
+            "sheet_as_section": False,
+            "multi_value_separator": "|",
+            "columns": {
+                "prompt": "Prompt Text",
+                "question_type": "Kind",
+                "correct_answer": "Correct Value",
+                "option_a": "Choice One",
+                "option_b": "Choice Two",
+                "instructions": "Teacher Note",
+                "explanation": "Rationale",
+                "points": "Marks",
+                "difficulty": "Diff",
+                "learning_language": "Lang",
+                "level": "CEFR",
+                "tags": "Labels",
+                "section": "Unit",
+            },
+        }
+    }
+
+    items = detect_candidates(extraction, profile=profile)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["item_type"] == "question"
+    assert item["sheet"] == "mapped"
+    assert item["payload"]["prompt"] == "Pick both"
+    assert item["payload"]["answer_key"] == {"correct": ["a", "b"]}
+    assert item["payload"]["instructions"] == "Choose all"
+    assert item["payload"]["explanation"] == "Two valid choices"
+    assert item["payload"]["scoring"]["points"] == 3.5
+    assert item["payload"]["difficulty"] == 4
+    assert item["payload"]["learning_language"] == "en"
+    assert item["payload"]["level"] == "B2"
+    assert item["payload"]["tags"] == ["grammar", "exam"]
+    assert item["payload"]["import_context"]["section"] == "Unit 7"
+    assert item["payload"]["import_mapping"]["row"] == 3
+
+
+def test_custom_spreadsheet_mapping_respects_sheet_allowlist(tmp_path: Path):
+    import openpyxl
+
+    source = tmp_path / "multi.xlsx"
+    workbook = openpyxl.Workbook()
+    keep = workbook.active
+    keep.title = "Keep"
+    keep.append(["Q", "A"])
+    keep.append(["Allowed question", "yes"])
+
+    skip = workbook.create_sheet("Skip")
+    skip.append(["Q", "A"])
+    skip.append(["Excluded question", "no"])
+    workbook.save(source)
+
+    extraction = extract_document(
+        source,
+        source.name,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    profile = {
+        "spreadsheet_mapping": {
+            "header_row": 1,
+            "first_data_row": 2,
+            "include_sheets": ["Keep"],
+            "sheet_as_section": True,
+            "multi_value_separator": "|",
+            "columns": {
+                "prompt": "Q",
+                "question_type": "",
+                "correct_answer": "A",
+                "option_a": "",
+                "option_b": "",
+                "option_c": "",
+                "option_d": "",
+                "option_e": "",
+                "option_f": "",
+                "option_g": "",
+                "option_h": "",
+                "instructions": "",
+                "explanation": "",
+                "points": "",
+                "difficulty": "",
+                "learning_language": "",
+                "level": "",
+                "tags": "",
+                "section": "",
+            },
+        }
+    }
+
+    items = detect_candidates(extraction, profile=profile)
+
+    assert len(items) == 1
+    assert items[0]["sheet"] == "Keep"
+    assert items[0]["payload"]["prompt"] == "Allowed question"
+    assert items[0]["payload"]["answer_key"] == {"blanks": [["yes"]]}
+    assert items[0]["payload"]["import_context"]["section"] == "Keep"
+
+
+def test_custom_mapping_does_not_fallback_to_raw_text_when_selected_sheet_has_no_rows(
+    tmp_path: Path,
+):
+    source = tmp_path / "questions.csv"
+    source.write_text("Q,A\nQuestion,Answer\n", encoding="utf-8")
+    extraction = extract_document(source, source.name, "text/csv")
+
+    profile = {
+        "spreadsheet_mapping": {
+            "header_row": 1,
+            "first_data_row": 2,
+            "include_sheets": ["different-sheet"],
+            "sheet_as_section": False,
+            "multi_value_separator": "|",
+            "columns": {"prompt": "Q"},
+        }
+    }
+
+    items = detect_candidates(extraction, profile=profile)
+
+    assert items == []
