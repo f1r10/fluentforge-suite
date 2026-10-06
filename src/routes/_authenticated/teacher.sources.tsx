@@ -15,6 +15,8 @@ import {
   getDocumentImport,
   getSourcePreviewUrl,
   listDocumentImports,
+  listImportProfiles,
+  saveImportProfile,
   startDocumentImport,
   syncDocumentImport,
   updateImportItem,
@@ -35,6 +37,8 @@ function SourcesPage() {
   const qc = useQueryClient();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [keepOriginal, setKeepOriginal] = useState(false);
+  const [profileId, setProfileId] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
 
@@ -42,6 +46,11 @@ function SourcesPage() {
     queryKey: ["document-imports"],
     queryFn: () => listDocumentImports(),
     refetchInterval: 5_000,
+  });
+
+  const { data: profiles = [] } = useQuery({
+    queryKey: ["document-import-profiles"],
+    queryFn: () => listImportProfiles(),
   });
 
   const activeIds = useMemo(
@@ -105,7 +114,7 @@ function SourcesPage() {
         data: {
           sourceFileId: finalized.sourceFileId,
           mode: "review",
-          profileId: null,
+          profileId: profileId || null,
         },
       });
 
@@ -131,6 +140,21 @@ function SourcesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="h-9 max-w-56 rounded-md border border-input bg-background px-2 text-sm"
+            value={profileId}
+            onChange={(event) => setProfileId(event.target.value)}
+          >
+            <option value="">{t("no_import_profile")}</option>
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+          <Button type="button" variant="outline" onClick={() => setProfileOpen(true)}>
+            {t("new_import_profile")}
+          </Button>
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={keepOriginal}
@@ -228,7 +252,134 @@ function SourcesPage() {
       </div>
 
       {selected && <ImportReviewDialog job={selected} onClose={() => setSelected(null)} />}
+
+      {profileOpen && (
+        <ImportProfileDialog
+          onClose={() => setProfileOpen(false)}
+          onSaved={async (id) => {
+            setProfileId(id);
+            await qc.invalidateQueries({ queryKey: ["document-import-profiles"] });
+            setProfileOpen(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ImportProfileDialog({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (id: string) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState("");
+  const [expectedContent, setExpectedContent] = useState<
+    "auto" | "questions" | "vocabulary" | "mixed"
+  >("auto");
+  const [language, setLanguage] = useState("");
+  const [level, setLevel] = useState("");
+  const [status, setStatus] = useState<"draft" | "active">("draft");
+  const [confidence, setConfidence] = useState(0.95);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const result = await saveImportProfile({
+        data: {
+          name: name.trim(),
+          config: {
+            expected_content: expectedContent,
+            learning_language: language || null,
+            level: level || null,
+            status,
+            auto_approve_confidence: confidence,
+          },
+        },
+      });
+      await onSaved(result.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>{t("new_import_profile")}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <input
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={t("profile_name")}
+          />
+          <select
+            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={expectedContent}
+            onChange={(event) => setExpectedContent(event.target.value as typeof expectedContent)}
+          >
+            <option value="auto">{t("auto")}</option>
+            <option value="questions">{t("questions")}</option>
+            <option value="vocabulary">{t("vocabulary")}</option>
+            <option value="mixed">{t("mixed")}</option>
+          </select>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <select
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+            >
+              <option value="">{t("language")}: —</option>
+              <option value="en">English</option>
+              <option value="az">Azərbaycanca</option>
+              <option value="ru">Русский</option>
+              <option value="tr">Türkçe</option>
+            </select>
+            <select
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              value={level}
+              onChange={(event) => setLevel(event.target.value)}
+            >
+              <option value="">{t("level")}: —</option>
+              {["A1","A2","B1","B2","C1","C2"].map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+          <select
+            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={status}
+            onChange={(event) => setStatus(event.target.value as typeof status)}
+          >
+            <option value="draft">{t("draft")}</option>
+            <option value="active">{t("active")}</option>
+          </select>
+          <label className="block text-sm">
+            <span className="text-muted-foreground">{t("auto_approve_confidence")}: {Math.round(confidence * 100)}%</span>
+            <input
+              type="range"
+              min="0.5"
+              max="1"
+              step="0.01"
+              value={confidence}
+              onChange={(event) => setConfidence(Number(event.target.value))}
+              className="mt-2 w-full"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose} disabled={busy}>{t("cancel")}</Button>
+            <Button onClick={save} disabled={busy || !name.trim()}>{t("save")}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
