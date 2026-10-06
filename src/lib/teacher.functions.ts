@@ -622,7 +622,7 @@ export const saveDashboardSettings = createServerFn({ method: "POST" })
               "recent_catalogs",
             ]),
           )
-          .max(10),
+          .max(11),
       })
       .parse(d),
   )
@@ -672,6 +672,7 @@ export const saveStudentDashboardSettings = createServerFn({
               "today",
               "accuracy",
               "study_time",
+              "streak",
               "progress",
               "weak_topics",
               "history",
