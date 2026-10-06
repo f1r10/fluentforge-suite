@@ -10,6 +10,13 @@ import {
   type Scoring,
 } from "./grading";
 import { TYPE_BY_ID } from "./question-types";
+import {
+  acceptedVocabularyAnswers,
+  gradeVocabularyResponse,
+  initialVocabularyState,
+  nextVocabularyState,
+  type VocabularyPracticeMode,
+} from "./vocabulary-practice";
 
 type Admin = Awaited<ReturnType<typeof import("./security.server")["adminClient"]>>;
 
@@ -50,6 +57,24 @@ const responseSchema = z
   .strict();
 
 export type PracticeResponse = z.infer<typeof responseSchema>;
+
+const vocabularyPracticeModeSchema = z.enum([
+  "flashcard",
+  "translation_recall",
+  "reverse_recall",
+  "multiple_choice",
+]);
+
+const vocabularyPracticeInputSchema = z.object({
+  catalogId: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  entryId: z.string().uuid(),
+  mode: vocabularyPracticeModeSchema,
+  response: z.string().max(5_000).default(""),
+  targetLanguage: z.string().max(10).nullable().default(null),
+  rating: z.enum(["known", "learning"]).nullable().default(null),
+  duration_ms: z.number().int().min(0).max(86_400_000).default(0),
+});
 
 type LoadedQuestion = {
   id: string;
@@ -271,6 +296,19 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       if (result.error) throw new Error(result.error.message);
     }
 
+    const vocabularyStateResult = vocabularyIds.length
+      ? await admin
+          .from("student_vocabulary_state")
+          .select(
+            "entry_id,state,correct_count,incorrect_count,correct_streak,last_result,last_mode,last_practiced_at",
+          )
+          .eq("student_id", studentId)
+          .in("entry_id", vocabularyIds)
+      : { data: [], error: null };
+    if (vocabularyStateResult.error) {
+      throw new Error(vocabularyStateResult.error.message);
+    }
+
     const readingSetResult = readingIds.length
       ? await admin
           .from("reading_question_sets")
@@ -368,6 +406,9 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       ]),
     );
     const vocabulary = new Map((vocabularyResult.data ?? []).map((entry) => [entry.id, entry]));
+    const vocabularyState = new Map(
+      (vocabularyStateResult.data ?? []).map((row) => [row.entry_id, row]),
+    );
     const readings = new Map((readingsResult.data ?? []).map((reading) => [reading.id, reading]));
     const listenings = new Map((listeningsResult.data ?? []).map((listening) => [listening.id, listening]));
     const resolvedMedia = await Promise.all(
@@ -460,6 +501,15 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
               }>)
                 .sort((a, b) => a.sort_order - b.sort_order)
                 .map((x) => ({ sentence: x.sentence, translation: x.translation })),
+              learner_state: vocabularyState.get(entry.id) ?? {
+                state: "new",
+                correct_count: 0,
+                incorrect_count: 0,
+                correct_streak: 0,
+                last_result: null,
+                last_mode: null,
+                last_practiced_at: null,
+              },
             },
           },
         ];
@@ -746,6 +796,167 @@ async function gradeAndLog(
 
   return results.map(({ response, duration_ms, ...result }) => result);
 }
+
+export const submitVocabularyPracticeAnswer = createServerFn({
+  method: "POST",
+})
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => vocabularyPracticeInputSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    await accessibleCatalog(admin, studentId, data.catalogId);
+
+    const { data: catalogItem, error: itemError } = await admin
+      .from("catalog_items")
+      .select("id")
+      .eq("catalog_id", data.catalogId)
+      .eq("entity_type", "vocabulary")
+      .eq("entity_id", data.entryId)
+      .maybeSingle();
+    if (itemError) throw new Error(itemError.message);
+    if (!catalogItem) {
+      throw new Error("This vocabulary entry is not available in the catalog.");
+    }
+
+    const { data: entry, error: entryError } = await admin
+      .from("vocabulary_entries")
+      .select("id,word,vocabulary_translations(language,value)")
+      .eq("id", data.entryId)
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (entryError) throw new Error(entryError.message);
+    if (!entry) throw new Error("Vocabulary entry is not available.");
+
+    const translations = (entry.vocabulary_translations ?? []) as Array<{
+      language: string;
+      value: string;
+    }>;
+    const target =
+      (data.targetLanguage
+        ? translations.find(
+            (translation) =>
+              translation.language.toLowerCase() ===
+              data.targetLanguage!.toLowerCase(),
+          )
+        : null) ??
+      translations[0] ??
+      null;
+
+    let correct: boolean | null = null;
+    let expected: string[] = [];
+    let effectiveTargetLanguage = target?.language ?? null;
+
+    if (data.mode === "flashcard") {
+      if (!data.rating) {
+        throw new Error("Choose whether this word is known or still learning.");
+      }
+    } else if (data.mode === "reverse_recall") {
+      if (!target) {
+        throw new Error("This vocabulary entry has no translation for reverse recall.");
+      }
+      expected = [entry.word];
+      correct = gradeVocabularyResponse(data.response, expected).correct;
+    } else {
+      if (!target) {
+        throw new Error("This vocabulary entry has no translation to practice.");
+      }
+      expected = acceptedVocabularyAnswers([target.value]);
+      correct = gradeVocabularyResponse(data.response, expected).correct;
+    }
+
+    const { data: existing, error: stateError } = await admin
+      .from("student_vocabulary_state")
+      .select("state,correct_count,incorrect_count,correct_streak")
+      .eq("student_id", studentId)
+      .eq("entry_id", entry.id)
+      .maybeSingle();
+    if (stateError) throw new Error(stateError.message);
+
+    const current = existing
+      ? {
+          state: existing.state as "new" | "learning" | "known",
+          correct_count: existing.correct_count,
+          incorrect_count: existing.incorrect_count,
+          correct_streak: existing.correct_streak,
+        }
+      : initialVocabularyState();
+
+    const next =
+      data.mode === "flashcard"
+        ? nextVocabularyState(current, {
+            kind: "rating",
+            rating: data.rating!,
+          })
+        : nextVocabularyState(current, {
+            kind: "answer",
+            correct: correct === true,
+          });
+
+    const practicedAt = new Date().toISOString();
+    const { error: upsertError } = await admin
+      .from("student_vocabulary_state")
+      .upsert(
+        {
+          student_id: studentId,
+          entry_id: entry.id,
+          state: next.state,
+          correct_count: next.correct_count,
+          incorrect_count: next.incorrect_count,
+          correct_streak: next.correct_streak,
+          last_result: correct,
+          last_mode: data.mode,
+          last_practiced_at: practicedAt,
+          updated_at: practicedAt,
+        },
+        { onConflict: "student_id,entry_id" },
+      );
+    if (upsertError) throw new Error(upsertError.message);
+
+    const { error: activityError } = await admin.from("activity_events").insert({
+      student_id: studentId,
+      category: "practice",
+      event_type:
+        data.mode === "flashcard"
+          ? "vocabulary_rating"
+          : "vocabulary_answer",
+      entity_type: "vocabulary",
+      entity_id: entry.id,
+      is_correct: correct,
+      response: {
+        value: data.response || null,
+        rating: data.rating,
+        target_language: effectiveTargetLanguage,
+      } as never,
+      duration_ms: data.duration_ms,
+      details: {
+        catalog_id: data.catalogId,
+        session_id: data.sessionId,
+        mode: data.mode satisfies VocabularyPracticeMode,
+        target_language: effectiveTargetLanguage,
+        expected,
+        learner_state: next.state,
+        correct_streak: next.correct_streak,
+      } as never,
+    });
+    if (activityError) throw new Error(activityError.message);
+
+    return {
+      entryId: entry.id,
+      mode: data.mode,
+      correct,
+      expected,
+      targetLanguage: effectiveTargetLanguage,
+      learner_state: {
+        ...next,
+        last_result: correct,
+        last_mode: data.mode,
+        last_practiced_at: practicedAt,
+      },
+    };
+  });
 
 export const submitPracticeAnswer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
