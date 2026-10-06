@@ -30,6 +30,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Check migration runner syntax
+        run: node --check scripts/migrate.mjs
+
 
   processing-service:
     runs-on: ubuntu-latest
@@ -52,3 +55,57 @@ jobs:
 
       - name: Test processing service
         run: pytest -q
+
+
+  production-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production Compose
+        run: |
+          cp .env.production.example .env.production
+          docker compose \
+            --env-file .env.production \
+            -f docker-compose.production.yml \
+            config >/tmp/fluentforge-compose.yml
+
+      - name: Build production web image
+        run: |
+          docker build \
+            --target runtime \
+            --build-arg VITE_SUPABASE_URL=https://example.supabase.co \
+            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci \
+            -t fluentforge-web-ci \
+            .
+
+      - name: Smoke test production web image
+        run: |
+          docker run -d --rm \
+            --name fluentforge-web-ci \
+            -p 127.0.0.1:3300:3000 \
+            -e SUPABASE_URL=https://example.supabase.co \
+            -e SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci \
+            -e SUPABASE_SERVICE_ROLE_KEY=sb_secret_ci \
+            -e SETUP_TOKEN=ci-setup-token-not-used \
+            -e PROCESSING_SERVICE_URL=http://127.0.0.1:8001 \
+            -e PROCESSING_SHARED_SECRET=ci-processing-secret \
+            fluentforge-web-ci
+
+          ok=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3300/api/health >/tmp/health.json; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            docker logs fluentforge-web-ci || true
+            exit 1
+          fi
+
+          cat /tmp/health.json
+          docker stop fluentforge-web-ci
