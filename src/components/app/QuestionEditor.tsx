@@ -103,7 +103,7 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
 
   async function save(next: boolean, force = false) {
     const err = validate(f);
-    if (err) return toast.error(err);
+    if (err) { toast.error(err); return; }
     setBusy(true);
     try {
       const r = await saveQuestion({ data: { ...toInput(f, id), force } });
