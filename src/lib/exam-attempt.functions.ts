@@ -1025,6 +1025,21 @@ export const submitExamAttempt = createServerFn({ method: "POST" })
     };
   });
 
+export const autoSubmitExamAttempt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ attemptId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    const result = await submitAttemptInternal(admin, studentId, data.attemptId, true);
+    return {
+      status: result.status,
+      submitted_at: result.submitted_at,
+      result_released: result.result_released,
+    };
+  });
+
 export const getExamResult = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ attemptId: z.string().uuid() }).parse(d))
