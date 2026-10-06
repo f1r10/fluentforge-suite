@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, BookOpen, ChevronRight, Dumbbell, LogOut, Target } from "lucide-react";
+import { BarChart3, BookOpen, ChevronRight, ClipboardList, Dumbbell, LogOut, Target } from "lucide-react";
 import { heartbeat, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
+import { listStudentExams } from "@/lib/exam-attempt.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelect } from "@/components/app/common";
 import { useI18n, type Lang } from "@/lib/i18n";
@@ -26,6 +27,10 @@ function StudentHome() {
   const { data: progress } = useQuery({
     queryKey: ["practice-progress"],
     queryFn: () => getMyPracticeProgress(),
+  });
+  const { data: exams = [] } = useQuery({
+    queryKey: ["student-exams"],
+    queryFn: () => listStudentExams(),
   });
 
   useEffect(() => {
@@ -97,6 +102,30 @@ function StudentHome() {
             ))}
           </div>
         )}
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
+          <h2 className="font-semibold">{t("exams")}</h2>
+          <span className="text-xs text-muted-foreground">{exams.length}</span>
+        </div>
+        <Link
+          to="/student/exams"
+          className="flex items-center gap-3 rounded-md border border-border p-4 hover:bg-muted/40"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted">
+            <ClipboardList className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{t("my_exams")}</div>
+            <div className="text-xs text-muted-foreground">
+              {exams.some((exam) => exam.availability === "available")
+                ? t("exam_available_now")
+                : t("student_exams_hint")}
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </Link>
       </section>
 
       <section className="mb-8">
