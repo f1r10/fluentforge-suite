@@ -342,16 +342,34 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       : { data: [], error: null };
     if (mediaResult.error) throw new Error(mediaResult.error.message);
 
+    const { hydrateQuestionMedia, resolveMediaUrl } = await import("./media.server");
+    const [directQuestionRows, readingQuestionRows, listeningQuestionRows] = await Promise.all([
+      hydrateQuestionMedia(
+        admin,
+        (directQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        60 * 60,
+      ),
+      hydrateQuestionMedia(
+        admin,
+        (readingQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        60 * 60,
+      ),
+      hydrateQuestionMedia(
+        admin,
+        (listeningQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        60 * 60,
+      ),
+    ]);
+
     const directQuestions = new Map(
-      (directQuestionsResult.data ?? []).map((question) => [
+      directQuestionRows.map((question) => [
         question.id,
-        publicQuestion(question as LoadedQuestion),
+        publicQuestion(question),
       ]),
     );
     const vocabulary = new Map((vocabularyResult.data ?? []).map((entry) => [entry.id, entry]));
     const readings = new Map((readingsResult.data ?? []).map((reading) => [reading.id, reading]));
     const listenings = new Map((listeningsResult.data ?? []).map((listening) => [listening.id, listening]));
-    const { resolveMediaUrl } = await import("./media.server");
     const resolvedMedia = await Promise.all(
       (mediaResult.data ?? []).map(async (asset) => ({
         ...asset,
@@ -361,18 +379,18 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const media = new Map(resolvedMedia.map((asset) => [asset.id, asset]));
 
     const readingQuestionsBySet = new Map<string, ReturnType<typeof publicQuestion>[]>();
-    for (const question of readingQuestionsResult.data ?? []) {
+    for (const question of readingQuestionRows) {
       if (!question.reading_question_set_id) continue;
       const list = readingQuestionsBySet.get(question.reading_question_set_id) ?? [];
-      list.push(publicQuestion(question as LoadedQuestion));
+      list.push(publicQuestion(question));
       readingQuestionsBySet.set(question.reading_question_set_id, list);
     }
 
     const listeningQuestionsBySet = new Map<string, ReturnType<typeof publicQuestion>[]>();
-    for (const question of listeningQuestionsResult.data ?? []) {
+    for (const question of listeningQuestionRows) {
       if (!question.listening_question_set_id) continue;
       const list = listeningQuestionsBySet.get(question.listening_question_set_id) ?? [];
-      list.push(publicQuestion(question as LoadedQuestion));
+      list.push(publicQuestion(question));
       listeningQuestionsBySet.set(question.listening_question_set_id, list);
     }
 
