@@ -14,6 +14,7 @@ RUN apt-get update \
        tesseract-ocr-tur \
        libreoffice-core \
        libreoffice-writer \
+       ffmpeg \
        libgl1 \
        libglib2.0-0 \
        tini \
