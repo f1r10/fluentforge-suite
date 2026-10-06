@@ -5,5 +5,7 @@
 - [x] Student access-key login, sessions
 - [x] Teacher dashboard panel: students, catalogs (tasks), exams overview
 - [x] Students & groups management
-- Later phases 3–12 per plan
+- [x] Question Bank: list/filters/multi-select bulk actions, editor for all types, versions, duplicates, topics tree
+- [ ] Question Bank: bulk paste, spreadsheet import, image/media on questions
+- Later phases 4–12 per plan
 - [ ] Branding: logo/favicon file upload (currently URL fields)

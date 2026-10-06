@@ -1,15 +1,7 @@
-import { createMiddleware, createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
+import { requireTeacher } from "./teacher-middleware";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-const requireTeacher = createMiddleware({ type: "function" })
-  .middleware([requireSupabaseAuth])
-  .server(async ({ next, context }) => {
-    const { data } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId).eq("role", "teacher").maybeSingle();
-    if (!data) throw new Error("Forbidden");
-    return next();
-  });
-
 
 export const getWhoAmI = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
