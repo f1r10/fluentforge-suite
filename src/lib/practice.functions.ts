@@ -847,7 +847,7 @@ export const submitVocabularyPracticeAnswer = createServerFn({
 
     let correct: boolean | null = null;
     let expected: string[] = [];
-    let effectiveTargetLanguage = target?.language ?? null;
+    const effectiveTargetLanguage = target?.language ?? null;
 
     if (data.mode === "flashcard") {
       if (!data.rating) {
