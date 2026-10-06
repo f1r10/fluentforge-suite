@@ -243,6 +243,50 @@ AI_LOCAL_API_KEY=
 
 Gemini remains optional and is active only when `AI_PROVIDER=gemini` and its credentials are configured.
 
+# Scheduled backups
+
+Both supplied production Compose stacks include an internal `scheduler` service.
+
+The scheduler calls:
+
+```text
+POST /api/scheduled-backup
+```
+
+once per hour over the private Docker network and authenticates with:
+
+```env
+SCHEDULED_JOB_SECRET=
+```
+
+The teacher controls whether scheduled backups are enabled, the interval and retention count from Backup & Restore settings. The database uses a concurrency-safe claim, so overlapping scheduler calls cannot create duplicate scheduled backups.
+
+Verify the scheduler after deployment:
+
+```bash
+docker compose \
+  --env-file .env.postgres \
+  -f docker-compose.postgres.yml \
+  logs --tail=100 scheduler
+```
+
+For the Supabase-compatible stack, use the same command with `.env.production` and `docker-compose.production.yml`.
+
+Do not expose `/api/scheduled-backup` as an unauthenticated public cron endpoint. Keep `SCHEDULED_JOB_SECRET` independent from every other application secret.
+
+# YouTube media import
+
+Media Library supports:
+
+- authorized YouTube download/import into private FluentForge storage; and
+- reference/embed-only fallback.
+
+The download flow requires teacher confirmation that they own the media or have the necessary permission/rights. The worker accepts only single-video YouTube URLs and rejects playlists/non-YouTube hosts.
+
+The processing image includes `yt-dlp`, FFmpeg and a JavaScript runtime required by modern YouTube extraction. If YouTube requires account cookies for a particular video, provide them to the processing container only through a protected server-side file and never expose them to the browser.
+
+Because upstream YouTube behavior changes independently of FluentForge, treat YouTube import as an operational integration that may require periodic `yt-dlp` updates.
+
 # Backup policy
 
 Use both layers:
@@ -251,6 +295,8 @@ Use both layers:
 2. Infrastructure-level PostgreSQL and storage-volume/object-storage backups for disaster recovery and large installations.
 
 The portable `.ffbackup` format includes relational application data and managed storage objects, including uploaded branding assets, but intentionally has in-process safety limits.
+
+Before a major upgrade, verify at least one recent scheduled/manual backup and test restore on a separate empty installation.
 
 # Security baseline
 
