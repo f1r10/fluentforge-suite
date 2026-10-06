@@ -243,7 +243,9 @@ function BackupsPage() {
                     <td className="px-3 py-2 font-medium">
                       {row.kind === "uploaded"
                         ? t("uploaded_backup")
-                        : t("manual_backup")}
+                        : row.kind === "scheduled"
+                          ? t("scheduled_backup")
+                          : t("manual_backup")}
                     </td>
                     <td className="px-3 py-2">
                       {row.status === "failed" ? (
