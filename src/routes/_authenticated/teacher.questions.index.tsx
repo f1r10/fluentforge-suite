@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { FileSpreadsheet, Plus } from "lucide-react";
+import { FileSpreadsheet, FileUp, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -66,6 +66,12 @@ function QuestionBank() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">{t("questions_bank")} {data && <span className="text-base font-normal text-muted-foreground">({data.total})</span>}</h1>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <a href="/teacher/sources?target=questions">
+              <FileUp className="h-4 w-4" />
+              {t("import_document")}
+            </a>
+          </Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}>
             <FileSpreadsheet className="h-4 w-4" />
             {t("import_questions")}
