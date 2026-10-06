@@ -325,7 +325,7 @@ function ReviewWorkspace({
   onChanged,
 }: {
   data: ImportDetail;
-  preview: { url: string; mimeType: string | null; filename: string } | null;
+  preview: { url: string | null; mimeType: string | null; filename: string } | null;
   busy: boolean;
   onRefresh: () => Promise<void>;
   onApproveHigh: () => Promise<void>;
@@ -499,10 +499,11 @@ function ImportItemCard({
 function SourcePreview({
   preview,
 }: {
-  preview: { url: string; mimeType: string | null; filename: string } | null;
+  preview: { url: string | null; mimeType: string | null; filename: string } | null;
 }) {
   const { t } = useI18n();
   if (!preview) return <div className="p-8 text-center text-sm text-muted-foreground">…</div>;
+  if (!preview.url) return <div className="p-8 text-center text-sm text-muted-foreground">{t("source_preview_not_available")}</div>;
 
   if (preview.mimeType === "application/pdf" || preview.filename.toLowerCase().endsWith(".pdf")) {
     return <iframe src={preview.url} title={preview.filename} className="h-full min-h-[60vh] w-full rounded bg-background" />;
