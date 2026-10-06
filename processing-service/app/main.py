@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from .models import DocumentImportRequest, JobCreated, JobView
+from .models import DocumentImportRequest, JobCreated, JobView, TranscriptionRequest
 from .store import create_job, get_job, init_db
 from .worker import start_worker, stop_worker
 
@@ -49,6 +49,18 @@ def submit_document_import(request: DocumentImportRequest):
     return JobCreated(job_id=job_id, status="queued")
 
 
+
+
+
+@app.post(
+    "/v1/jobs/transcription",
+    response_model=JobCreated,
+    dependencies=[Depends(verify_key)],
+)
+def submit_transcription(request: TranscriptionRequest):
+    job_id = create_job("transcription", request.model_dump(mode="json"))
+    return JobCreated(job_id=job_id, status="queued")
+
 @app.get(
     "/v1/jobs/{job_id}",
     response_model=JobView,
@@ -68,4 +80,5 @@ def job_status(job_id: str):
         error=job.get("error"),
         stats=result.get("stats") or {},
         items=result.get("items") or [],
+        result=result,
     )
