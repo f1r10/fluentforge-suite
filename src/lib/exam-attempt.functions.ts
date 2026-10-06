@@ -673,6 +673,9 @@ export const listStudentExams = createServerFn({ method: "GET" })
         duration_minutes: exam.duration_minutes,
         max_attempts: settings.max_attempts,
         attempts_used: attempts.length,
+        completed_attempts: attempts.filter(
+          (attempt) => attempt.status !== "in_progress",
+        ).length,
         active_attempt: attempts.find((attempt) => attempt.status === "in_progress") ?? null,
         latest_attempt: attempts[0] ?? null,
       };
