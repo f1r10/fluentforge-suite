@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { saveQuestion, type QuestionInput } from "@/lib/questions.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions, type TopicRow } from "@/components/app/topics";
+import { QuestionLabellingEditor, type SpatialLabel } from "@/components/app/QuestionLabellingEditor";
 import { useI18n } from "@/lib/i18n";
 
 type Opt = { id: string; text: string };
@@ -21,6 +22,7 @@ type Form = {
   grading_mode: "automatic" | "manual" | "ai_assisted"; points: number; partial: boolean; negative: number;
   case_sensitive: boolean; ignore_punctuation: boolean; ignore_diacritics: boolean;
   options: Opt[]; correct: string[]; blanks: string[]; pairs: Pair[]; order: string[]; model_answer: string;
+  media_id: string; media_label: string; labels: SpatialLabel[];
   topicIds: string[]; tags: string;
 };
 
@@ -33,7 +35,8 @@ function empty(type = "single_choice"): Form {
     grading_mode: TYPE_BY_ID[type]?.defaultGrading ?? "automatic", points: 1, partial: false, negative: 0,
     case_sensitive: false, ignore_punctuation: false, ignore_diacritics: false,
     options: [{ id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }], correct: [], blanks: [""],
-    pairs: [{ left: "", right: "" }, { left: "", right: "" }], order: ["", "", ""], model_answer: "", topicIds: [], tags: "",
+    pairs: [{ left: "", right: "" }, { left: "", right: "" }], order: ["", "", ""], model_answer: "",
+    media_id: "", media_label: "", labels: [], topicIds: [], tags: "",
   };
 }
 
@@ -51,6 +54,9 @@ export function fromQuestion(q: QuestionInput & { topicIds?: string[]; tags?: st
     options: (p["options"] as Opt[]) ?? f.options, correct: (k["correct"] as string[]) ?? [],
     blanks: ((k["blanks"] as string[][]) ?? [[]]).map((b) => b.join(" | ")),
     pairs: (k["pairs"] as Pair[]) ?? f.pairs, order: (k["order"] as string[]) ?? f.order, model_answer: String(k["model_answer"] ?? ""),
+    media_id: typeof p["media_id"] === "string" ? p["media_id"] : "",
+    media_label: "",
+    labels: Array.isArray(p["labels"]) ? (p["labels"] as SpatialLabel[]) : [],
     topicIds: q.topicIds ?? [], tags: (q.tags ?? []).join(", "),
   };
 }
@@ -69,7 +75,23 @@ function toInput(f: Form, id?: string): QuestionInput {
     case "fixed_choice": payload = { options: def.fixedOptions }; answer_key = { correct: f.correct }; break;
     case "text": answer_key = { blanks: f.blanks.map((b) => b.split("|").map((x) => x.trim()).filter(Boolean)) }; payload = { blank_count: f.blanks.length }; break;
     case "open": answer_key = f.model_answer ? { model_answer: f.model_answer } : {}; break;
-    case "matching": answer_key = { pairs: f.pairs.filter((p) => p.left.trim() || p.right.trim()) }; break;
+    case "matching":
+      if (isSpatialLabelling(f.question_type)) {
+        payload = {
+          media_id: f.media_id || null,
+          labels: f.labels,
+          allow_reuse: false,
+        };
+        answer_key = {
+          pairs: f.labels.map((label) => ({
+            left: label.id,
+            right: f.pairs.find((pair) => pair.left === label.id)?.right.trim() ?? "",
+          })),
+        };
+      } else {
+        answer_key = { pairs: f.pairs.filter((p) => p.left.trim() || p.right.trim()) };
+      }
+      break;
     case "ordering": answer_key = { order: f.order.filter((x) => x.trim()) }; break;
   }
   return {
@@ -88,6 +110,13 @@ function validate(f: Form): string | null {
   if ((def.editor === "choice" || def.editor === "fixed_choice") && f.correct.length === 0) return "Mark the correct answer.";
   if (def.editor === "choice" && !def.multiple && f.correct.length > 1) return "Only one correct answer is allowed.";
   if (def.editor === "text" && f.blanks.every((b) => !b.trim())) return "Enter at least one accepted answer.";
+  if (isSpatialLabelling(f.question_type)) {
+    if (!f.media_id) return "Choose an image for this labelling question.";
+    if (!f.labels.length) return "Add at least one label position on the image.";
+    if (f.labels.some((label) => !(f.pairs.find((pair) => pair.left === label.id)?.right ?? "").trim())) {
+      return "Every label position needs a correct answer.";
+    }
+  }
   return null;
 }
 
@@ -206,7 +235,23 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
             <div className="space-y-2 sm:col-span-2"><Label>Model answer (optional)</Label><Textarea value={f.model_answer} onChange={(e) => set({ model_answer: e.target.value })} /></div>
           </div>
         )}
-        {def.editor === "matching" && (
+        {def.editor === "matching" && isSpatialLabelling(f.question_type) && (
+          <QuestionLabellingEditor
+            mediaId={f.media_id}
+            mediaLabel={f.media_label}
+            labels={f.labels}
+            pairs={f.pairs}
+            onChange={(value) =>
+              set({
+                media_id: value.mediaId,
+                media_label: value.mediaLabel,
+                labels: value.labels,
+                pairs: value.pairs,
+              })
+            }
+          />
+        )}
+        {def.editor === "matching" && !isSpatialLabelling(f.question_type) && (
           <>
             <Label>{t("pairs")}</Label>
             {f.pairs.map((p, i) => (
@@ -280,6 +325,10 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       </div>
     </form>
   );
+}
+
+function isSpatialLabelling(type: string) {
+  return ["image_labelling", "diagram_labelling", "map_labelling"].includes(type);
 }
 
 function TopicPicker({ topics, value, onChange }: { topics: TopicRow[]; value: string[]; onChange: (v: string[]) => void }) {
