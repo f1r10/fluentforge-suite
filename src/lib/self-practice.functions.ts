@@ -81,6 +81,26 @@ async function getStudentId(
   return String(data);
 }
 
+async function assignedCatalogIds(admin: Admin, studentId: string) {
+  const { data: memberships, error: membershipsError } = await admin
+    .from("group_memberships")
+    .select("group_id")
+    .eq("student_id", studentId);
+  if (membershipsError) throw new Error(membershipsError.message);
+
+  const groupIds = (memberships ?? []).map((row) => row.group_id);
+  const [direct, grouped] = await Promise.all([
+    admin.from("catalog_assignments").select("catalog_id").eq("student_id", studentId),
+    groupIds.length
+      ? admin.from("catalog_assignments").select("catalog_id").in("group_id", groupIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (direct.error) throw new Error(direct.error.message);
+  if (grouped.error) throw new Error(grouped.error.message);
+
+  return [...new Set([...(direct.data ?? []), ...(grouped.data ?? [])].map((row) => row.catalog_id))];
+}
+
 function shuffle<T>(input: T[]) {
   const out = [...input];
   for (let i = out.length - 1; i > 0; i--) {
@@ -293,15 +313,21 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     const admin = await adminClient();
     await getStudentId(context.supabase);
 
+    const studentId = await getStudentId(context.supabase);
+    const assignedIds = await assignedCatalogIds(admin, studentId);
+
     const [topicsResult, catalogsResult, sourcesResult, languageResult] = await Promise.all([
       admin.from("topics").select("id,name,parent_id,sort_order").order("sort_order").order("name"),
-      admin
-        .from("catalogs")
-        .select("id,name,parent_id")
-        .eq("status", "active")
-        .is("deleted_at", null)
-        .order("sort_order")
-        .order("name"),
+      assignedIds.length
+        ? admin
+            .from("catalogs")
+            .select("id,name,parent_id")
+            .in("id", assignedIds)
+            .eq("status", "active")
+            .is("deleted_at", null)
+            .order("sort_order")
+            .order("name")
+        : Promise.resolve({ data: [], error: null }),
       admin
         .from("source_files")
         .select("id,original_filename,created_at")
@@ -348,6 +374,10 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
     const studentId = await getStudentId(context.supabase);
 
     if (data.catalogId) {
+      const assignedIds = await assignedCatalogIds(admin, studentId);
+      if (!assignedIds.includes(data.catalogId)) {
+        throw new Error("This catalog is not assigned to you.");
+      }
       const { data: catalog, error } = await admin
         .from("catalogs")
         .select("id")
@@ -484,7 +514,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
 
-    const [statsResult, topicResult, dailyResult, recentResult] = await Promise.all([
+    const [statsResult, topicResult, dailyResult, recentResult, finishedResult] = await Promise.all([
       admin.rpc("student_practice_stats", { p_student_id: studentId }),
       admin.rpc("student_topic_practice_stats", { p_student_id: studentId, p_limit: 12 }),
       admin.rpc("student_practice_daily_stats", { p_student_id: studentId, p_days: 14 }),
@@ -495,9 +525,17 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
         .eq("category", "practice")
         .order("created_at", { ascending: false })
         .limit(30),
+      admin
+        .from("activity_events")
+        .select("id,entity_type,entity_id,details,created_at")
+        .eq("student_id", studentId)
+        .eq("category", "practice")
+        .eq("event_type", "practice_finished")
+        .order("created_at", { ascending: false })
+        .limit(20),
     ]);
 
-    for (const result of [statsResult, topicResult, dailyResult, recentResult]) {
+    for (const result of [statsResult, topicResult, dailyResult, recentResult, finishedResult]) {
       if (result.error) throw new Error(result.error.message);
     }
 
@@ -513,6 +551,43 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       current_mistakes: 0,
     };
 
+    const finishedRows = finishedResult.data ?? [];
+    const catalogIds = [
+      ...new Set(
+        finishedRows
+          .map((row) => {
+            const details = row.details as Record<string, unknown>;
+            return typeof details["catalog_id"] === "string" ? details["catalog_id"] : null;
+          })
+          .filter((value): value is string => !!value),
+      ),
+    ];
+    const { data: catalogRows, error: catalogError } = catalogIds.length
+      ? await admin.from("catalogs").select("id,name").in("id", catalogIds)
+      : { data: [], error: null };
+    if (catalogError) throw new Error(catalogError.message);
+    const catalogNames = new Map((catalogRows ?? []).map((row) => [row.id, row.name]));
+
+    const history = finishedRows.map((row) => {
+      const details = row.details as Record<string, unknown>;
+      const catalogId = typeof details["catalog_id"] === "string" ? details["catalog_id"] : null;
+      const practiceKind = details["practice_kind"] === "self" || row.entity_type === "self_practice"
+        ? "self"
+        : "catalog";
+      return {
+        id: row.id,
+        at: row.created_at,
+        kind: practiceKind as "self" | "catalog",
+        title: catalogId ? catalogNames.get(catalogId) ?? "Catalog practice" : "Self practice",
+        catalog_id: catalogId,
+        answered: Number(details["answered"] ?? 0),
+        graded: Number(details["graded"] ?? 0),
+        score: typeof details["score"] === "number" ? details["score"] : null,
+        max_score: typeof details["max_score"] === "number" ? details["max_score"] : null,
+        accuracy: typeof details["accuracy"] === "number" ? details["accuracy"] : null,
+      };
+    });
+
     return {
       stats: {
         ...stats,
@@ -524,5 +599,6 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       topics: topicResult.data ?? [],
       daily: dailyResult.data ?? [],
       recent: recentResult.data ?? [],
+      history,
     };
   });
