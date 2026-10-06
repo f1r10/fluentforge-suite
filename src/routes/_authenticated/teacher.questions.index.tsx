@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { FileSpreadsheet, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,6 +10,7 @@ import { bulkQuestions, listQuestions, listTopics } from "@/lib/questions.functi
 import { listCatalogs } from "@/lib/teacher.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
+import { QuestionImportDialog } from "@/components/app/QuestionImportDialog";
 import { useI18n } from "@/lib/i18n";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
@@ -32,6 +33,7 @@ function QuestionBank() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkTopic, setBulkTopic] = useState("");
   const [bulkCatalog, setBulkCatalog] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
 
   const { data, isFetching } = useQuery({
     queryKey: ["questions", f],
@@ -63,7 +65,13 @@ function QuestionBank() {
     <div className="mx-auto max-w-6xl space-y-4 pb-24">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">{t("questions_bank")} {data && <span className="text-base font-normal text-muted-foreground">({data.total})</span>}</h1>
-        <Button asChild><Link to="/teacher/questions/new"><Plus className="h-4 w-4" />{t("add_question")}</Link></Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t("import_questions")}
+          </Button>
+          <Button asChild><Link to="/teacher/questions/new"><Plus className="h-4 w-4" />{t("add_question")}</Link></Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -116,6 +124,12 @@ function QuestionBank() {
           <Button variant="outline" size="sm" disabled={(f.page + 1) * data.pageSize >= data.total} onClick={() => setF({ ...f, page: f.page + 1 })}>›</Button>
         </div>
       )}
+
+      <QuestionImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        topics={topics}
+      />
 
       {selected.size > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 shadow-sm md:left-56">
