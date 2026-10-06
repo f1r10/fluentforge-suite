@@ -26,23 +26,40 @@
 - [x] Group and individual student catalog assignments
 - [x] Catalog practice settings and context-preservation rules
 - [x] Student assigned-catalog dashboard
-- [x] Catalog practice workspace with instant/end feedback foundations
+- [x] Catalog practice workspace with instant/end feedback
 - [x] Practice grading for choice, text/cloze, matching and ordering
 - [x] Practice activity logging
-- [ ] Global self-practice generator with filters, previous mistakes and unused questions
+- [x] Global self-practice generator: language, level, type, topic, assigned catalog, source, count
+- [x] Previous-mistakes, unused-question and exclude-answered self-practice filters
+- [x] Browser-local resume for unfinished self-practice
+- [x] Practice analytics: today/week, accuracy, current mistakes, topic stats, 14-day activity
+- [x] Finished-practice history UI
 - [ ] Vocabulary practice modes beyond flashcard reveal
-- [ ] Practice resume/local persistence and finished-practice history UI
-- [ ] Practice analytics/progress dashboard
 
 ## Exams
-- [ ] Full exam builder and sections
-- [ ] Catalog/question-bank/random-pool sources
-- [ ] Assignment to groups/students
-- [ ] Immutable publish snapshots
-- [ ] Attempt engine, autosave, deadline enforcement, auto-submit
-- [ ] Automatic/manual/AI-assisted grading and Student Questions Box
-- [ ] Results release and answer/explanation visibility controls
-- [ ] Exam monitoring and violation timeline
+- [x] Full exam builder and sections
+- [x] Question / Reading / Listening / Catalog sources
+- [x] Balanced random question pools with filters
+- [x] Assignment to groups/students
+- [x] Immutable published exam snapshots
+- [x] Per-attempt randomized snapshot generation
+- [x] Attempt engine with server-authoritative deadline
+- [x] Browser backup + server autosave
+- [x] Answer change count, time spent, flags and numbered navigation
+- [x] Unanswered-submit warning and automatic deadline submission
+- [x] Late-entry full-duration vs must-finish-by-close policy
+- [x] Question/option/section randomization
+- [x] Back-navigation restrictions
+- [x] Copy/paste and tab-switch monitoring
+- [x] Server-side tab-switch-limit auto-submit enforcement
+- [x] Automatic grading and manual-review fallback
+- [x] Student Questions Box / manual score override with audit
+- [x] Result release: immediate / after close / after teacher approval
+- [x] Answer/explanation visibility timing enforcement
+- [x] Teacher approval queue for after-approval results
+- [ ] AI-assisted open-answer grading suggestion (score/confidence/reason)
+- [ ] Full teacher attempt-monitoring / violation timeline UI
+- [ ] Strict server-controlled listening play limits (requires private Media Library delivery)
 
 ## Processing / Operations
 - [ ] Document import review pipeline
