@@ -514,3 +514,76 @@ def test_private_use_checkbox_glyph_is_normalized():
         "Yes, I do",
         "Yes, I am",
     ]
+
+
+def test_inline_main_question_can_contain_numbered_statements():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 2,
+                "text": (
+                    "11. Choose the correct variant.\n"
+                    "When Peter …, he … ever listened to.\n"
+                    "1. speaks, has not\n"
+                    "2. spoke, had not\n"
+                    "3. speaks, is not\n"
+                    "4. spoke, was not\n"
+                    "A) 2, 3\nB) 1, 4\nC) 1, 2\nD) 2, 4\nE) 3, 4\n"
+                    "12. Choose the correct tense form.\n"
+                    "After Linda … a driving test, she … a car.\n"
+                    "1. has passed, buy\n2. passed, bought\n"
+                    "A) 1, 2\nB) 2, 1\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert "4. spoke, was not" in questions[0]["payload"]["prompt"]
+    assert len(questions[0]["payload"]["payload"]["options"]) == 5
+    assert "2. passed, bought" in questions[1]["payload"]["prompt"]
+
+
+def test_wrapped_option_text_is_joined_and_section_heading_is_not_appended():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "6. She's a doctor.\n"
+                    "A \uf020 What's his job? B \uf020\n"
+                    "What's your job?\n"
+                    "C \uf020 What's her job?\n"
+                    "Exercise 3: Prepositions.\n"
+                    "7. ___ the summer, we go to the beach.\n"
+                    "A) In B) At\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert [option["text"] for option in questions[0]["payload"]["payload"]["options"]] == [
+        "What's his job?",
+        "What's your job?",
+        "What's her job?",
+    ]
+    assert "Exercise 3" not in questions[0]["payload"]["prompt"]
