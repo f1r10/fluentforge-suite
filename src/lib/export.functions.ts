@@ -20,7 +20,7 @@ export const EXPORT_KINDS = [
 ] as const;
 
 export type ExportKind = (typeof EXPORT_KINDS)[number];
-export type ExportFormat = "json" | "xlsx" | "csv";
+export type ExportFormat = "json" | "xlsx" | "csv" | "pdf";
 
 type TableSpec = {
   key: string;
@@ -31,7 +31,7 @@ type TableSpec = {
 };
 
 const kindSchema = z.enum(EXPORT_KINDS);
-const formatSchema = z.enum(["json", "xlsx", "csv"]);
+const formatSchema = z.enum(["json", "xlsx", "csv", "pdf"]);
 
 const TABLES: Record<ExportKind, TableSpec[]> = {
   questions: [
@@ -183,6 +183,9 @@ export const createExport = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (data.format === "csv" && !PRIMARY_CSV_TABLE[data.kind]) {
       throw new Error("CSV is not available for this export package.");
+    }
+    if (data.format === "pdf" && data.kind !== "analytics") {
+      throw new Error("PDF reports are currently available for analytics only.");
     }
 
     const { adminClient, audit } = await import("./security.server");
@@ -413,6 +416,28 @@ async function buildArtifact(input: {
   tables: Record<string, Record<string, unknown>[]>;
   rowCounts: Record<string, number>;
 }) {
+  if (input.format === "pdf") {
+    if (input.kind !== "analytics") {
+      throw new Error("PDF reports are available for analytics only.");
+    }
+
+    const html = buildAnalyticsPdfHtml({
+      exportedAt: input.exportedAt,
+      tables: input.tables,
+    });
+    const { getProcessingService } = await import("./processing.service");
+    const pdf = await getProcessingService().renderPdfReport({ html });
+    if (pdf.byteLength < 5 || new TextDecoder().decode(pdf.slice(0, 5)) !== "%PDF-") {
+      throw new Error("Processing service returned an invalid PDF.");
+    }
+
+    return {
+      body: Buffer.from(pdf),
+      mimeType: "application/pdf",
+      extension: "pdf",
+    };
+  }
+
   if (input.format === "json") {
     const payload = {
       schema_version: 1,
@@ -470,6 +495,102 @@ async function buildArtifact(input: {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     extension: "xlsx",
   };
+}
+
+function buildAnalyticsPdfHtml(input: {
+  exportedAt: string;
+  tables: Record<string, Record<string, unknown>[]>;
+}) {
+  const sections = [
+    ["Question analytics", input.tables["question_analytics"] ?? []],
+    ["Catalog analytics", input.tables["catalog_analytics"] ?? []],
+    ["Student analytics", input.tables["student_analytics"] ?? []],
+  ] as const;
+
+  const body = sections
+    .map(([title, rows]) => {
+      const columns = rows.length
+        ? [...new Set(rows.flatMap((row) => Object.keys(row)))]
+        : [];
+      const header = columns
+        .map((column) => `<th>${escapeHtml(humanizeColumn(column))}</th>`)
+        .join("");
+      const rowsHtml = rows
+        .map(
+          (row) =>
+            `<tr>${columns
+              .map((column) => `<td>${escapeHtml(formatPdfValue(row[column]))}</td>`)
+              .join("")}</tr>`,
+        )
+        .join("");
+
+      return `
+        <section>
+          <h2>${escapeHtml(title)}</h2>
+          <p class="count">${rows.length} row(s)</p>
+          ${rows.length
+            ? `<table><thead><tr>${header}</tr></thead><tbody>${rowsHtml}</tbody></table>`
+            : '<p class="empty">No recorded data.</p>'}
+        </section>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FluentForge Analytics Report</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; color: #111; font-size: 9pt; }
+  h1 { font-size: 18pt; margin: 0 0 4mm; }
+  h2 { font-size: 13pt; margin: 8mm 0 1mm; page-break-after: avoid; }
+  .meta, .count, .empty { color: #555; }
+  table { width: 100%; border-collapse: collapse; table-layout: auto; }
+  th, td { border: 1px solid #bbb; padding: 3px 4px; vertical-align: top; overflow-wrap: anywhere; }
+  th { background: #eee; font-weight: 700; }
+  tr { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+  <h1>FluentForge Analytics Report</h1>
+  <p class="meta">Generated: ${escapeHtml(input.exportedAt)}</p>
+  ${body}
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function humanizeColumn(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatPdfValue(value: unknown) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function toSheetRow(row: Record<string, unknown>) {
