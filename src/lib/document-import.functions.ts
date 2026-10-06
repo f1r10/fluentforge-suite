@@ -658,7 +658,7 @@ async function prepareItems(
       item_type: item.item_type,
       page: item.page ?? null,
       sheet: item.sheet ?? null,
-      crop: null,
+      crop: (item.crop ?? null) as never,
       payload: item.payload as never,
       confidence: item.confidence ?? null,
       decision: "pending",
