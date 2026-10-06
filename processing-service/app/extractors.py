@@ -753,6 +753,38 @@ def _normalize_choice_markers(line: str) -> str:
     )
 
 
+def _fixed_choice_options_from_line(line: str) -> list[dict[str, str]]:
+    token_re = re.compile(
+        r"(?:[\ue000-\uf8ff☐☑□❏]\s*)?(Not Given|True|False|Yes|No)",
+        re.IGNORECASE,
+    )
+    matches = list(token_re.finditer(line))
+    if not matches:
+        return []
+
+    residual = token_re.sub("", line)
+    if residual.strip():
+        return []
+
+    options: list[dict[str, str]] = []
+    for match in matches:
+        text = match.group(1)
+        canonical = {
+            "not given": "Not Given",
+            "true": "True",
+            "false": "False",
+            "yes": "Yes",
+            "no": "No",
+        }[text.casefold()]
+        options.append(
+            {
+                "id": canonical.casefold().replace(" ", "_"),
+                "text": canonical,
+            }
+        )
+    return options
+
+
 def _options_from_line(line: str) -> list[dict[str, str]]:
     line = _normalize_choice_markers(line)
     matches = list(INLINE_OPTION_RE.finditer(line))
@@ -982,6 +1014,14 @@ def _questions_from_text(
             if current:
                 questions.append(current)
                 current = None
+            continue
+
+        fixed_options = _fixed_choice_options_from_line(line)
+        if current and fixed_options:
+            existing = {option["id"] for option in current["options"]}
+            current["options"].extend(
+                option for option in fixed_options if option["id"] not in existing
+            )
             continue
 
         inline_options = _options_from_line(line)
