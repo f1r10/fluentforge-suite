@@ -73,7 +73,7 @@
 - [x] Local Whisper transcription via processing worker and Listening editor
 - [x] Optional AI adapters: disabled-by-default local OpenAI-compatible provider + optional Gemini provider
 - [x] Export Center: Questions, Vocabulary, Readings, Listenings, Catalogs, Exams, Students, Results, Logs and portable content package (JSON/XLSX/CSV)
-- [ ] Backup/restore
+- [x] Validated application Backup/Restore: relational data + private media/source files, checksums, dry-run, empty-target guard and resumable restore
 - [x] Trash retention, expired export/upload cleanup, dependency-safe permanent cleanup and teacher retention controls
 - [ ] Production Docker/self-host deployment
 - [ ] Performance/security acceptance testing
