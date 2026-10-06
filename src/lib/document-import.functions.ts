@@ -7,6 +7,16 @@ import { getProcessingService, type ProcessingImportItem } from "./processing.se
 const SOURCE_BUCKET = "sources";
 const MiB = 1024 * 1024;
 
+const readingImportPayloadSchema = z.object({
+  source_ref: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(300),
+  body: z.string().trim().min(1).max(250_000),
+  display_layout: z.enum(["stacked", "split", "tabbed"]).default("split"),
+  learning_language: z.string().max(10).nullable().optional(),
+  level: z.string().max(20).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
 const allowedExtensions = new Set([
   "pdf",
   "doc",
@@ -547,26 +557,128 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       .eq("id", data.jobId)
       .maybeSingle();
     if (jobError) throw new Error(jobError.message);
-    if (!job?.source_file_id) throw new Error("Import job or source file not found.");
+    if (!job?.source_file_id) {
+      throw new Error("Import job or source file not found.");
+    }
 
     const { data: items, error: itemsError } = await admin
       .from("import_items")
       .select("*")
       .eq("job_id", data.jobId)
       .eq("decision", "approved")
-      .is("created_entity_id", null);
+      .order("page", { ascending: true, nullsFirst: false })
+      .order("created_at");
     if (itemsError) throw new Error(itemsError.message);
 
-    let imported = 0;
+    const approvedItems = items ?? [];
+    const readingContexts = new Map<
+      string,
+      { readingId: string; questionSetId: string }
+    >();
+
+    let importedQuestions = 0;
+    let importedReadings = 0;
     let skipped = 0;
 
-    for (const item of items ?? []) {
-      if (item.item_type !== "question") {
-        skipped += 1;
-        continue;
+    // Context entities must exist before their dependent questions are inserted.
+    for (const item of approvedItems) {
+      if (item.item_type !== "reading") continue;
+
+      const raw = readingImportPayloadSchema.parse(item.payload);
+
+      let readingId = item.created_entity_id;
+      if (!readingId) {
+        const wordCount = raw.body.split(/\s+/).filter(Boolean).length;
+        const { data: createdReading, error: readingError } = await admin
+          .from("readings")
+          .insert({
+            title: raw.title,
+            body: raw.body,
+            learning_language: raw.learning_language ?? "en",
+            level: raw.level ?? null,
+            word_count: wordCount,
+            display_layout: raw.display_layout,
+            status: "draft",
+            source_file_id: job.source_file_id,
+            metadata: {
+              ...raw.metadata,
+              import_job_id: job.id,
+              import_item_id: item.id,
+              source_page: item.page,
+              source_crop: item.crop,
+              extraction: "document_import",
+            },
+          } as never)
+          .select("id")
+          .single();
+        if (readingError || !createdReading) {
+          throw new Error(
+            readingError?.message ?? "Could not create imported reading.",
+          );
+        }
+        readingId = createdReading.id;
+
+        await admin
+          .from("import_items")
+          .update({ created_entity_id: readingId })
+          .eq("id", item.id);
+
+        await admin.from("source_collection_items").upsert({
+          source_file_id: job.source_file_id,
+          entity_type: "reading",
+          entity_id: readingId,
+        });
+
+        importedReadings += 1;
       }
 
+      const { data: existingSets, error: existingSetError } = await admin
+        .from("reading_question_sets")
+        .select("id")
+        .eq("reading_id", readingId)
+        .order("sort_order")
+        .limit(1);
+      if (existingSetError) throw new Error(existingSetError.message);
+
+      let questionSetId = existingSets?.[0]?.id ?? null;
+      if (!questionSetId) {
+        const { data: createdSet, error: setError } = await admin
+          .from("reading_question_sets")
+          .insert({
+            reading_id: readingId,
+            title: "Imported questions",
+            instructions: null,
+            sort_order: 0,
+          })
+          .select("id")
+          .single();
+        if (setError || !createdSet) {
+          throw new Error(
+            setError?.message ?? "Could not create reading question set.",
+          );
+        }
+        questionSetId = createdSet.id;
+      }
+
+      readingContexts.set(raw.source_ref, {
+        readingId,
+        questionSetId,
+      });
+    }
+
+    for (const item of approvedItems) {
+      if (item.item_type !== "question") {
+        if (item.item_type !== "reading") skipped += 1;
+        continue;
+      }
+      if (item.created_entity_id) continue;
+
       const raw = item.payload as Record<string, unknown>;
+      const importContext =
+        raw["import_context"] && typeof raw["import_context"] === "object"
+          ? (raw["import_context"] as Record<string, unknown>)
+          : null;
+
       const validated = validateQuestionInput({
         ...raw,
         instructions: raw["instructions"] ?? null,
@@ -591,7 +703,8 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         force: true,
       });
 
-      const { topicIds: _topics, tags: _tags, force: _force, ...fields } = validated;
+      const { topicIds: _topics, tags: _tags, force: _force, ...fields } =
+        validated;
       const contentHash = sha256(
         JSON.stringify([
           fields.question_type,
@@ -601,12 +714,30 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         ]),
       );
 
+      const sourceRef =
+        importContext?.["kind"] === "reading" &&
+        typeof importContext["source_ref"] === "string"
+          ? importContext["source_ref"]
+          : null;
+      const readingContext = sourceRef
+        ? readingContexts.get(sourceRef) ?? null
+        : null;
+      const contextSort =
+        typeof importContext?.["sort_order"] === "number"
+          ? Math.max(0, Math.floor(importContext["sort_order"]))
+          : 0;
+
       const { data: created, error: createError } = await admin
         .from("questions")
         .insert({
           ...fields,
           status: "draft",
           current_version: 1,
+          context_kind: readingContext ? "reading" : "none",
+          reading_question_set_id: readingContext?.questionSetId ?? null,
+          listening_question_set_id: null,
+          context_sort: readingContext ? contextSort : 0,
+          reusable_independently: false,
           source_file_id: job.source_file_id,
           source_page: item.page,
           source_sheet: item.sheet,
@@ -615,19 +746,31 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
             import_item_id: item.id,
             confidence: item.confidence,
             extraction: "document_import",
+            source_crop: item.crop,
+            import_context: importContext,
+            unresolved_reading_context:
+              sourceRef && !readingContext ? sourceRef : null,
           },
           content_hash: contentHash,
         } as never)
         .select("id")
         .single();
       if (createError || !created) {
-        throw new Error(createError?.message ?? "Could not create imported question.");
+        throw new Error(
+          createError?.message ?? "Could not create imported question.",
+        );
       }
 
       await admin.from("question_versions").insert({
         question_id: created.id,
         version: 1,
-        snapshot: fields as never,
+        snapshot: {
+          ...fields,
+          context_kind: readingContext ? "reading" : "none",
+          reading_question_set_id: readingContext?.questionSetId ?? null,
+          listening_question_set_id: null,
+          context_sort: readingContext ? contextSort : 0,
+        } as never,
       });
 
       await admin
@@ -641,8 +784,10 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         entity_id: created.id,
       });
 
-      imported += 1;
+      importedQuestions += 1;
     }
+
+    const imported = importedQuestions + importedReadings;
 
     await admin
       .from("import_jobs")
@@ -682,11 +827,23 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       action: "document_import_committed",
       entity_type: "import_job",
       entity_id: job.id,
-      summary: `Imported ${imported} question(s) from document review`,
-      details: { imported, skipped, original_deleted: originalDeleted },
+      summary: `Imported ${importedQuestions} question(s) and ${importedReadings} reading(s) from document review`,
+      details: {
+        imported,
+        imported_questions: importedQuestions,
+        imported_readings: importedReadings,
+        skipped,
+        original_deleted: originalDeleted,
+      },
     });
 
-    return { imported, skipped, originalDeleted };
+    return {
+      imported,
+      importedQuestions,
+      importedReadings,
+      skipped,
+      originalDeleted,
+    };
   });
 
 async function prepareItems(
