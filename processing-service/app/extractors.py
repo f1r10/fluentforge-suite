@@ -31,7 +31,7 @@ QUESTION_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s+(.+?)\s*$")
 QUESTION_NUMBER_ONLY_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s*$")
 OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.)]\s+(.+?)\s*$")
 INLINE_OPTION_RE = re.compile(
-    r"(?<!\\w)([A-Ha-h])[\\.)]\\s*(.*?)(?=(?:\\s+[A-Ha-h][\\.)]\\s*)|$)"
+    r"(?<!\w)([A-Ha-h])[\.)]\s*(.*?)(?=(?:\s+[A-Ha-h][\.)]\s*)|$)"
 )
 ANSWER_RE = re.compile(
     r"^\s*(?:answer\s*key|answers?|cavab(?:lar)?|cevap(?:lar)?|ответы?)\s*[:\-]?\s*(.*)$",
@@ -745,8 +745,8 @@ def _normalize_choice_markers(line: str) -> str:
     # Common PDF checkbox glyphs are often extracted between the option letter
     # and its text instead of as A)/B) punctuation.
     return re.sub(
-        r"(?<!\\w)([A-Ha-h])\\s*[\\ue000-\\uf8ff☐☑□❏]\\s*",
-        r"\\1) ",
+        r"(?<!\w)([A-Ha-h])\s*[\ue000-\uf8ff☐☑□❏]\s*",
+        r"\1) ",
         line,
     )
 
@@ -785,7 +785,7 @@ def _split_prompt_and_inline_options(
             return prompt, options
 
     true_false = re.search(
-        r"\s+[\\ue000-\\uf8ff☐☑□❏]?\\s*True\\s+[\\ue000-\\uf8ff☐☑□❏]?\\s*False\\s*$",
+        r"\s+[\ue000-\uf8ff☐☑□❏]?\s*True\s+[\ue000-\uf8ff☐☑□❏]?\s*False\s*$",
         value,
         re.IGNORECASE,
     )
@@ -801,7 +801,7 @@ def _split_prompt_and_inline_options(
 def _join_wrapped_option_lines(lines: list[str]) -> list[str]:
     out: list[str] = []
     trailing_marker = re.compile(
-        r"(?<!\\w)[A-Ha-h]\\s*(?:[\\.)]|[\\ue000-\\uf8ff☐☑□❏])\\s*$"
+        r"(?<!\w)[A-Ha-h]\s*(?:[\.)]|[\ue000-\uf8ff☐☑□❏])\s*$"
     )
     index = 0
     while index < len(lines):
@@ -824,7 +824,7 @@ def _is_section_boundary(line: str) -> bool:
         return False
     return bool(
         re.match(
-            r"^(?:exercise\\s+\\d+|section\\s+[ivx0-9]+|reading\\s+task|listening\\s+task|read\\s+the\\s+(?:passage|text|article)|read\\s+and\\s+answer|©|www\\.)",
+            r"^(?:exercise\s+\d+|section\s+[ivx0-9]+|reading\s+task|listening\s+task|read\s+the\s+(?:passage|text|article)|read\s+and\s+answer|©|www\.)",
             value,
             re.IGNORECASE,
         )
