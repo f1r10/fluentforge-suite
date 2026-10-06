@@ -2639,6 +2639,10 @@ export type Database = {
     }
     Functions: {
       current_student_id: { Args: never; Returns: string }
+      claim_scheduled_backup: {
+        Args: { p_interval_hours: number }
+        Returns: string | null
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
