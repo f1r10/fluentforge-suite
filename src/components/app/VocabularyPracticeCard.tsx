@@ -1,5 +1,5 @@
 import { CheckCircle2, Eye, RotateCcw, XCircle } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,6 +87,13 @@ export function VocabularyPracticeCard({
     mode === "reverse_recall" && target
       ? target.value
       : entry.word;
+
+  useEffect(() => {
+    setResponse("");
+    setRevealed(false);
+    setFeedback(null);
+    startedAt.current = Date.now();
+  }, [mode]);
 
   async function submitAnswer() {
     if (mode === "flashcard") return;
