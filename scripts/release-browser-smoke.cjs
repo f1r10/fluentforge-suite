@@ -29,6 +29,11 @@ async function expectPath(page, pattern, label) {
   console.log("[ok] " + label + ": " + page.url());
 }
 
+async function gotoHydrated(page, path) {
+  await page.goto(baseUrl + path, { waitUntil: "networkidle" });
+  await page.waitForTimeout(100);
+}
+
 (async () => {
   assert(teacherPassword.length >= 8, "E2E_TEACHER_PASSWORD must be set.");
 
@@ -41,7 +46,7 @@ async function expectPath(page, pattern, label) {
     activePage = page;
     await useEnglish(page);
 
-    await page.goto(baseUrl + "/setup", { waitUntil: "domcontentloaded" });
+    await gotoHydrated(page, "/setup");
     await page.locator("#u").fill(teacherUsername);
     await page.locator("#p").fill(teacherPassword);
     await page.locator("#c").fill(teacherPassword);
@@ -61,9 +66,7 @@ async function expectPath(page, pattern, label) {
     await page.getByRole("button", { name: "Continue" }).click();
     await expectPath(page, "**/teacher/settings", "teacher setup session");
 
-    await page.goto(baseUrl + "/teacher/students", {
-      waitUntil: "domcontentloaded",
-    });
+    await gotoHydrated(page, "/teacher/students");
     await page
       .getByRole("button", { name: "Add student" })
       .waitFor({ timeout: 20000 });
@@ -88,9 +91,7 @@ async function expectPath(page, pattern, label) {
     const reloginPage = await reloginContext.newPage();
     activePage = reloginPage;
     await useEnglish(reloginPage);
-    await reloginPage.goto(baseUrl + "/teacher-login", {
-      waitUntil: "domcontentloaded",
-    });
+    await gotoHydrated(reloginPage, "/teacher-login");
     await reloginPage.locator("#u").fill(teacherUsername);
     await reloginPage.locator("#p").fill(teacherPassword);
     await reloginPage.locator('form button[type="submit"]').click();
@@ -102,7 +103,7 @@ async function expectPath(page, pattern, label) {
     const studentPage = await studentContext.newPage();
     activePage = studentPage;
     await useEnglish(studentPage);
-    await studentPage.goto(baseUrl + "/", { waitUntil: "domcontentloaded" });
+    await gotoHydrated(studentPage, "/");
     await studentPage.locator("#key").fill(accessKey);
     await studentPage.locator('form button[type="submit"]').click();
     await expectPath(studentPage, "**/student", "student access-key login");
