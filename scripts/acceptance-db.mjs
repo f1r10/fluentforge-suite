@@ -35,8 +35,8 @@ async function verifySchemaSecurity() {
     select count(*)::int as count
     from public.fluentforge_schema_migrations
   `;
-  if (migrationCount < 30) {
-    fail(`Expected at least 30 applied migrations, found ${migrationCount}.`);
+  if (migrationCount < 31) {
+    fail(`Expected at least 31 applied migrations, found ${migrationCount}.`);
   } else {
     pass(`Applied migrations: ${migrationCount}`);
   }
@@ -159,6 +159,23 @@ async function verifySchemaSecurity() {
     );
   } else {
     pass("Only branding/interface settings are public");
+  }
+
+  const [monitoringSetting] = await sql`
+    select value, is_public
+    from public.system_settings
+    where key = 'monitoring'
+  `;
+  if (!monitoringSetting) {
+    fail("Monitoring privacy setting is missing.");
+  } else if (monitoringSetting.is_public) {
+    fail("Monitoring privacy setting must not be public.");
+  } else if (
+    monitoringSetting.value?.show_ip !== false
+  ) {
+    fail("Monitoring IP visibility must default to false.");
+  } else {
+    pass("Monitoring privacy defaults keep IP addresses hidden");
   }
 
   const bucketRows = await sql`
