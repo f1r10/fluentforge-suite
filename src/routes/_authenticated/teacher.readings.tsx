@@ -20,6 +20,7 @@ import { LEVELS } from "@/lib/question-types";
 import { trashContextContent } from "@/lib/trash.functions";
 import { topicOptions } from "@/components/app/topics";
 import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -39,10 +40,10 @@ type EditorState = {
   questionSets: QuestionSet[];
 };
 
-const emptyEditor = (): EditorState => ({
+const emptyEditor = (learningLanguage = ""): EditorState => ({
   title: "",
   body: "",
-  learning_language: "en",
+  learning_language: learningLanguage,
   level: "",
   status: "active",
   display_layout: "stacked",
@@ -59,6 +60,7 @@ export const Route = createFileRoute("/_authenticated/teacher/readings")({
 function ReadingsPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const languages = useContentLanguages();
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const topicOpts = topicOptions(topics);
   const [search, setSearch] = useState("");
@@ -87,7 +89,8 @@ function ReadingsPage() {
         id: row.id,
         title: row.title,
         body: row.body,
-        learning_language: row.learning_language ?? "en",
+        learning_language:
+          row.learning_language ?? languages.defaultLearningCode,
         level: row.level ?? "",
         status: row.status,
         display_layout: (row.display_layout as EditorState["display_layout"]) ?? "stacked",
@@ -168,7 +171,12 @@ function ReadingsPage() {
           <h1 className="text-2xl font-bold">{t("readings")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button onClick={() => setEditor(emptyEditor())}>
+        <Button
+          disabled={languages.isPending}
+          onClick={() =>
+            setEditor(emptyEditor(languages.defaultLearningCode))
+          }
+        >
           <Plus className="h-4 w-4" />
           {t("add_reading")}
         </Button>
@@ -182,10 +190,11 @@ function ReadingsPage() {
         />
         <select className={selectClass} value={language} onChange={(e) => { setLanguage(e.target.value); setPage(0); }}>
           <option value="">{t("all")} — {t("language")}</option>
-          <option value="en">English</option>
-          <option value="az">Azərbaycanca</option>
-          <option value="ru">Русский</option>
-          <option value="tr">Türkçe</option>
+          {languages.all.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
         </select>
         <select className={selectClass} value={level} onChange={(e) => { setLevel(e.target.value); setPage(0); }}>
           <option value="">{t("all")} — {t("level")}</option>
@@ -265,8 +274,19 @@ function ReadingsPage() {
               <div className="grid gap-4 sm:grid-cols-4">
                 <Field label={t("language")}>
                   <select className={selectClass} value={editor.learning_language} onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}>
-                    <option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
-                    <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option>
+                    {editor.learning_language &&
+                      !languages.learning.some(
+                        (item) => item.code === editor.learning_language,
+                      ) && (
+                        <option value={editor.learning_language}>
+                          {editor.learning_language}
+                        </option>
+                      )}
+                    {languages.learning.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label={t("level")}>
