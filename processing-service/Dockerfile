@@ -18,11 +18,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-whisper.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-whisper.txt
 
 COPY app ./app
-RUN mkdir -p /data
+RUN mkdir -p /data /models/whisper
 
 EXPOSE 8001
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
