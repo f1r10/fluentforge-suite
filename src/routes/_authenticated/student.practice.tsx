@@ -42,6 +42,7 @@ const STORAGE_KEY = "fluentforge:self-practice:v1";
 
 type StoredSession = {
   sessionId: string;
+  startedAt: string;
   filters: SelfPracticeGenerator;
   questions: PracticeQuestion[];
   readings: StudentReadingPractice[];
@@ -72,6 +73,8 @@ function SelfPracticePage() {
     count: 20,
     readingCount: 0,
     listeningCount: 0,
+    sessionMode: "practice",
+    durationMinutes: 30,
     language: null,
     level: null,
     types: [],
@@ -83,6 +86,8 @@ function SelfPracticePage() {
     feedbackMode: "instant",
   });
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [readings, setReadings] = useState<StudentReadingPractice[]>([]);
   const [listenings, setListenings] = useState<StudentListeningPractice[]>([]);
@@ -134,10 +139,13 @@ function SelfPracticePage() {
             storedListenings.length
           ) {
             setSessionId(parsed.sessionId);
+            setStartedAt(parsed.startedAt ?? new Date().toISOString());
             setFilters({
               ...parsed.filters,
               readingCount: parsed.filters.readingCount ?? 0,
               listeningCount: parsed.filters.listeningCount ?? 0,
+              sessionMode: parsed.filters.sessionMode ?? "practice",
+              durationMinutes: parsed.filters.durationMinutes ?? 30,
             });
             setQuestions(storedQuestions);
             setReadings(storedReadings);
@@ -157,6 +165,7 @@ function SelfPracticePage() {
     if (!resumeChecked || !sessionId || !hasGeneratedContent || summary) return;
     const payload: StoredSession = {
       sessionId,
+      startedAt: startedAt ?? new Date().toISOString(),
       filters,
       questions,
       readings,
@@ -168,6 +177,7 @@ function SelfPracticePage() {
     resumeChecked,
     sessionId,
     filters,
+    startedAt,
     questions,
     readings,
     listenings,
@@ -178,6 +188,8 @@ function SelfPracticePage() {
 
   function resetSession() {
     setSessionId(null);
+    setStartedAt(null);
+    setRemainingMs(null);
     setQuestions([]);
     setReadings([]);
     setListenings([]);
@@ -195,7 +207,12 @@ function SelfPracticePage() {
     setFeedback({});
     setRevealed({});
     try {
-      const result = await generateSelfPractice({ data: filters });
+      const effectiveFilters =
+        filters.sessionMode === "mock_exam"
+          ? { ...filters, feedbackMode: "end" as const }
+          : filters;
+      const result = await generateSelfPractice({ data: effectiveFilters });
+      setFilters(effectiveFilters);
       const nextQuestions = result.questions as PracticeQuestion[];
       const nextReadings =
         result.readings as unknown as StudentReadingPractice[];
@@ -211,6 +228,7 @@ function SelfPracticePage() {
       }
       const nextSessionId = crypto.randomUUID();
       setSessionId(nextSessionId);
+      setStartedAt(new Date().toISOString());
       setQuestions(nextQuestions);
       setReadings(nextReadings);
       setListenings(nextListenings);
@@ -241,7 +259,7 @@ function SelfPracticePage() {
   }
 
   async function check(question: PracticeQuestion) {
-    if (!sessionId) return;
+    if (!sessionId || filters.sessionMode === "mock_exam") return;
     const response = responseFor(question);
     if (!hasPracticeResponse(question, response)) {
       toast.error(t("answer_required"));
@@ -274,14 +292,18 @@ function SelfPracticePage() {
     }
   }
 
-  async function finish() {
+  async function finish(skipConfirmation = false) {
     if (!sessionId) return;
     const answered = allQuestions.filter((question) => hasPracticeResponse(question, responseFor(question)));
     if (!answered.length) {
       toast.error(t("answer_required"));
       return;
     }
-    if (answered.length < allQuestions.length && !confirm(t("finish_with_unanswered_confirm"))) return;
+    if (
+      !skipConfirmation &&
+      answered.length < allQuestions.length &&
+      !confirm(t("finish_with_unanswered_confirm"))
+    ) return;
 
     setFinishing(true);
     try {
@@ -309,6 +331,47 @@ function SelfPracticePage() {
       setFinishing(false);
     }
   }
+
+  useEffect(() => {
+    if (
+      !sessionId ||
+      !startedAt ||
+      filters.sessionMode !== "mock_exam" ||
+      summary
+    ) {
+      setRemainingMs(null);
+      return;
+    }
+
+    const deadline =
+      new Date(startedAt).getTime() + filters.durationMinutes * 60_000;
+    let submitted = false;
+
+    const tick = () => {
+      const remaining = Math.max(0, deadline - Date.now());
+      setRemainingMs(remaining);
+      if (remaining === 0 && !submitted && !finishing) {
+        submitted = true;
+        void finish(true);
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(timer);
+    // The current answer state is intentionally captured by rerenders below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    sessionId,
+    startedAt,
+    filters.sessionMode,
+    filters.durationMinutes,
+    summary,
+    finishing,
+    responses,
+    feedback,
+    allQuestions,
+  ]);
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl px-4 py-5">
@@ -407,6 +470,47 @@ function SelfPracticePage() {
                 />
               </Field>
 
+              <Field label={t("session_mode")}>
+                <select
+                  className={selectClass}
+                  value={filters.sessionMode}
+                  onChange={(e) => {
+                    const mode = e.target.value as SelfPracticeGenerator["sessionMode"];
+                    setFilters({
+                      ...filters,
+                      sessionMode: mode,
+                      feedbackMode:
+                        mode === "mock_exam"
+                          ? "end"
+                          : filters.feedbackMode,
+                    });
+                  }}
+                >
+                  <option value="practice">{t("practice_mode")}</option>
+                  <option value="mock_exam">{t("mock_exam")}</option>
+                </select>
+              </Field>
+
+              {filters.sessionMode === "mock_exam" && (
+                <Field label={t("duration_min")}>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={240}
+                    value={filters.durationMinutes}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        durationMinutes: Math.max(
+                          5,
+                          Math.min(240, Number(e.target.value) || 30),
+                        ),
+                      })
+                    }
+                  />
+                </Field>
+              )}
+
               <Field label={t("language")}>
                 <select
                   className={selectClass}
@@ -473,7 +577,12 @@ function SelfPracticePage() {
               <Field label={t("feedback_mode")}>
                 <select
                   className={selectClass}
-                  value={filters.feedbackMode}
+                  value={
+                    filters.sessionMode === "mock_exam"
+                      ? "end"
+                      : filters.feedbackMode
+                  }
+                  disabled={filters.sessionMode === "mock_exam"}
                   onChange={(e) => setFilters({ ...filters, feedbackMode: e.target.value as SelfPracticeGenerator["feedbackMode"] })}
                 >
                   <option value="instant">{t("instant")}</option>
@@ -547,7 +656,17 @@ function SelfPracticePage() {
           </section>
 
           <div className="flex justify-end">
-            <Button type="submit" size="lg" disabled={generating}>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={
+                generating ||
+                filters.count +
+                  filters.readingCount +
+                  filters.listeningCount ===
+                  0
+              }
+            >
               <Play className="h-4 w-4" />
               {t("generate_practice")}
             </Button>
@@ -561,7 +680,14 @@ function SelfPracticePage() {
               {" · "}{readings.length} {t("readings").toLocaleLowerCase()}
               {" · "}{listenings.length} {t("listenings").toLocaleLowerCase()}
               {" · "}
-              {filters.feedbackMode === "instant" ? t("instant_feedback") : t("feedback_after_finish")}
+              {filters.sessionMode === "mock_exam"
+                ? t("mock_exam")
+                : filters.feedbackMode === "instant"
+                  ? t("instant_feedback")
+                  : t("feedback_after_finish")}
+              {remainingMs != null
+                ? ` · ${t("time_remaining")}: ${formatRemaining(remainingMs)}`
+                : ""}
             </span>
             {resumeChecked && !summary && <span className="text-xs text-muted-foreground">{t("saved_in_browser")}</span>}
           </div>
@@ -578,7 +704,10 @@ function SelfPracticePage() {
                   feedback={feedback[question.id]}
                   revealed={!!revealed[question.id]}
                   busy={busyQuestion === question.id}
-                  showCheck={filters.feedbackMode === "instant"}
+                  showCheck={
+                    filters.sessionMode === "practice" &&
+                    filters.feedbackMode === "instant"
+                  }
                   onChange={(response) => updateResponse(question, response)}
                   onCheck={() => check(question)}
                   onReveal={() => setRevealed((current) => ({ ...current, [question.id]: true }))}
@@ -593,7 +722,10 @@ function SelfPracticePage() {
                 responses={responses}
                 feedback={feedback}
                 revealed={revealed}
-                showCheck={filters.feedbackMode === "instant"}
+                showCheck={
+                    filters.sessionMode === "practice" &&
+                    filters.feedbackMode === "instant"
+                  }
                 busyQuestion={busyQuestion}
                 onResponse={(id, response) => {
                   const question = allQuestions.find((row) => row.id === id);
@@ -613,7 +745,10 @@ function SelfPracticePage() {
                 responses={responses}
                 feedback={feedback}
                 revealed={revealed}
-                showCheck={filters.feedbackMode === "instant"}
+                showCheck={
+                    filters.sessionMode === "practice" &&
+                    filters.feedbackMode === "instant"
+                  }
                 busyQuestion={busyQuestion}
                 onResponse={(id, response) => {
                   const question = allQuestions.find((row) => row.id === id);
@@ -657,6 +792,13 @@ function SummaryCell({ label, value }: { label: string; value: string | number }
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
+}
+
+function formatRemaining(ms: number) {
+  const total = Math.max(0, Math.ceil(ms / 1_000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function round(value: number) {
