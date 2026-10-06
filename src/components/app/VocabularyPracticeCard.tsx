@@ -41,7 +41,7 @@ export function VocabularyPracticeCard({
   allEntries,
   mode,
 }: {
-  catalogId: string;
+  catalogId: string | null;
   sessionId: string;
   entry: VocabularyPracticeEntry;
   allEntries: VocabularyPracticeEntry[];
