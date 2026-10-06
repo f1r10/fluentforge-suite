@@ -11,6 +11,8 @@ RUN apt-get update \
        tesseract-ocr-eng \
        tesseract-ocr-rus \
        tesseract-ocr-tur \
+       libreoffice-core \
+       libreoffice-writer \
        libgl1 \
        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
