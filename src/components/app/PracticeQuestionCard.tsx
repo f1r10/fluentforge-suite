@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Eye, FlagTriangleRight } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, FlagTriangleRight, Heart } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TYPE_BY_ID } from "@/lib/question-types";
 import { useI18n } from "@/lib/i18n";
 import { reportQuestion } from "@/lib/notifications.functions";
+import { toggleFavorite } from "@/lib/student.functions";
 
 export type PracticeQuestion = {
   id: string;
@@ -66,6 +67,8 @@ export function PracticeQuestionCard({
   const { t } = useI18n();
   const def = TYPE_BY_ID[question.question_type];
   const [reporting, setReporting] = useState(false);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [favorited, setFavorited] = useState<boolean | null>(null);
 
   async function report() {
     const comment = window.prompt(t("report_question_prompt"), "");
@@ -87,6 +90,26 @@ export function PracticeQuestionCard({
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setReporting(false);
+    }
+  }
+
+  async function toggleSaved() {
+    setFavoriteBusy(true);
+    try {
+      const result = await toggleFavorite({
+        data: {
+          entityType: "question",
+          entityId: question.id,
+        },
+      });
+      setFavorited(result.favorited);
+      toast.success(
+        result.favorited ? t("favorite_saved") : t("favorite_removed"),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFavoriteBusy(false);
     }
   }
 
@@ -117,9 +140,23 @@ export function PracticeQuestionCard({
           type="button"
           size="sm"
           variant="ghost"
+          disabled={favoriteBusy}
+          onClick={toggleSaved}
+          className="ml-auto text-muted-foreground"
+          aria-pressed={favorited === true}
+        >
+          <Heart
+            className={`h-4 w-4 ${favorited ? "fill-current" : ""}`}
+          />
+          {t("favorite")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
           disabled={reporting}
           onClick={report}
-          className="ml-auto text-muted-foreground"
+          className="text-muted-foreground"
         >
           <FlagTriangleRight className="h-4 w-4" />
           {t("report_question")}
