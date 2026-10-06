@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Clock3, Dumbbell, Heart, History, LogOut, Target } from "lucide-react";
+import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Clock3, Dumbbell, Flame, Heart, History, LogOut, Target } from "lucide-react";
 import { getMyDashboardSettings, heartbeat, listMyFavorites, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
@@ -185,12 +185,15 @@ function StudentHome() {
       {(visible.has("today") ||
         visible.has("accuracy") ||
         visible.has("study_time") ||
+        visible.has("streak") ||
         visible.has("progress") ||
         visible.has("weak_topics") ||
         visible.has("history")) && (
       <section>
         <h2 className="mb-3 border-b border-border pb-2 font-semibold">{t("your_progress")}</h2>
-        {!progress || progress.stats.total_answers === 0 ? (
+        {!progress ||
+        (progress.stats.total_answers === 0 &&
+          progress.stats.current_streak === 0) ? (
           <p className="py-6 text-sm text-muted-foreground">{t("progress_coming_from_activity")}</p>
         ) : (
           <div className="space-y-5">
@@ -232,6 +235,13 @@ function StudentHome() {
                   icon={<Clock3 className="h-4 w-4" />}
                   label={t("study_time")}
                   value={formatStudyTime(Number(progress.stats.total_time_ms))}
+                />
+              )}
+              {visible.has("streak") && (
+                <ProgressCard
+                  icon={<Flame className="h-4 w-4" />}
+                  label={`${t("streak")} · ${t("best")}: ${progress.stats.longest_streak}`}
+                  value={progress.stats.current_streak}
                 />
               )}
             </div>
