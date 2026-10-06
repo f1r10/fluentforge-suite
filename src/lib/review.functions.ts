@@ -540,6 +540,20 @@ export const reviewManualAnswer = createServerFn({ method: "POST" })
         body: data.feedback,
       });
       if (feedbackError) throw new Error(feedbackError.message);
+
+      const { notifyStudent } = await import("./notifications.functions");
+      await notifyStudent(admin, typed.student_id, {
+        kind: "teacher_feedback",
+        title: "Teacher feedback available",
+        body: data.feedback,
+        link: `/student/attempts/${typed.attempt_answers.attempt_id}`,
+        data: {
+          attempt_id: typed.attempt_answers.attempt_id,
+          answer_id: typed.answer_id,
+          question_id: typed.question_id,
+        },
+        dedupeKey: `teacher-feedback:${typed.answer_id}`,
+      });
     }
 
     const attempt = await recomputeAttempt(admin, typed.attempt_answers.attempt_id);
@@ -589,9 +603,8 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
       .single();
     if (error || !attempt) throw new Error(error?.message ?? "Attempt not found.");
 
-    await admin.from("notifications").insert({
-      recipient_type: "student",
-      student_id: attempt.student_id,
+    const { notifyStudent } = await import("./notifications.functions");
+    await notifyStudent(admin, attempt.student_id, {
       kind: "exam_result",
       title: "Exam result available",
       body: "Your exam result has been released.",
@@ -599,7 +612,8 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
       data: {
         attempt_id: data.attemptId,
         exam_id: attempt.exam_id,
-      } as never,
+      },
+      dedupeKey: `exam-result:${data.attemptId}`,
     });
 
     await audit(admin, {
