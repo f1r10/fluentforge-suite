@@ -261,24 +261,42 @@ function ActiveAttempt({
       if (!settings.monitor_tab_switches || document.visibilityState !== "hidden") return;
       const next = tabSwitches + 1;
       setTabSwitches(next);
-      record("tab_hidden");
 
-      if (
+      const limitExceeded =
         settings.max_tab_switches != null &&
-        next > settings.max_tab_switches &&
-        !autoSubmitting.current
-      ) {
+        next > settings.max_tab_switches;
+
+      if (limitExceeded && !autoSubmitting.current) {
         autoSubmitting.current = true;
         try {
-          await flushAll(views, attemptId, responseRef.current, flagRef.current, timeRef.current).catch(() => {});
-          await autoSubmitExamAttempt({ data: { attemptId } });
+          // Persist legitimate in-browser work before the server enforces the
+          // tab-switch policy and closes the attempt.
+          await flushAll(
+            views,
+            attemptId,
+            responseRef.current,
+            flagRef.current,
+            timeRef.current,
+          ).catch(() => {});
+
+          const violation = await recordExamViolation({
+            data: { attemptId, type: "tab_hidden", details: {} },
+          });
+
+          if (!violation.autoSubmitted) {
+            await autoSubmitExamAttempt({ data: { attemptId } });
+          }
+
           localStorage.removeItem(storageKey);
           await qc.invalidateQueries({ queryKey: ["exam-attempt", attemptId] });
           await refetch();
         } finally {
           autoSubmitting.current = false;
         }
+        return;
       }
+
+      record("tab_hidden");
     };
 
     const copyHandler = (event: ClipboardEvent) => {
