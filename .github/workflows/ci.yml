@@ -274,7 +274,7 @@ jobs:
             >/tmp/runtime-range.bin
 
           grep -qi '^content-range: bytes 0-10/25' /tmp/runtime-range.headers
-          test "$(cat /tmp/runtime-range.bin)" = "fluentforge-"
+          test "$(cat /tmp/runtime-range.bin)" = "fluentforge"
 
       - name: Verify plain PostgreSQL bootstrap invariants
         run: |
@@ -283,20 +283,32 @@ jobs:
             -f docker-compose.postgres.yml \
             exec -T postgres \
             psql -U postgres -d fluentforge -v ON_ERROR_STOP=1 <<'SQL'
-          select 1
-          where exists (
-            select 1 from pg_roles
-            where rolname = 'authenticated'
-          );
-          select 1
-          where exists (
-            select 1 from pg_roles
-            where rolname = 'service_role' and rolbypassrls
-          );
-          select 1
-          where to_regclass('public.runtime_auth_users') is not null;
-          select 1
-          where to_regclass('public.runtime_refresh_tokens') is not null;
+          do $
+          begin
+            if not exists (
+              select 1 from pg_roles
+              where rolname = 'authenticated'
+            ) then
+              raise exception 'authenticated role missing';
+            end if;
+
+            if not exists (
+              select 1 from pg_roles
+              where rolname = 'service_role'
+                and rolbypassrls
+            ) then
+              raise exception 'service_role BYPASSRLS invariant missing';
+            end if;
+
+            if to_regclass('public.runtime_auth_users') is null then
+              raise exception 'runtime_auth_users missing';
+            end if;
+
+            if to_regclass('public.runtime_refresh_tokens') is null then
+              raise exception 'runtime_refresh_tokens missing';
+            end if;
+          end
+          $;
           SQL
 
       - name: Stop Supabase-free stack
