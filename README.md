@@ -337,7 +337,7 @@ GitHub Actions verifies:
 - fully Supabase-free PostgreSQL/PostgREST runtime startup;
 - signed local object upload and HTTP Range download.
 
-The repository currently contains 31 numbered SQL migrations, TypeScript test coverage and Python processing-service tests.
+The repository currently contains 32 numbered SQL migrations, TypeScript test coverage and Python processing-service tests.
 
 ## Production checklist
 
