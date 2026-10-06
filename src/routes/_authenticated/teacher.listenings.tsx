@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { listTopics } from "@/lib/questions.functions";
 import {
+  deleteContextQuestionSet,
+  deleteListeningSection,
   getListening,
   listListenings,
   saveListening,
@@ -28,6 +30,7 @@ import {
 } from "@/lib/transcription.functions";
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
+import { ContextQuestionSetManager } from "@/components/app/ContextQuestionSetManager";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -233,8 +236,8 @@ function ListeningsPage() {
         });
       }
 
-      setEditor(null);
       await qc.invalidateQueries({ queryKey: ["listenings"] });
+      await openEdit(saved.id);
       toast.success(t("save"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -305,6 +308,65 @@ function ListeningsPage() {
       window.clearInterval(timer);
     };
   }, [transcriptionJobId, editor?.id, qc, t]);
+
+  async function removeSection(index: number) {
+    if (!editor) return;
+    const section = editor.sections[index];
+    if (!section) return;
+
+    if (section.id && editor.id) {
+      if (!confirm(t("delete_section_confirm"))) return;
+      try {
+        await deleteListeningSection({
+          data: { id: section.id, listeningId: editor.id },
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+
+    const removedId = section.id ?? `new:${index}`;
+    setEditor((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        sections: current.sections.filter((_, rowIndex) => rowIndex !== index),
+        questionSets: current.questionSets.map((set) =>
+          set.section_id === removedId ? { ...set, section_id: "" } : set,
+        ),
+      };
+    });
+  }
+
+  async function removeQuestionSet(index: number) {
+    if (!editor) return;
+    const set = editor.questionSets[index];
+    if (!set) return;
+
+    if (set.id) {
+      if (!confirm(t("delete_question_set_confirm"))) return;
+      try {
+        await deleteContextQuestionSet({
+          data: { kind: "listening", id: set.id },
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+
+    setEditor((current) =>
+      current
+        ? {
+            ...current,
+            questionSets: current.questionSets.filter(
+              (_, rowIndex) => rowIndex !== index,
+            ),
+          }
+        : current,
+    );
+  }
 
   async function trashListening(id: string) {
     if (!confirm(t("move_to_trash_confirm"))) return;
@@ -575,10 +637,15 @@ function ListeningsPage() {
                       ...editor,
                       sections: editor.sections.map((x, i) => i === index ? { ...x, end_seconds: e.target.value } : x),
                     })} />
-                    <Button type="button" variant="ghost" size="icon" onClick={() => setEditor({
-                      ...editor,
-                      sections: editor.sections.filter((_, i) => i !== index),
-                    })}><X className="h-4 w-4" /></Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void removeSection(index)}
+                      aria-label={t("delete")}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </section>
@@ -592,7 +659,10 @@ function ListeningsPage() {
                   })}><Plus className="h-4 w-4" />{t("add")}</Button>
                 </div>
                 {editor.questionSets.map((set, index) => (
-                  <div key={set.id ?? index} className="grid gap-2 rounded-md border border-border p-3 lg:grid-cols-[180px_1fr_2fr_auto]">
+                  <div
+                    key={set.id ?? index}
+                    className="grid gap-3 rounded-md border border-border p-3 lg:grid-cols-[180px_1fr_2fr_auto]"
+                  >
                     <select className={selectClass} value={set.section_id} onChange={(e) => setEditor({
                       ...editor,
                       questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, section_id: e.target.value } : x),
@@ -612,10 +682,28 @@ function ListeningsPage() {
                       ...editor,
                       questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
                     })} />
-                    <Button type="button" variant="ghost" size="icon" onClick={() => setEditor({
-                      ...editor,
-                      questionSets: editor.questionSets.filter((_, i) => i !== index),
-                    })}><X className="h-4 w-4" /></Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void removeQuestionSet(index)}
+                      aria-label={t("delete")}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                    {set.id ? (
+                      <div className="lg:col-span-4">
+                        <ContextQuestionSetManager
+                          kind="listening"
+                          questionSetId={set.id}
+                          topics={topics}
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground lg:col-span-4">
+                        {t("save_context_before_questions")}
+                      </div>
+                    )}
                   </div>
                 ))}
               </section>
