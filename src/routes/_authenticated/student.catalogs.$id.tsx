@@ -1,7 +1,7 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, Eye, Headphones, RotateCcw } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Headphones } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getWhoAmI } from "@/lib/teacher.functions";
@@ -19,6 +19,11 @@ import {
   type PracticeResponse,
 } from "@/components/app/PracticeQuestionCard";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  VocabularyPracticeCard,
+  type VocabularyPracticeEntry,
+} from "@/components/app/VocabularyPracticeCard";
+import type { VocabularyPracticeMode } from "@/lib/vocabulary-practice";
 import { useI18n } from "@/lib/i18n";
 
 const practiceQuery = (id: string) =>
@@ -51,7 +56,7 @@ function PracticePage() {
   const [responses, setResponses] = useState<Record<string, PracticeResponse>>({});
   const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [vocabShown, setVocabShown] = useState<Record<string, boolean>>({});
+  const [vocabularyMode, setVocabularyMode] = useState<VocabularyPracticeMode>("flashcard");
   const [busyQuestion, setBusyQuestion] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [summary, setSummary] = useState<{
@@ -63,6 +68,7 @@ function PracticePage() {
   } | null>(null);
 
   const questions = useMemo(() => collectQuestions(data), [data]);
+  const vocabularyEntries = useMemo(() => collectVocabulary(data), [data]);
   const feedbackMode = data.catalog.settings.feedback_mode;
 
   function currentResponse(question: PracticeQuestion) {
@@ -100,7 +106,7 @@ function PracticePage() {
         },
       });
       if (!result.deferred && result.result) {
-        setFeedback((prev) => ({ ...prev, [question.id]: result.result as Feedback }));
+        setFeedback((prev) => ({ ...prev, [question.id]: result.result as PracticeFeedback }));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -132,7 +138,7 @@ function PracticePage() {
         },
       });
       setFeedback(
-        Object.fromEntries(result.results.map((row) => [row.question_id, row as Feedback])),
+        Object.fromEntries(result.results.map((row) => [row.question_id, row as PracticeFeedback])),
       );
       setSummary(result.summary);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -169,6 +175,29 @@ function PracticePage() {
         </section>
       )}
 
+      {vocabularyEntries.length > 0 && (
+        <section className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+          <div>
+            <div className="text-sm font-medium">{t("vocabulary_practice_mode")}</div>
+            <div className="text-xs text-muted-foreground">
+              {t("vocabulary_practice_mode_hint")}
+            </div>
+          </div>
+          <select
+            value={vocabularyMode}
+            onChange={(event) =>
+              setVocabularyMode(event.target.value as VocabularyPracticeMode)
+            }
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="flashcard">{t("flashcards")}</option>
+            <option value="translation_recall">{t("translation_recall")}</option>
+            <option value="reverse_recall">{t("reverse_translation")}</option>
+            <option value="multiple_choice">{t("multiple_choice_practice")}</option>
+          </select>
+        </section>
+      )}
+
       <div className="space-y-6">
         {data.blocks.length === 0 && (
           <div className="rounded-md border border-border p-8 text-center text-sm text-muted-foreground">
@@ -196,52 +225,16 @@ function PracticePage() {
           }
 
           if (block.kind === "vocabulary") {
-            const entry = block.entry;
-            const shown = !!vocabShown[entry.id];
+            const entry = block.entry as VocabularyPracticeEntry;
             return (
-              <section key={block.item_id} className="rounded-md border border-border p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">{t("vocabulary")}</div>
-                    <h2 className="mt-1 text-2xl font-bold">{entry.word}</h2>
-                    {entry.ipa && <div className="text-sm text-muted-foreground">{entry.ipa}</div>}
-                    {entry.part_of_speech && <div className="mt-1 text-xs text-muted-foreground">{entry.part_of_speech}</div>}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setVocabShown((prev) => ({ ...prev, [entry.id]: !shown }))}
-                  >
-                    {shown ? <RotateCcw className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    {shown ? t("hide_meaning") : t("show_meaning")}
-                  </Button>
-                </div>
-                {shown && (
-                  <div className="mt-4 space-y-3 border-t border-border pt-4">
-                    {entry.translations.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {entry.translations.map((translation) => (
-                          <span key={`${translation.language}:${translation.value}`} className="rounded bg-muted px-2 py-1 text-sm">
-                            <span className="text-xs text-muted-foreground">{translation.language}: </span>
-                            {translation.value}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {entry.definition && <p className="text-sm">{entry.definition}</p>}
-                    {entry.examples.length > 0 && (
-                      <ul className="space-y-1 text-sm">
-                        {entry.examples.map((example, index) => (
-                          <li key={index}>
-                            {example.sentence}
-                            {example.translation && <span className="text-muted-foreground"> — {example.translation}</span>}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </section>
+              <VocabularyPracticeCard
+                key={block.item_id}
+                catalogId={id}
+                sessionId={sessionId}
+                entry={entry}
+                allEntries={vocabularyEntries}
+                mode={vocabularyMode}
+              />
             );
           }
 
@@ -543,6 +536,14 @@ function ListeningBlock(props: {
 
 function Passage({ body }: { body: string }) {
   return <div className="whitespace-pre-wrap text-sm leading-7">{body}</div>;
+}
+
+function collectVocabulary(data: PracticeData): VocabularyPracticeEntry[] {
+  return data.blocks.flatMap((block) =>
+    block.kind === "vocabulary"
+      ? [block.entry as VocabularyPracticeEntry]
+      : [],
+  );
 }
 
 function collectQuestions(data: PracticeData): PracticeQuestion[] {
