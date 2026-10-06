@@ -514,6 +514,107 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const listExamAttemptsMonitoring = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        search: z.string().max(120).default(""),
+        examId: z.string().uuid().nullable().default(null),
+        status: z
+          .enum(["all", "in_progress", "submitted", "auto_submitted", "graded", "abandoned"])
+          .default("all"),
+        violationsOnly: z.boolean().default(false),
+        page: z.number().int().min(0).default(0),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const pageSize = 40;
+    let studentIds: string[] | null = null;
+
+    if (data.search.trim()) {
+      const safe = data.search.trim().replace(/[,()%]/g, " ");
+      const { data: students, error: studentError } = await context.supabase
+        .from("students")
+        .select("id")
+        .is("deleted_at", null)
+        .or(`first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,username.ilike.%${safe}%`)
+        .limit(500);
+      if (studentError) throw new Error(studentError.message);
+      studentIds = (students ?? []).map((student) => student.id);
+      if (!studentIds.length) {
+        return { rows: [], total: 0, pageSize };
+      }
+    }
+
+    let query = context.supabase
+      .from("exam_attempts")
+      .select(
+        "id,exam_id,student_id,attempt_number,status,started_at,deadline_at,submitted_at,score,max_score,passed,result_released,violations,students!inner(id,first_name,last_name,username),exams!inner(id,title),attempt_answers(count)",
+        { count: "exact" },
+      )
+      .order("started_at", { ascending: false })
+      .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
+
+    if (studentIds) query = query.in("student_id", studentIds);
+    if (data.examId) query = query.eq("exam_id", data.examId);
+    if (data.status !== "all") query = query.eq("status", data.status);
+
+    const { data: attempts, count, error } = await query;
+    if (error) throw new Error(error.message);
+
+    const rows = (attempts ?? [])
+      .map((attempt) => {
+        const violations = Array.isArray(attempt.violations) ? attempt.violations : [];
+        const counts = (attempt.attempt_answers as unknown as Array<{ count: number }>)[0]?.count ?? 0;
+        const student = attempt.students as unknown as {
+          id: string;
+          first_name: string;
+          last_name: string;
+          username: string;
+        };
+        const exam = attempt.exams as unknown as { id: string; title: string };
+        return {
+          id: attempt.id,
+          exam_id: attempt.exam_id,
+          student_id: attempt.student_id,
+          attempt_number: attempt.attempt_number,
+          status: attempt.status,
+          started_at: attempt.started_at,
+          deadline_at: attempt.deadline_at,
+          submitted_at: attempt.submitted_at,
+          score: attempt.score,
+          max_score: attempt.max_score,
+          passed: attempt.passed,
+          result_released: attempt.result_released,
+          violation_count: violations.length,
+          tab_switches: violations.filter(
+            (entry) =>
+              !!entry &&
+              typeof entry === "object" &&
+              (entry as Record<string, unknown>)["type"] === "tab_hidden",
+          ).length,
+          answers_saved: counts,
+          student: {
+            id: student.id,
+            name: `${student.first_name} ${student.last_name}`,
+            username: student.username,
+          },
+          exam,
+        };
+      })
+      .filter((row) => !data.violationsOnly || row.violation_count > 0);
+
+    // When violationsOnly is used, count is page-local because JSON-array
+    // filtering is deliberately kept outside query-builder-specific syntax.
+    return {
+      rows,
+      total: data.violationsOnly ? rows.length : count ?? 0,
+      pageSize,
+    };
+  });
+
 export const getReviewAttemptSummary = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ attemptId: z.string().uuid() }).parse(d))
@@ -527,14 +628,45 @@ export const getReviewAttemptSummary = createServerFn({ method: "GET" })
       .single();
     if (error || !attempt) throw new Error(error?.message ?? "Attempt not found.");
 
-    const { count: pending } = await context.supabase
-      .from("manual_reviews")
-      .select("id,attempt_answers!inner(attempt_id)", { count: "exact", head: true })
-      .eq("attempt_answers.attempt_id", data.attemptId)
-      .eq("status", "pending");
+    const [{ count: pending }, answersResult, activityResult] = await Promise.all([
+      context.supabase
+        .from("manual_reviews")
+        .select("id,attempt_answers!inner(attempt_id)", { count: "exact", head: true })
+        .eq("attempt_answers.attempt_id", data.attemptId)
+        .eq("status", "pending"),
+      context.supabase
+        .from("attempt_answers")
+        .select("id,item_key,is_correct,score,flagged,change_count,time_spent_ms,updated_at")
+        .eq("attempt_id", data.attemptId)
+        .order("updated_at"),
+      context.supabase
+        .from("activity_events")
+        .select("id,event_type,details,created_at")
+        .eq("attempt_id", data.attemptId)
+        .eq("category", "exam")
+        .order("created_at"),
+    ]);
+
+    if (answersResult.error) throw new Error(answersResult.error.message);
+    if (activityResult.error) throw new Error(activityResult.error.message);
+
+    const answers = answersResult.data ?? [];
+    const autoGraded = answers.filter((answer) => answer.is_correct !== null);
+    const correct = autoGraded.filter((answer) => answer.is_correct === true).length;
 
     return {
       ...attempt,
       pending_reviews: pending ?? 0,
+      metrics: {
+        answers_saved: answers.length,
+        auto_graded: autoGraded.length,
+        correct,
+        incorrect: autoGraded.length - correct,
+        flagged: answers.filter((answer) => answer.flagged).length,
+        answer_changes: answers.reduce((sum, answer) => sum + (answer.change_count ?? 0), 0),
+        time_spent_ms: answers.reduce((sum, answer) => sum + (answer.time_spent_ms ?? 0), 0),
+      },
+      answers,
+      timeline: activityResult.data ?? [],
     };
   });
