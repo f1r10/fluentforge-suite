@@ -453,7 +453,9 @@ function toSheetRow(row: Record<string, unknown>) {
 function safeSheetName(name: string, existing: string[]) {
   const base =
     name
-      .replace(/[\\/?*\[\]:]/g, "_")
+      .replace(/[\\/?*:]/g, "_")
+      .replaceAll("[", "_")
+      .replaceAll("]", "_")
       .slice(0, 31) || "Sheet";
   if (!existing.includes(base)) return base;
 
