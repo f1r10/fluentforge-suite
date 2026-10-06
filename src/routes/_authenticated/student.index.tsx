@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Dumbbell, History, LogOut, Target } from "lucide-react";
-import { heartbeat, setMyLanguage } from "@/lib/student.functions";
+import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Clock3, Dumbbell, Heart, History, LogOut, Target } from "lucide-react";
+import { getMyDashboardSettings, heartbeat, listMyFavorites, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
 import { listStudentExams } from "@/lib/exam-attempt.functions";
@@ -32,6 +32,28 @@ function StudentHome() {
     queryKey: ["student-exams"],
     queryFn: () => listStudentExams(),
   });
+  const { data: dashboardSettings } = useQuery({
+    queryKey: ["student-dashboard-settings"],
+    queryFn: () => getMyDashboardSettings(),
+  });
+  const { data: favorites = [] } = useQuery({
+    queryKey: ["my-favorites"],
+    queryFn: () => listMyFavorites(),
+  });
+  const visible = new Set(
+    dashboardSettings?.widgets ?? [
+      "catalogs",
+      "exams",
+      "practice",
+      "today",
+      "accuracy",
+      "study_time",
+      "progress",
+      "weak_topics",
+      "history",
+      "favorites",
+    ],
+  );
 
   useEffect(() => {
     if (me.interface_language) setLang(me.interface_language as Lang);
@@ -73,6 +95,7 @@ function StudentHome() {
         </div>
       </header>
 
+      {visible.has("catalogs") && (
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
           <h2 className="font-semibold">{t("my_catalogs")}</h2>
@@ -110,7 +133,9 @@ function StudentHome() {
           </div>
         )}
       </section>
+      )}
 
+      {visible.has("exams") && (
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
           <h2 className="font-semibold">{t("exams")}</h2>
@@ -134,7 +159,9 @@ function StudentHome() {
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
         </Link>
       </section>
+      )}
 
+      {visible.has("practice") && (
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
           <h2 className="font-semibold">{t("self_practice")}</h2>
@@ -153,7 +180,14 @@ function StudentHome() {
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
         </Link>
       </section>
+      )}
 
+      {(visible.has("today") ||
+        visible.has("accuracy") ||
+        visible.has("study_time") ||
+        visible.has("progress") ||
+        visible.has("weak_topics") ||
+        visible.has("history")) && (
       <section>
         <h2 className="mb-3 border-b border-border pb-2 font-semibold">{t("your_progress")}</h2>
         {!progress || progress.stats.total_answers === 0 ? (
@@ -161,21 +195,42 @@ function StudentHome() {
         ) : (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <ProgressCard icon={<Target className="h-4 w-4" />} label={t("today")} value={progress.stats.today_answers} />
-              <ProgressCard icon={<BarChart3 className="h-4 w-4" />} label={t("week")} value={progress.stats.week_answers} />
-              <ProgressCard
-                icon={<Target className="h-4 w-4" />}
-                label={t("accuracy")}
-                value={progress.stats.accuracy == null ? "—" : `${Math.round(progress.stats.accuracy * 100)}%`}
-              />
-              <ProgressCard
-                icon={<Target className="h-4 w-4" />}
-                label={t("current_mistakes")}
-                value={progress.stats.current_mistakes}
-              />
+              {visible.has("today") && (
+                <ProgressCard
+                  icon={<Target className="h-4 w-4" />}
+                  label={t("today")}
+                  value={progress.stats.today_answers}
+                />
+              )}
+              {visible.has("progress") && (
+                <ProgressCard
+                  icon={<BarChart3 className="h-4 w-4" />}
+                  label={t("week")}
+                  value={progress.stats.week_answers}
+                />
+              )}
+              {visible.has("accuracy") && (
+                <ProgressCard
+                  icon={<Target className="h-4 w-4" />}
+                  label={t("accuracy")}
+                  value={
+                    progress.stats.accuracy == null
+                      ? "—"
+                      : `${Math.round(progress.stats.accuracy * 100)}%`
+                  }
+                />
+              )}
+              {visible.has("study_time") && (
+                <ProgressCard
+                  icon={<Clock3 className="h-4 w-4" />}
+                  label={t("study_time")}
+                  value={formatStudyTime(Number(progress.stats.total_time_ms))}
+                />
+              )}
             </div>
 
-            {progress.daily.some((day) => day.attempts > 0) && (
+            {visible.has("progress") &&
+              progress.daily.some((day) => day.attempts > 0) && (
               <div className="rounded-md border border-border p-3">
                 <div className="mb-3 text-sm font-medium">{t("last_14_days")}</div>
                 <div className="flex h-24 items-end gap-1">
@@ -195,11 +250,16 @@ function StudentHome() {
               </div>
             )}
 
-            {progress.topics.length > 0 && (
+            {visible.has("weak_topics") && progress.topics.length > 0 && (
               <div className="rounded-md border border-border p-3">
-                <div className="mb-2 text-sm font-medium">{t("topic_progress")}</div>
+                <div className="mb-2 text-sm font-medium">{t("weak_topics")}</div>
                 <div className="space-y-2">
-                  {progress.topics.slice(0, 6).map((topic) => (
+                  {[...progress.topics]
+                    .sort((a, b) =>
+                      Number(a.accuracy ?? 1) - Number(b.accuracy ?? 1),
+                    )
+                    .slice(0, 6)
+                    .map((topic) => (
                     <div key={topic.topic_id} className="grid grid-cols-[1fr_auto] items-center gap-3 text-sm">
                       <div className="min-w-0 truncate">{topic.topic_name}</div>
                       <div className="text-xs text-muted-foreground">
@@ -211,6 +271,7 @@ function StudentHome() {
               </div>
             )}
 
+            {visible.has("history") && (
             <div className="rounded-md border border-border p-3">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <History className="h-4 w-4 text-muted-foreground" />
@@ -241,13 +302,55 @@ function StudentHome() {
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
       </section>
+      )}
+
+      {visible.has("favorites") && (
+        <section className="mt-8">
+          <h2 className="mb-3 border-b border-border pb-2 font-semibold">
+            {t("favorites")}
+          </h2>
+          {favorites.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">
+              {t("no_favorites")}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {favorites.slice(0, 8).map((item) => (
+                <div
+                  key={`${item.entity_type}:${item.entity_id}`}
+                  className="flex items-start gap-3 rounded-md border border-border p-3"
+                >
+                  <Heart className="mt-0.5 h-4 w-4 shrink-0 fill-current text-muted-foreground" />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {item.title}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {t(item.entity_type)}{item.subtitle ? ` · ${item.subtitle}` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
 
+
+function formatStudyTime(milliseconds: number) {
+  const minutes = Math.max(0, Math.round(milliseconds / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
 
 function ProgressCard({
   icon,
