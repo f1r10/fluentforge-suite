@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { createHmac, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
@@ -818,5 +819,481 @@ export const finishPractice = createServerFn({ method: "POST" })
         max_score: maxScore,
         accuracy: maxScore > 0 ? score / maxScore : null,
       },
+    };
+  });
+
+
+type SelfPracticeFilters = {
+  language: string;
+  level: string;
+  type: string;
+  topicId: string | null;
+  catalogId: string | null;
+  sourceFileId: string | null;
+  mode: "all" | "mistakes" | "unused";
+  count: number;
+};
+
+const selfPracticeFiltersSchema = z.object({
+  language: z.string().max(10).default(""),
+  level: z.string().max(20).default(""),
+  type: z.string().max(60).default(""),
+  topicId: z.string().uuid().nullable().default(null),
+  catalogId: z.string().uuid().nullable().default(null),
+  sourceFileId: z.string().uuid().nullable().default(null),
+  mode: z.enum(["all", "mistakes", "unused"]).default("all"),
+  count: z.number().int().min(1).max(100).default(20),
+});
+
+type SelfPracticeTokenPayload = {
+  v: 1;
+  studentId: string;
+  sessionId: string;
+  questionIds: string[];
+  filters: SelfPracticeFilters;
+  exp: number;
+};
+
+function practiceSigningSecret() {
+  const secret =
+    process.env["SELF_PRACTICE_SIGNING_KEY"] ??
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ??
+    process.env["SETUP_TOKEN"];
+  if (!secret) {
+    throw new Error("SELF_PRACTICE_SIGNING_KEY is not configured.");
+  }
+  return secret;
+}
+
+function signSelfPracticePayload(payload: SelfPracticeTokenPayload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", practiceSigningSecret()).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+function verifySelfPracticeToken(token: string, studentId: string): SelfPracticeTokenPayload {
+  const [body, signature] = token.split(".");
+  if (!body || !signature) throw new Error("Invalid practice session.");
+
+  const expected = createHmac("sha256", practiceSigningSecret()).update(body).digest();
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(signature, "base64url");
+  } catch {
+    throw new Error("Invalid practice session.");
+  }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error("Invalid practice session.");
+  }
+
+  let payload: SelfPracticeTokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as SelfPracticeTokenPayload;
+  } catch {
+    throw new Error("Invalid practice session.");
+  }
+
+  if (payload.v !== 1 || payload.studentId !== studentId || payload.exp < Date.now()) {
+    throw new Error("Practice session expired or is invalid.");
+  }
+  return payload;
+}
+
+export const getSelfPracticeOptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    await currentStudentId(context.supabase);
+
+    const [topics, sources, catalogs] = await Promise.all([
+      admin
+        .from("topics")
+        .select("id,name,parent_id")
+        .is("deleted_at", null)
+        .order("sort_order")
+        .order("name"),
+      admin
+        .from("source_files")
+        .select("id,original_filename")
+        .order("created_at", { ascending: false })
+        .limit(200),
+      admin
+        .from("catalogs")
+        .select("id,name")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("name"),
+    ]);
+
+    for (const result of [topics, sources, catalogs]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+
+    return {
+      topics: topics.data ?? [],
+      sources: sources.data ?? [],
+      catalogs: catalogs.data ?? [],
+      questionTypes: Object.values(TYPE_BY_ID).map((def) => ({
+        id: def.id,
+        label: def.label,
+      })),
+    };
+  });
+
+export const createSelfPractice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => selfPracticeFiltersSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+
+    let catalogQuestionIds: string[] | null = null;
+    if (data.catalogId) {
+      const { data: items, error } = await admin
+        .from("catalog_items")
+        .select("entity_id")
+        .eq("catalog_id", data.catalogId)
+        .eq("entity_type", "question");
+      if (error) throw new Error(error.message);
+      catalogQuestionIds = (items ?? []).map((x) => x.entity_id);
+      if (!catalogQuestionIds.length) {
+        return {
+          sessionId: crypto.randomUUID(),
+          token: "",
+          filters: data,
+          questions: [],
+        };
+      }
+    }
+
+    let select =
+      "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id,learning_language,level,source_file_id" +
+      (data.topicId ? ",qt:question_topics!inner(topic_id)" : "");
+
+    let q = admin
+      .from("questions")
+      .select(select)
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .or("context_kind.eq.none,reusable_independently.eq.true")
+      .order("updated_at", { ascending: false })
+      .limit(1000);
+
+    if (data.language) q = q.eq("learning_language", data.language);
+    if (data.level) q = q.eq("level", data.level);
+    if (data.type) q = q.eq("question_type", data.type);
+    if (data.topicId) q = q.eq("qt.topic_id", data.topicId);
+    if (data.sourceFileId) q = q.eq("source_file_id", data.sourceFileId);
+    if (catalogQuestionIds) q = q.in("id", catalogQuestionIds);
+
+    const { data: candidatesRaw, error } = await q;
+    if (error) throw new Error(error.message);
+
+    let candidates = (candidatesRaw ?? []) as unknown as Array<
+      LoadedQuestion & {
+        learning_language: string | null;
+        level: string | null;
+        source_file_id: string | null;
+      }
+    >;
+
+    if (candidates.length && data.mode !== "all") {
+      const candidateIds = candidates.map((x) => x.id);
+      const { data: activity, error: activityError } = await admin
+        .from("activity_events")
+        .select("entity_id,is_correct,created_at")
+        .eq("student_id", studentId)
+        .eq("entity_type", "question")
+        .in("entity_id", candidateIds)
+        .order("created_at", { ascending: false });
+      if (activityError) throw new Error(activityError.message);
+
+      if (data.mode === "unused") {
+        const seen = new Set((activity ?? []).map((row) => row.entity_id).filter(Boolean));
+        candidates = candidates.filter((question) => !seen.has(question.id));
+      } else {
+        const latest = new Map<string, boolean | null>();
+        for (const row of activity ?? []) {
+          if (!row.entity_id || latest.has(row.entity_id)) continue;
+          latest.set(row.entity_id, row.is_correct);
+        }
+        candidates = candidates.filter((question) => latest.get(question.id) === false);
+      }
+    }
+
+    const selected = shuffle(candidates).slice(0, data.count);
+    const sessionId = crypto.randomUUID();
+    const filters: SelfPracticeFilters = data;
+    const token = selected.length
+      ? signSelfPracticePayload({
+          v: 1,
+          studentId,
+          sessionId,
+          questionIds: selected.map((question) => question.id),
+          filters,
+          exp: Date.now() + 6 * 60 * 60 * 1000,
+        })
+      : "";
+
+    if (selected.length) {
+      const { error: logError } = await admin.from("activity_events").insert({
+        student_id: studentId,
+        category: "practice",
+        event_type: "self_practice_started",
+        entity_type: null,
+        entity_id: null,
+        details: {
+          session_id: sessionId,
+          filters,
+          question_count: selected.length,
+        } as never,
+      });
+      if (logError) throw new Error(logError.message);
+    }
+
+    return {
+      sessionId,
+      token,
+      filters,
+      questions: selected.map(publicQuestion),
+    };
+  });
+
+export const submitSelfPracticeAnswer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        token: z.string().min(1).max(100_000),
+        answer: answerInputSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    const session = verifySelfPracticeToken(data.token, studentId);
+
+    if (!session.questionIds.includes(data.answer.questionId)) {
+      throw new Error("Question is not part of this practice session.");
+    }
+
+    const { data: row, error } = await admin
+      .from("questions")
+      .select(
+        "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id",
+      )
+      .eq("id", data.answer.questionId)
+      .eq("status", "active")
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Question is no longer available.");
+
+    const question = row as LoadedQuestion;
+    const result = gradeLoadedQuestion(question, data.answer.response);
+
+    const { error: logError } = await admin.from("activity_events").insert({
+      student_id: studentId,
+      category: "practice",
+      event_type: "self_practice_answer",
+      entity_type: "question",
+      entity_id: question.id,
+      is_correct: result.is_correct,
+      response: data.answer.response as never,
+      duration_ms: data.answer.duration_ms,
+      details: {
+        session_id: session.sessionId,
+        score: result.score,
+        max_score: result.max_score,
+        question_version: question.current_version,
+        question_type: question.question_type,
+        needs_review: result.needs_review,
+        filters: session.filters,
+      } as never,
+    });
+    if (logError) throw new Error(logError.message);
+
+    return {
+      question_id: question.id,
+      question_version: question.current_version,
+      question_type: question.question_type,
+      ...result,
+      explanation: question.explanation,
+      answer_key: question.answer_key,
+    };
+  });
+
+export const finishSelfPractice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({ token: z.string().min(1).max(100_000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    const session = verifySelfPracticeToken(data.token, studentId);
+
+    const { data: rows, error } = await admin
+      .from("activity_events")
+      .select("entity_id,is_correct,details,created_at")
+      .eq("student_id", studentId)
+      .eq("event_type", "self_practice_answer")
+      .in("entity_id", session.questionIds)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+
+    const latest = new Map<string, { is_correct: boolean | null; details: Record<string, unknown> }>();
+    for (const row of rows ?? []) {
+      const details = row.details as Record<string, unknown>;
+      if (details["session_id"] !== session.sessionId || !row.entity_id || latest.has(row.entity_id)) continue;
+      latest.set(row.entity_id, {
+        is_correct: row.is_correct,
+        details,
+      });
+    }
+
+    const answered = latest.size;
+    const gradedRows = [...latest.values()].filter((entry) => typeof entry.details["score"] === "number");
+    const score = gradedRows.reduce((sum, entry) => sum + Number(entry.details["score"] ?? 0), 0);
+    const maxScore = gradedRows.reduce((sum, entry) => sum + Number(entry.details["max_score"] ?? 0), 0);
+
+    const summary = {
+      total: session.questionIds.length,
+      answered,
+      graded: gradedRows.length,
+      correct: [...latest.values()].filter((entry) => entry.is_correct === true).length,
+      score,
+      max_score: maxScore,
+      accuracy: maxScore > 0 ? score / maxScore : null,
+    };
+
+    const { error: logError } = await admin.from("activity_events").insert({
+      student_id: studentId,
+      category: "practice",
+      event_type: "self_practice_finished",
+      entity_type: null,
+      entity_id: null,
+      details: {
+        session_id: session.sessionId,
+        filters: session.filters,
+        ...summary,
+      } as never,
+    });
+    if (logError) throw new Error(logError.message);
+
+    return summary;
+  });
+
+export const getStudentPracticeProgress = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+
+    const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const { data: recent, error } = await admin
+      .from("activity_events")
+      .select("id,event_type,entity_id,is_correct,duration_ms,details,created_at")
+      .eq("student_id", studentId)
+      .eq("category", "practice")
+      .gte("created_at", since30)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (error) throw new Error(error.message);
+
+    const answerEvents = (recent ?? []).filter((row) =>
+      ["practice_answer", "self_practice_answer"].includes(row.event_type),
+    );
+    const finished = (recent ?? []).filter((row) =>
+      ["practice_finished", "self_practice_finished"].includes(row.event_type),
+    );
+
+    const todayAnswers = answerEvents.filter((row) => new Date(row.created_at) >= today);
+    const totalDurationMs = answerEvents.reduce((sum, row) => sum + (row.duration_ms ?? 0), 0);
+    const correct = answerEvents.filter((row) => row.is_correct === true).length;
+    const autoGraded = answerEvents.filter((row) => row.is_correct !== null).length;
+
+    const byQuestion = new Map<string, { attempts: number; correct: number; incorrect: number; last_at: string }>();
+    for (const row of answerEvents) {
+      if (!row.entity_id) continue;
+      const entry = byQuestion.get(row.entity_id) ?? { attempts: 0, correct: 0, incorrect: 0, last_at: row.created_at };
+      entry.attempts += 1;
+      if (row.is_correct === true) entry.correct += 1;
+      if (row.is_correct === false) entry.incorrect += 1;
+      if (row.created_at > entry.last_at) entry.last_at = row.created_at;
+      byQuestion.set(row.entity_id, entry);
+    }
+
+    const weakIds = [...byQuestion.entries()]
+      .filter(([, value]) => value.incorrect > 0)
+      .sort((a, b) => b[1].incorrect - a[1].incorrect || b[1].attempts - a[1].attempts)
+      .slice(0, 10)
+      .map(([id]) => id);
+
+    const { data: weakQuestions, error: weakError } = weakIds.length
+      ? await admin.from("questions").select("id,prompt,question_type,level").in("id", weakIds)
+      : { data: [], error: null };
+    if (weakError) throw new Error(weakError.message);
+    const weakMap = new Map((weakQuestions ?? []).map((question) => [question.id, question]));
+
+    const history = finished.slice(0, 30).map((row) => {
+      const details = row.details as Record<string, unknown>;
+      return {
+        id: row.id,
+        kind: row.event_type === "self_practice_finished" ? ("self" as const) : ("catalog" as const),
+        at: row.created_at,
+        answered: Number(details["answered"] ?? details["total"] ?? 0),
+        score: typeof details["score"] === "number" ? details["score"] : null,
+        max_score: typeof details["max_score"] === "number" ? details["max_score"] : null,
+        accuracy: typeof details["accuracy"] === "number" ? details["accuracy"] : null,
+        catalog_id: typeof details["catalog_id"] === "string" ? details["catalog_id"] : null,
+      };
+    });
+
+    return {
+      today: {
+        answered: todayAnswers.length,
+        correct: todayAnswers.filter((row) => row.is_correct === true).length,
+        accuracy:
+          todayAnswers.filter((row) => row.is_correct !== null).length > 0
+            ? todayAnswers.filter((row) => row.is_correct === true).length /
+              todayAnswers.filter((row) => row.is_correct !== null).length
+            : null,
+      },
+      last30Days: {
+        answered: answerEvents.length,
+        correct,
+        accuracy: autoGraded > 0 ? correct / autoGraded : null,
+        study_time_ms: totalDurationMs,
+        practices_finished: finished.length,
+      },
+      weakQuestions: weakIds
+        .map((id) => {
+          const q = weakMap.get(id);
+          const stats = byQuestion.get(id)!;
+          return q
+            ? {
+                id,
+                prompt: q.prompt,
+                question_type: q.question_type,
+                level: q.level,
+                attempts: stats.attempts,
+                incorrect: stats.incorrect,
+                correct: stats.correct,
+                last_at: stats.last_at,
+              }
+            : null;
+        })
+        .filter(Boolean),
+      history,
     };
   });
