@@ -134,12 +134,13 @@ function CatalogsPage() {
               <th className="hidden px-3 py-2 font-medium sm:table-cell">{t("assignments")}</th>
               <th className="hidden px-3 py-2 font-medium md:table-cell">{t("status")}</th>
               <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("last_active")}</th>
+              <th className="w-28 px-3 py-2 font-medium">{t("edit")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {visible.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
                   {t("no_results")}
                 </td>
               </tr>
@@ -169,6 +170,13 @@ function CatalogsPage() {
                 <td className="hidden px-3 py-2 md:table-cell">{t(catalog.status)}</td>
                 <td className="hidden px-3 py-2 text-muted-foreground lg:table-cell">
                   {formatDateTime(catalog.updated_at, lang)}
+                </td>
+                <td className="px-3 py-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/teacher/catalogs/$id" params={{ id: catalog.id }}>
+                      {t("edit")}
+                    </Link>
+                  </Button>
                 </td>
               </tr>
             ))}
