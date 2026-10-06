@@ -418,11 +418,33 @@ async function hydrateAttemptMediaUrls(
   snapshot: ReturnType<typeof sanitizeAttemptSnapshot>,
   deadlineAt: string | null,
 ) {
-  const { resolveMediaUrl } = await import("./media.server");
+  const { hydrateQuestionMedia, resolveMediaUrl } = await import("./media.server");
   const remainingSeconds = deadlineAt
     ? Math.max(0, Math.ceil((new Date(deadlineAt).getTime() - Date.now()) / 1000))
     : 60 * 60;
   const expiresIn = Math.max(15 * 60, Math.min(26 * 60 * 60, remainingSeconds + 10 * 60));
+
+  const questionRefs: Array<{ payload: unknown }> = [];
+  for (const section of snapshot.sections) {
+    for (const block of section.blocks) {
+      if (block.kind === "question") {
+        questionRefs.push(block.question);
+      } else {
+        for (const set of block.question_sets) {
+          questionRefs.push(...set.questions);
+        }
+      }
+    }
+  }
+
+  const hydratedQuestions = await hydrateQuestionMedia(
+    admin,
+    questionRefs,
+    expiresIn,
+  );
+  hydratedQuestions.forEach((question, index) => {
+    questionRefs[index]!.payload = question.payload;
+  });
 
   for (const section of snapshot.sections) {
     for (const block of section.blocks) {
