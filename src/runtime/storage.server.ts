@@ -76,7 +76,7 @@ export function validateRuntimeObjectPath(value: string) {
   return value;
 }
 
-function objectPath(bucket: RuntimeBucket, object: string) {
+export function runtimeObjectPath(bucket: RuntimeBucket, object: string) {
   const safe = validateRuntimeObjectPath(object);
   const root = path.resolve(storageRoot(), bucket);
   const resolved = path.resolve(root, safe);
@@ -86,7 +86,7 @@ function objectPath(bucket: RuntimeBucket, object: string) {
   return resolved;
 }
 
-function metadataPath(bucket: RuntimeBucket, object: string) {
+export function runtimeMetadataPath(bucket: RuntimeBucket, object: string) {
   const safe = validateRuntimeObjectPath(object);
   const root = path.resolve(storageRoot(), ".metadata", bucket);
   const resolved = path.resolve(root, safe + ".json");
@@ -177,7 +177,7 @@ async function readMetadata(
 ): Promise<Record<string, unknown>> {
   try {
     return JSON.parse(
-      await readFile(metadataPath(bucket, object), "utf8"),
+      await readFile(runtimeMetadataPath(bucket, object), "utf8"),
     ) as Record<string, unknown>;
   } catch {
     return {};
@@ -189,7 +189,7 @@ export async function writeRuntimeObjectMetadata(
   object: string,
   metadata: Record<string, unknown>,
 ) {
-  const target = metadataPath(bucket, object);
+  const target = runtimeMetadataPath(bucket, object);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, JSON.stringify(metadata), {
     encoding: "utf8",
@@ -201,7 +201,7 @@ export async function runtimeObjectInfo(
   bucket: RuntimeBucket,
   object: string,
 ) {
-  const target = objectPath(bucket, object);
+  const target = runtimeObjectPath(bucket, object);
   const fileStat = await stat(target);
   if (!fileStat.isFile()) throw new Error("Storage object is not a file.");
   const metadata = await readMetadata(bucket, object);
@@ -324,7 +324,7 @@ export function createRuntimeStorageServer() {
         ) {
           try {
             const safe = validateRuntimeObjectPath(object);
-            const target = objectPath(bucket, safe);
+            const target = runtimeObjectPath(bucket, safe);
             const bytes = await toBuffer(value);
             if (bytes.byteLength > runtimeBucketLimit(bucket)) {
               throw new Error("Storage object exceeds bucket size limit.");
@@ -367,7 +367,7 @@ export function createRuntimeStorageServer() {
         async download(object: string) {
           try {
             const safe = validateRuntimeObjectPath(object);
-            const bytes = await readFile(objectPath(bucket, safe));
+            const bytes = await readFile(runtimeObjectPath(bucket, safe));
             const metadata = await readMetadata(bucket, safe);
             return {
               data: new Blob([bytes], {
@@ -387,8 +387,8 @@ export function createRuntimeStorageServer() {
           try {
             for (const object of objects) {
               const safe = validateRuntimeObjectPath(object);
-              await rm(objectPath(bucket, safe), { force: true });
-              await rm(metadataPath(bucket, safe), { force: true });
+              await rm(runtimeObjectPath(bucket, safe), { force: true });
+              await rm(runtimeMetadataPath(bucket, safe), { force: true });
             }
             return { data: objects.map((name) => ({ name })), error: null };
           } catch (error) {
