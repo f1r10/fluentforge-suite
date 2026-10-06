@@ -405,7 +405,7 @@ export function createRuntimeStorageServer() {
               ? validateRuntimeObjectPath(folder)
               : "";
             const directory = normalizedFolder
-              ? objectPath(bucket, normalizedFolder)
+              ? runtimeObjectPath(bucket, normalizedFolder)
               : path.resolve(storageRoot(), bucket);
 
             let entries: Awaited<ReturnType<typeof readdir>>;
