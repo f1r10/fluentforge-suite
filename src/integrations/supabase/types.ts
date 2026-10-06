@@ -2678,6 +2678,51 @@ export type Database = {
           items: number
         }[]
       }
+      teacher_question_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          question_id: string
+          prompt: string
+          question_type: string
+          attempts: number
+          correct: number
+          incorrect: number
+          manual: number
+          skips: number
+          accuracy: number | null
+          skip_rate: number | null
+          avg_time_ms: number | null
+          difficulty_suggestion: string | null
+        }[]
+      }
+      teacher_catalog_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          catalog_id: string
+          catalog_name: string
+          sessions: number
+          total_answered: number
+          avg_accuracy: number | null
+          avg_score_percent: number | null
+          last_activity: string | null
+        }[]
+      }
+      teacher_student_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          student_id: string
+          student_name: string
+          username: string
+          status: Database["public"]["Enums"]["student_status"]
+          last_active_at: string | null
+          practice_answers: number
+          practice_accuracy: number | null
+          study_time_ms: number
+          exam_attempts: number
+          exam_accuracy_percent: number | null
+          last_activity: string | null
+        }[]
+      }
       student_practice_stats: {
         Args: { p_student_id: string }
         Returns: {
