@@ -110,7 +110,7 @@ services:
         done
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     read_only: true
     cap_drop:
