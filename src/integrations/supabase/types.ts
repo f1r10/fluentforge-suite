@@ -1777,6 +1777,60 @@ export type Database = {
         }
         Relationships: []
       }
+      student_vocabulary_state: {
+        Row: {
+          student_id: string
+          entry_id: string
+          state: string
+          correct_count: number
+          incorrect_count: number
+          correct_streak: number
+          last_result: boolean | null
+          last_mode: string | null
+          last_practiced_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          student_id: string
+          entry_id: string
+          state?: string
+          correct_count?: number
+          incorrect_count?: number
+          correct_streak?: number
+          last_result?: boolean | null
+          last_mode?: string | null
+          last_practiced_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          student_id?: string
+          entry_id?: string
+          state?: string
+          correct_count?: number
+          incorrect_count?: number
+          correct_streak?: number
+          last_result?: boolean | null
+          last_mode?: string | null
+          last_practiced_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_vocabulary_state_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_vocabulary_state_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "vocabulary_entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_access_keys: {
         Row: {
           created_at: string
