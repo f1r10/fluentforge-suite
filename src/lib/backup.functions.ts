@@ -665,7 +665,11 @@ async function collectStorage(
     brandingRow?.["value"] && typeof brandingRow["value"] === "object"
       ? (brandingRow["value"] as Record<string, unknown>)
       : null;
-  for (const key of ["logo_storage_path", "favicon_storage_path"] as const) {
+  for (const key of [
+    "logo_storage_path",
+    "favicon_storage_path",
+    "login_image_storage_path",
+  ] as const) {
     const path =
       brandingValue && typeof brandingValue[key] === "string"
         ? (brandingValue[key] as string)
@@ -790,7 +794,7 @@ async function restoreTable(
       }
 
       const value = { ...(row["value"] as Record<string, unknown>) };
-      for (const kind of ["logo", "favicon"] as const) {
+      for (const kind of ["logo", "favicon", "login_image"] as const) {
         const pathKey = `${kind}_storage_path`;
         const urlKey = `${kind}_url`;
         const path =
