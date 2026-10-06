@@ -35,8 +35,8 @@ async function verifySchemaSecurity() {
     select count(*)::int as count
     from public.fluentforge_schema_migrations
   `;
-  if (migrationCount < 19) {
-    fail(`Expected at least 19 applied migrations, found ${migrationCount}.`);
+  if (migrationCount < 29) {
+    fail(`Expected at least 29 applied migrations, found ${migrationCount}.`);
   } else {
     pass(`Applied migrations: ${migrationCount}`);
   }
@@ -121,6 +121,29 @@ async function verifySchemaSecurity() {
     pass("Service-only RPC privileges are enforced");
   }
 
+  const resetColumns = await sql`
+    select column_name
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'exam_attempts'
+      and column_name = any(${sql.array(["reset_at", "reset_by"])})
+  `;
+  const resetColumnNames = new Set(
+    resetColumns.map((row) => row.column_name),
+  );
+  for (const column of ["reset_at", "reset_by"]) {
+    if (!resetColumnNames.has(column)) {
+      fail(`public.exam_attempts.${column} is missing.`);
+    }
+  }
+  if (
+    ["reset_at", "reset_by"].every((column) =>
+      resetColumnNames.has(column),
+    )
+  ) {
+    pass("Exam attempt reset metadata columns exist");
+  }
+
   const publicSettings = await sql`
     select key
     from public.system_settings
@@ -185,6 +208,7 @@ async function verifySchemaSecurity() {
     "question_reports_unresolved_created_idx",
     "exam_listening_plays_attempt_idx",
     "attempt_answers_attempt_updated_idx",
+    "exam_attempts_student_exam_active_idx",
   ];
   const indexRows = await sql`
     select indexname
