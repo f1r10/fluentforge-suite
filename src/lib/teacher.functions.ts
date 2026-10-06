@@ -712,6 +712,59 @@ export const saveStudentDashboardSettings = createServerFn({
     return { ok: true };
   });
 
+export const saveMediaSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        max_video_mb: z.number().int().min(10).max(700),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: currentRow, error: readError } = await context.supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "media")
+      .maybeSingle();
+    if (readError) throw new Error(readError.message);
+
+    const current =
+      currentRow?.value && typeof currentRow.value === "object"
+        ? (currentRow.value as Record<string, unknown>)
+        : {};
+
+    const value = {
+      ...current,
+      max_video_mb: data.max_video_mb,
+    };
+
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "media",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "media_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "media",
+      summary: "Media upload settings updated",
+      details: { max_video_mb: data.max_video_mb },
+    });
+
+    return { ok: true };
+  });
+
 export const getLanguageSettings = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
