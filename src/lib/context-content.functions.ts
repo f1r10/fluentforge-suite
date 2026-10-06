@@ -550,27 +550,61 @@ export const linkQuestionToContext = createServerFn({ method: "POST" })
         questionId: z.string().uuid(),
         kind: z.enum(["reading", "listening"]),
         questionSetId: z.string().uuid(),
-        sort_order: z.number().int().min(0).max(10_000).default(0),
+        sort_order: z.number().int().min(0).max(10_000).optional(),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    const table =
+      data.kind === "reading"
+        ? "reading_question_sets"
+        : "listening_question_sets";
+    const { data: target, error: targetError } = await context.supabase
+      .from(table)
+      .select("id")
+      .eq("id", data.questionSetId)
+      .maybeSingle();
+    if (targetError) throw new Error(targetError.message);
+    if (!target) throw new Error("Question set was not found.");
+
+    const column =
+      data.kind === "reading"
+        ? "reading_question_set_id"
+        : "listening_question_set_id";
+    let sortOrder = data.sort_order;
+    if (sortOrder == null) {
+      const { data: last, error: lastError } = await context.supabase
+        .from("questions")
+        .select("context_sort")
+        .eq(column, data.questionSetId)
+        .is("deleted_at", null)
+        .order("context_sort", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastError) throw new Error(lastError.message);
+      sortOrder = Number(last?.context_sort ?? -1) + 1;
+    }
+
     const patch =
       data.kind === "reading"
         ? {
             context_kind: "reading" as const,
             reading_question_set_id: data.questionSetId,
             listening_question_set_id: null,
-            context_sort: data.sort_order,
+            context_sort: sortOrder,
           }
         : {
             context_kind: "listening" as const,
             reading_question_set_id: null,
             listening_question_set_id: data.questionSetId,
-            context_sort: data.sort_order,
+            context_sort: sortOrder,
           };
 
-    const { error } = await context.supabase.from("questions").update(patch).eq("id", data.questionId);
+    const { error } = await context.supabase
+      .from("questions")
+      .update(patch)
+      .eq("id", data.questionId)
+      .is("deleted_at", null);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -588,6 +622,148 @@ export const unlinkQuestionFromContext = createServerFn({ method: "POST" })
         context_sort: 0,
       })
       .eq("id", data.questionId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+
+export const searchContextQuestionCandidates = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        search: z.string().max(200).default(""),
+        type: z.string().max(60).default(""),
+        page: z.number().int().min(0).default(0),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const pageSize = 40;
+    let query = context.supabase
+      .from("questions")
+      .select(
+        "id,question_type,prompt,status,level,learning_language,context_kind,reading_question_set_id,listening_question_set_id",
+        { count: "exact" },
+      )
+      .is("deleted_at", null)
+      .neq("status", "archived")
+      .order("updated_at", { ascending: false })
+      .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
+
+    if (data.type) query = query.eq("question_type", data.type);
+    if (data.search.trim()) {
+      const safe = data.search.trim().replace(/[%,()]/g, " ");
+      query = query.ilike("prompt", `%${safe}%`);
+    }
+
+    const { data: rows, count, error } = await query;
+    if (error) throw new Error(error.message);
+    return {
+      rows: rows ?? [],
+      total: count ?? 0,
+      pageSize,
+    };
+  });
+
+export const reorderContextQuestions = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        kind: z.enum(["reading", "listening"]),
+        questionSetId: z.string().uuid(),
+        questionIds: z.array(z.string().uuid()).max(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const column =
+      data.kind === "reading"
+        ? "reading_question_set_id"
+        : "listening_question_set_id";
+    const { data: rows, error } = await context.supabase
+      .from("questions")
+      .select("id")
+      .eq(column, data.questionSetId)
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+
+    const current = new Set((rows ?? []).map((row) => row.id));
+    const requested = new Set(data.questionIds);
+    if (
+      current.size !== requested.size ||
+      [...current].some((id) => !requested.has(id))
+    ) {
+      throw new Error("Question order does not match the question set.");
+    }
+
+    for (let index = 0; index < data.questionIds.length; index += 1) {
+      const { error: updateError } = await context.supabase
+        .from("questions")
+        .update({ context_sort: index })
+        .eq("id", data.questionIds[index]!)
+        .eq(column, data.questionSetId);
+      if (updateError) throw new Error(updateError.message);
+    }
+
+    return { ok: true };
+  });
+
+export const deleteContextQuestionSet = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        kind: z.enum(["reading", "listening"]),
+        id: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const table =
+      data.kind === "reading"
+        ? "reading_question_sets"
+        : "listening_question_sets";
+    const column =
+      data.kind === "reading"
+        ? "reading_question_set_id"
+        : "listening_question_set_id";
+
+    const { error: unlinkError } = await context.supabase
+      .from("questions")
+      .update({
+        context_kind: "none",
+        reading_question_set_id: null,
+        listening_question_set_id: null,
+        context_sort: 0,
+      })
+      .eq(column, data.id)
+      .is("deleted_at", null);
+    if (unlinkError) throw new Error(unlinkError.message);
+
+    const { error } = await context.supabase
+      .from(table)
+      .delete()
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteListeningSection = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({
+      id: z.string().uuid(),
+      listeningId: z.string().uuid(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("listening_sections")
+      .delete()
+      .eq("id", data.id)
+      .eq("listening_id", data.listeningId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
