@@ -35,7 +35,7 @@
 - [x] Browser-local resume for unfinished self-practice
 - [x] Practice analytics: today/week, accuracy, current mistakes, topic stats, 14-day activity
 - [x] Finished-practice history UI
-- [ ] Vocabulary practice modes beyond flashcard reveal
+- [x] Vocabulary practice: flashcards, translation recall, reverse recall, multiple choice, persistent learner state
 
 ## Exams
 - [x] Full exam builder and sections
