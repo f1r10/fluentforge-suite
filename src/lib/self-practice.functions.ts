@@ -25,6 +25,7 @@ const generatorSchema = z.object({
   sourceFileId: z.string().uuid().nullable().default(null),
   historyMode: historyModeSchema.default("all"),
   excludeAnswered: z.boolean().default(false),
+  feedbackMode: z.enum(["instant", "end"]).default("instant"),
 });
 
 export type SelfPracticeGenerator = z.infer<typeof generatorSchema>;
