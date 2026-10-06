@@ -4,6 +4,12 @@ import {
   type AiGradingPromptInput,
   type AiGradingSuggestion,
 } from "./ai-grading";
+import {
+  buildVocabularyEnrichmentMessages,
+  parseVocabularyEnrichmentText,
+  type VocabularyEnrichmentInput,
+  type VocabularyEnrichmentSuggestion,
+} from "./ai-vocabulary";
 
 export type AiProvider = "disabled" | "local" | "gemini";
 
@@ -65,6 +71,32 @@ export async function suggestOpenAnswerGrade(
   return {
     ...parsed,
     max_score: input.maxScore,
+    provider: config.provider,
+    model: config.model,
+    generated_at: new Date().toISOString(),
+  };
+}
+
+export async function suggestVocabularyEnrichment(
+  input: VocabularyEnrichmentInput,
+): Promise<VocabularyEnrichmentSuggestion> {
+  const config = readProviderConfig();
+  if (!config.available || config.provider === "disabled" || !config.model) {
+    throw new Error(
+      config.message ??
+        "AI enrichment is disabled. Configure AI_PROVIDER and the selected provider.",
+    );
+  }
+
+  const { system, user } = buildVocabularyEnrichmentMessages(input);
+  const raw =
+    config.provider === "local"
+      ? await callLocalProvider(config, system, user)
+      : await callGeminiProvider(config, system, user);
+  const parsed = parseVocabularyEnrichmentText(raw);
+
+  return {
+    ...parsed,
     provider: config.provider,
     model: config.model,
     generated_at: new Date().toISOString(),
