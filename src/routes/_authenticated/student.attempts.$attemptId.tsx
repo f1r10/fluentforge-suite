@@ -1,6 +1,6 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -94,14 +94,25 @@ type LocalBackup = {
 
 function AttemptPage() {
   const { attemptId } = Route.useParams();
-  const { t } = useI18n();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const { data, refetch } = useSuspenseQuery(attemptQuery(attemptId));
+  const { data } = useSuspenseQuery(attemptQuery(attemptId));
 
   if (data.attempt.status !== "in_progress") {
     return <ResultView attemptId={attemptId} data={data} />;
   }
+
+  return <ActiveAttempt attemptId={attemptId} data={data} />;
+}
+
+function ActiveAttempt({
+  attemptId,
+  data,
+}: {
+  attemptId: string;
+  data: AttemptData;
+}) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { refetch } = useSuspenseQuery(attemptQuery(attemptId));
 
   const views = flattenAttempt(data);
   const initialAnswers = Object.fromEntries(
