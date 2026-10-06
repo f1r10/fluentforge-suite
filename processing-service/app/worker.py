@@ -377,9 +377,15 @@ def _apply_profile(items: list[dict], profile: dict) -> None:
     expected_content = profile.get("expected_content") or "auto"
 
     for item in items:
-        if expected_content == "questions" and item["item_type"] != "question":
+        item_type = item["item_type"]
+        if expected_content == "questions" and item_type != "question":
             item["confidence"] = min(float(item["confidence"]), 0.4)
-        if item["item_type"] != "question":
+        elif expected_content == "readings" and item_type not in {"reading", "question"}:
+            item["confidence"] = min(float(item["confidence"]), 0.4)
+        elif expected_content == "listenings" and item_type not in {"listening", "question"}:
+            item["confidence"] = min(float(item["confidence"]), 0.4)
+
+        if item_type not in {"question", "reading", "listening"}:
             continue
 
         payload = item.get("payload") or {}
