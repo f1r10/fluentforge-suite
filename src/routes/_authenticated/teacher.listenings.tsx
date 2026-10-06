@@ -27,6 +27,7 @@ import {
   syncTranscriptionJob,
 } from "@/lib/transcription.functions";
 import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -65,13 +66,13 @@ type EditorState = {
   questionSets: QuestionSet[];
 };
 
-const emptyEditor = (): EditorState => ({
+const emptyEditor = (learningLanguage = ""): EditorState => ({
   title: "",
   media_id: "",
   media_label: "",
   transcript: "",
   transcript_source: "none",
-  learning_language: "en",
+  learning_language: learningLanguage,
   level: "",
   status: "active",
   max_plays: "",
@@ -93,6 +94,7 @@ export const Route = createFileRoute("/_authenticated/teacher/listenings")({
 function ListeningsPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const languages = useContentLanguages();
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const topicOpts = topicOptions(topics);
   const [search, setSearch] = useState("");
@@ -142,7 +144,8 @@ function ListeningsPage() {
         media_label: row.media?.original_filename ?? "",
         transcript: row.transcript ?? "",
         transcript_source: (row.transcript_source as EditorState["transcript_source"]) ?? "none",
-        learning_language: row.learning_language ?? "en",
+        learning_language:
+          row.learning_language ?? languages.defaultLearningCode,
         level: row.level ?? "",
         status: row.status,
         max_plays: rules["max_plays"] == null ? "" : String(rules["max_plays"]),
@@ -324,7 +327,12 @@ function ListeningsPage() {
           <h1 className="text-2xl font-bold">{t("listenings")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button onClick={() => setEditor(emptyEditor())}>
+        <Button
+          disabled={languages.isPending}
+          onClick={() =>
+            setEditor(emptyEditor(languages.defaultLearningCode))
+          }
+        >
           <Plus className="h-4 w-4" />
           {t("add_listening")}
         </Button>
@@ -334,7 +342,11 @@ function ListeningsPage() {
         <Input value={search} placeholder={t("search")} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
         <select className={selectClass} value={language} onChange={(e) => { setLanguage(e.target.value); setPage(0); }}>
           <option value="">{t("all")} — {t("language")}</option>
-          <option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
+          {languages.all.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
         </select>
         <select className={selectClass} value={level} onChange={(e) => { setLevel(e.target.value); setPage(0); }}>
           <option value="">{t("all")} — {t("level")}</option>
@@ -413,8 +425,19 @@ function ListeningsPage() {
               <div className="grid gap-4 sm:grid-cols-4">
                 <Field label={t("language")}>
                   <select className={selectClass} value={editor.learning_language} onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}>
-                    <option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
-                    <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option>
+                    {editor.learning_language &&
+                      !languages.learning.some(
+                        (item) => item.code === editor.learning_language,
+                      ) && (
+                        <option value={editor.learning_language}>
+                          {editor.learning_language}
+                        </option>
+                      )}
+                    {languages.learning.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label={t("level")}>
