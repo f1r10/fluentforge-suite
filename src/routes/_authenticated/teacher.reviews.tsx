@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, Eye, Search, Sparkles } from "lucide-react";
+import { CheckCircle2, Eye, MessageSquareWarning, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,9 +12,11 @@ import {
   generateAiReviewSuggestion,
   getAiReviewStatus,
   listManualReviews,
+  listQuestionReports,
   listReleaseQueue,
   listReviewExams,
   releaseAttemptResult,
+  resolveQuestionReport,
   reviewManualAnswer,
 } from "@/lib/review.functions";
 import { formatDateTime } from "@/components/app/common";
@@ -34,6 +36,9 @@ function ReviewsPage() {
   const [examId, setExamId] = useState("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<ReviewRow | null>(null);
+  const [reportStatus, setReportStatus] = useState<
+    "open" | "resolved" | "all"
+  >("open");
 
   const { data, isFetching } = useQuery({
     queryKey: ["manual-reviews", status, search, examId, page],
@@ -58,6 +63,15 @@ function ReviewsPage() {
     queryFn: () => listReleaseQueue(),
   });
 
+  const { data: reportData } = useQuery({
+    queryKey: ["question-reports", reportStatus],
+    queryFn: () =>
+      listQuestionReports({
+        data: { status: reportStatus, page: 0 },
+      }),
+  });
+  const questionReports = reportData?.rows ?? [];
+
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
   const pageSize = data?.pageSize ?? 40;
@@ -67,6 +81,8 @@ function ReviewsPage() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["manual-reviews"] }),
       qc.invalidateQueries({ queryKey: ["release-queue"] }),
+      qc.invalidateQueries({ queryKey: ["question-reports"] }),
+      qc.invalidateQueries({ queryKey: ["teacher-notifications"] }),
       qc.invalidateQueries({ queryKey: ["exams-detailed"] }),
     ]);
   }
@@ -77,6 +93,111 @@ function ReviewsPage() {
         <h1 className="text-2xl font-bold">{t("student_questions_box")}</h1>
         <p className="text-sm text-muted-foreground">{t("review_box_hint")}</p>
       </div>
+
+      <section className="space-y-3 rounded-md border border-border p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold">
+              <MessageSquareWarning className="h-4 w-4" />
+              {t("reported_questions")}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {t("reported_questions_hint")}
+            </p>
+          </div>
+          <select
+            value={reportStatus}
+            onChange={(event) =>
+              setReportStatus(event.target.value as typeof reportStatus)
+            }
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="open">{t("pending")}</option>
+            <option value="resolved">{t("resolved")}</option>
+            <option value="all">{t("all")}</option>
+          </select>
+        </div>
+
+        {questionReports.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("no_question_reports")}
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">{t("student")}</th>
+                  <th className="px-3 py-2 font-medium">{t("question")}</th>
+                  <th className="hidden px-3 py-2 font-medium md:table-cell">
+                    {t("report_comment")}
+                  </th>
+                  <th className="hidden px-3 py-2 font-medium sm:table-cell">
+                    {t("reported_at")}
+                  </th>
+                  <th className="w-28" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {questionReports.map((report) => (
+                  <tr key={report.id}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{report.student.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {report.student.username}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="max-w-lg truncate">
+                        {report.question.prompt}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {report.question.question_type}
+                      </div>
+                    </td>
+                    <td className="hidden max-w-md px-3 py-2 text-muted-foreground md:table-cell">
+                      {report.comment || "—"}
+                    </td>
+                    <td className="hidden whitespace-nowrap px-3 py-2 text-muted-foreground sm:table-cell">
+                      {formatDateTime(report.created_at, lang)}
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <Button
+                        size="sm"
+                        variant={report.resolved_at ? "outline" : "default"}
+                        onClick={async () => {
+                          try {
+                            await resolveQuestionReport({
+                              data: {
+                                id: report.id,
+                                resolved: !report.resolved_at,
+                              },
+                            });
+                            toast.success(
+                              report.resolved_at
+                                ? t("question_report_reopened")
+                                : t("question_report_resolved"),
+                            );
+                            await refresh();
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : String(error),
+                            );
+                          }
+                        }}
+                      >
+                        {report.resolved_at ? t("reopen") : t("resolve")}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="space-y-3 rounded-md border border-border p-4">
         <div>
