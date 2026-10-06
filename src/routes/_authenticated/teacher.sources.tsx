@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileSearch, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +26,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 
+const importTargetSchema = z.enum([
+  "auto",
+  "questions",
+  "vocabulary",
+  "readings",
+  "listenings",
+  "mixed",
+]);
+type ImportTarget = z.infer<typeof importTargetSchema>;
+
 export const Route = createFileRoute("/_authenticated/teacher/sources")({
+  validateSearch: (search) =>
+    z
+      .object({ target: importTargetSchema.optional() })
+      .parse(search),
   component: SourcesPage,
 });
 
@@ -35,9 +50,13 @@ type ImportDetail = Awaited<ReturnType<typeof getDocumentImport>>;
 function SourcesPage() {
   const { t, lang } = useI18n();
   const qc = useQueryClient();
+  const { target: routeTarget } = Route.useSearch();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [keepOriginal, setKeepOriginal] = useState(false);
   const [profileId, setProfileId] = useState("");
+  const [expectedContent, setExpectedContent] = useState<ImportTarget>(
+    routeTarget ?? "auto",
+  );
   const [profileOpen, setProfileOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
@@ -52,6 +71,10 @@ function SourcesPage() {
     queryKey: ["document-import-profiles"],
     queryFn: () => listImportProfiles(),
   });
+
+  useEffect(() => {
+    if (routeTarget) setExpectedContent(routeTarget);
+  }, [routeTarget]);
 
   const activeIds = useMemo(
     () =>
@@ -115,6 +138,7 @@ function SourcesPage() {
           sourceFileId: finalized.sourceFileId,
           mode: "review",
           profileId: profileId || null,
+          expectedContent,
         },
       });
 
@@ -140,6 +164,23 @@ function SourcesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="h-9 max-w-56 rounded-md border border-input bg-background px-2 text-sm"
+            value={expectedContent}
+            onChange={(event) =>
+              setExpectedContent(event.target.value as ImportTarget)
+            }
+            aria-label={t("import_target")}
+          >
+            <option value="auto">{t("import_target_auto")}</option>
+            <option value="questions">{t("questions")}</option>
+            <option value="readings">{t("readings")}</option>
+            <option value="listenings">{t("listenings")}</option>
+            <option value="vocabulary">{t("vocabulary")}</option>
+            <option value="readings">{t("readings")}</option>
+            <option value="listenings">{t("listenings")}</option>
+            <option value="mixed">{t("mixed")}</option>
+          </select>
           <select
             className="h-9 max-w-56 rounded-md border border-input bg-background px-2 text-sm"
             value={profileId}
@@ -276,9 +317,7 @@ function ImportProfileDialog({
 }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
-  const [expectedContent, setExpectedContent] = useState<
-    "auto" | "questions" | "vocabulary" | "mixed"
-  >("auto");
+  const [expectedContent, setExpectedContent] = useState<ImportTarget>("auto");
   const [language, setLanguage] = useState("");
   const [level, setLevel] = useState("");
   const [status, setStatus] = useState<"draft" | "active">("draft");
@@ -705,6 +744,8 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
         refetch(),
         qc.invalidateQueries({ queryKey: ["document-imports"] }),
         qc.invalidateQueries({ queryKey: ["questions"] }),
+        qc.invalidateQueries({ queryKey: ["readings"] }),
+        qc.invalidateQueries({ queryKey: ["listenings"] }),
       ]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
