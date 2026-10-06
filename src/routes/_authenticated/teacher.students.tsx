@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  createStudent, listGroups, listStudents, regenerateKey, setStudentStatus, suggestUsername, terminateSessions, updateStudent,
+  createStudent, listGroups, listStudents, regenerateKey, revokeStudentKey, setStudentStatus, suggestUsername, terminateSessions, updateStudent,
 } from "@/lib/teacher.functions";
 import { useI18n } from "@/lib/i18n";
 import { ErrorText, formatDateTime } from "@/components/app/common";
@@ -97,6 +97,15 @@ function StudentsPage() {
                         try { const res = await regenerateKey({ data: { studentId: r.id } }); setShownKey({ name: `${r.first_name} ${r.last_name}`, key: res.key }); }
                         catch (e) { toast.error(String(e)); }
                       }}>{t("new_key")}</DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() =>
+                          confirm(`${t("revoke_key")}?`) &&
+                          act(() => revokeStudentKey({ data: { studentId: r.id } }), t("revoke_key"))
+                        }
+                      >
+                        {t("revoke_key")}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => act(() => terminateSessions({ data: { studentId: r.id } }), t("end_sessions"))}>{t("end_sessions")}</DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {r.status !== "active" && <DropdownMenuItem onClick={() => act(() => setStudentStatus({ data: { studentId: r.id, status: "active" } }), t("active"))}>{t("enable")}</DropdownMenuItem>}
