@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Activity, AlertTriangle, Eye, Flag, RotateCcw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -276,7 +277,12 @@ function AttemptDialog({
                       qc.invalidateQueries({ queryKey: ["release-queue"] }),
                       qc.invalidateQueries({ queryKey: ["teacher-analytics"] }),
                     ]);
+                    toast.success(t("attempt_reset_success"));
                     onClose();
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error ? error.message : String(error),
+                    );
                   } finally {
                     setResetting(false);
                   }
