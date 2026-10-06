@@ -56,8 +56,8 @@ function TeacherLayout() {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="border-b border-border bg-sidebar md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
-        <div className="flex items-center justify-between gap-2 px-4 py-3">
+      <aside className="border-b border-border bg-sidebar md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:overflow-hidden md:border-b-0 md:border-r">
+        <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             {b.logo_url && (
               <img
@@ -72,20 +72,20 @@ function TeacherLayout() {
           </div>
           <button onClick={signOut} className="text-muted-foreground md:hidden" aria-label={t("sign_out")}><LogOut className="h-5 w-5" /></button>
         </div>
-        <nav className="flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:overflow-visible">
+        <nav className="flex gap-1 overflow-x-auto px-2 pb-2 md:min-h-0 md:flex-1 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:overscroll-contain md:pb-3">
           {NAV.map((n) => (
             <Link
               key={n.to}
               to={n.to}
               activeOptions={{ exact: "exact" in n }}
-              className="flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent"
+              className="flex min-w-0 shrink-0 items-start gap-2 rounded-md px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent"
               activeProps={{ className: "bg-sidebar-accent font-semibold text-primary" }}
             >
-              <n.icon className="h-4 w-4" />{t(n.key)}
+              <n.icon className="mt-0.5 h-4 w-4 shrink-0" /><span className="min-w-0 break-words leading-tight">{t(n.key)}</span>
             </Link>
           ))}
         </nav>
-        <div className="hidden space-y-2 px-4 py-4 md:absolute md:bottom-0 md:block md:w-56">
+        <div className="hidden shrink-0 space-y-2 border-t border-sidebar-border bg-sidebar px-3 py-3 md:block">
           <LanguageSelect />
           <button onClick={signOut} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><LogOut className="h-4 w-4" />{t("sign_out")}</button>
         </div>
