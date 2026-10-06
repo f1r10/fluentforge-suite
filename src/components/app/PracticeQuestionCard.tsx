@@ -1,10 +1,13 @@
-import { ArrowDown, ArrowUp, Eye } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, FlagTriangleRight } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { TYPE_BY_ID } from "@/lib/question-types";
 import { useI18n } from "@/lib/i18n";
+import { reportQuestion } from "@/lib/notifications.functions";
 
 export type PracticeQuestion = {
   id: string;
@@ -62,6 +65,30 @@ export function PracticeQuestionCard({
 }) {
   const { t } = useI18n();
   const def = TYPE_BY_ID[question.question_type];
+  const [reporting, setReporting] = useState(false);
+
+  async function report() {
+    const comment = window.prompt(t("report_question_prompt"), "");
+    if (comment === null) return;
+    setReporting(true);
+    try {
+      const result = await reportQuestion({
+        data: {
+          questionId: question.id,
+          comment,
+        },
+      });
+      toast.success(
+        result.alreadyReported
+          ? t("question_already_reported")
+          : t("question_reported"),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReporting(false);
+    }
+  }
 
   return (
     <div className="rounded-md border border-border p-4">
@@ -86,6 +113,17 @@ export function PracticeQuestionCard({
             {t("check_answer")}
           </Button>
         )}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={reporting}
+          onClick={report}
+          className="ml-auto text-muted-foreground"
+        >
+          <FlagTriangleRight className="h-4 w-4" />
+          {t("report_question")}
+        </Button>
         {feedback && (
           <>
             <span className={feedback.is_correct ? "text-sm font-medium text-success" : "text-sm font-medium text-destructive"}>
