@@ -15,6 +15,13 @@ import {
   type PracticeResponse,
 } from "@/components/app/PracticeQuestionCard";
 import {
+  StudentListeningBlock,
+  StudentReadingBlock,
+  collectContextQuestions,
+  type StudentListeningPractice,
+  type StudentReadingPractice,
+} from "@/components/app/StudentContextPractice";
+import {
   finishSelfPractice,
   generateSelfPractice,
   getSelfPracticeOptions,
@@ -37,6 +44,8 @@ type StoredSession = {
   sessionId: string;
   filters: SelfPracticeGenerator;
   questions: PracticeQuestion[];
+  readings: StudentReadingPractice[];
+  listenings: StudentListeningPractice[];
   responses: Record<string, PracticeResponse>;
 };
 
@@ -61,6 +70,8 @@ function SelfPracticePage() {
 
   const [filters, setFilters] = useState<SelfPracticeGenerator>({
     count: 20,
+    readingCount: 0,
+    listeningCount: 0,
     language: null,
     level: null,
     types: [],
@@ -73,6 +84,8 @@ function SelfPracticePage() {
   });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
+  const [readings, setReadings] = useState<StudentReadingPractice[]>([]);
+  const [listenings, setListenings] = useState<StudentListeningPractice[]>([]);
   const [responses, setResponses] = useState<Record<string, PracticeResponse>>({});
   const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
@@ -90,17 +103,43 @@ function SelfPracticePage() {
 
   const topicTree = useMemo(() => flattenTopics(options.topics), [options.topics]);
   const catalogTree = useMemo(() => flattenCatalogs(options.catalogs), [options.catalogs]);
+  const allQuestions = useMemo(
+    () => [
+      ...questions,
+      ...readings.flatMap(collectContextQuestions),
+      ...listenings.flatMap(collectContextQuestions),
+    ],
+    [questions, readings, listenings],
+  );
+  const hasGeneratedContent =
+    questions.length > 0 || readings.length > 0 || listenings.length > 0;
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as StoredSession;
-        if (parsed.sessionId && Array.isArray(parsed.questions) && parsed.questions.length) {
-          setSessionId(parsed.sessionId);
-          setFilters(parsed.filters);
-          setQuestions(parsed.questions);
-          setResponses(parsed.responses ?? {});
+        if (
+          parsed.sessionId &&
+          (Array.isArray(parsed.questions) ||
+            Array.isArray(parsed.readings) ||
+            Array.isArray(parsed.listenings))
+        ) {
+          const storedQuestions = parsed.questions ?? [];
+          const storedReadings = parsed.readings ?? [];
+          const storedListenings = parsed.listenings ?? [];
+          if (
+            storedQuestions.length ||
+            storedReadings.length ||
+            storedListenings.length
+          ) {
+            setSessionId(parsed.sessionId);
+            setFilters(parsed.filters);
+            setQuestions(storedQuestions);
+            setReadings(storedReadings);
+            setListenings(storedListenings);
+            setResponses(parsed.responses ?? {});
+          }
         }
       }
     } catch {
@@ -111,14 +150,33 @@ function SelfPracticePage() {
   }, []);
 
   useEffect(() => {
-    if (!resumeChecked || !sessionId || !questions.length || summary) return;
-    const payload: StoredSession = { sessionId, filters, questions, responses };
+    if (!resumeChecked || !sessionId || !hasGeneratedContent || summary) return;
+    const payload: StoredSession = {
+      sessionId,
+      filters,
+      questions,
+      readings,
+      listenings,
+      responses,
+    };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [resumeChecked, sessionId, filters, questions, responses, summary]);
+  }, [
+    resumeChecked,
+    sessionId,
+    filters,
+    questions,
+    readings,
+    listenings,
+    responses,
+    summary,
+    hasGeneratedContent,
+  ]);
 
   function resetSession() {
     setSessionId(null);
     setQuestions([]);
+    setReadings([]);
+    setListenings([]);
     setResponses({});
     setFeedback({});
     setRevealed({});
@@ -135,13 +193,23 @@ function SelfPracticePage() {
     try {
       const result = await generateSelfPractice({ data: filters });
       const nextQuestions = result.questions as PracticeQuestion[];
-      if (!nextQuestions.length) {
+      const nextReadings =
+        result.readings as unknown as StudentReadingPractice[];
+      const nextListenings =
+        result.listenings as unknown as StudentListeningPractice[];
+      if (
+        !nextQuestions.length &&
+        !nextReadings.length &&
+        !nextListenings.length
+      ) {
         toast.error(t("no_questions_match"));
         return;
       }
       const nextSessionId = crypto.randomUUID();
       setSessionId(nextSessionId);
       setQuestions(nextQuestions);
+      setReadings(nextReadings);
+      setListenings(nextListenings);
       setResponses({});
       if (result.generated < result.requested) {
         toast.message(`${t("generated")} ${result.generated} / ${result.requested}`);
@@ -204,12 +272,12 @@ function SelfPracticePage() {
 
   async function finish() {
     if (!sessionId) return;
-    const answered = questions.filter((question) => hasPracticeResponse(question, responseFor(question)));
+    const answered = allQuestions.filter((question) => hasPracticeResponse(question, responseFor(question)));
     if (!answered.length) {
       toast.error(t("answer_required"));
       return;
     }
-    if (answered.length < questions.length && !confirm(t("finish_with_unanswered_confirm"))) return;
+    if (answered.length < allQuestions.length && !confirm(t("finish_with_unanswered_confirm"))) return;
 
     setFinishing(true);
     try {
@@ -218,7 +286,7 @@ function SelfPracticePage() {
           sessionId,
           filters,
           alreadyLoggedQuestionIds: Object.keys(feedback),
-          presentedQuestionIds: questions.map((question) => question.id),
+          presentedQuestionIds: allQuestions.map((question) => question.id),
           answers: answered.map((question) => ({
             questionId: question.id,
             response: responseFor(question),
@@ -249,8 +317,9 @@ function SelfPracticePage() {
           <div>
             <h1 className="text-2xl font-bold">{t("self_practice")}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{t("self_practice_hint")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("mixed_practice_hint")}</p>
           </div>
-          {questions.length > 0 && (
+          {hasGeneratedContent && (
             <Button variant="outline" onClick={resetSession}>
               <RotateCcw className="h-4 w-4" />
               {t("new_practice")}
@@ -271,7 +340,7 @@ function SelfPracticePage() {
         </section>
       )}
 
-      {questions.length === 0 ? (
+      {!hasGeneratedContent ? (
         <form onSubmit={generate} className="space-y-6">
           <section className="rounded-md border border-border p-4">
             <div className="mb-4 flex items-center gap-2">
@@ -280,13 +349,57 @@ function SelfPracticePage() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Field label={t("question_count")}>
+              <Field label={t("direct_question_count")}>
                 <Input
                   type="number"
-                  min={1}
+                  min={0}
                   max={100}
                   value={filters.count}
-                  onChange={(e) => setFilters({ ...filters, count: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      count: Math.max(
+                        0,
+                        Math.min(100, Number(e.target.value) || 0),
+                      ),
+                    })
+                  }
+                />
+              </Field>
+
+              <Field label={t("reading_count")}>
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={filters.readingCount}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      readingCount: Math.max(
+                        0,
+                        Math.min(20, Number(e.target.value) || 0),
+                      ),
+                    })
+                  }
+                />
+              </Field>
+
+              <Field label={t("listening_count")}>
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={filters.listeningCount}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      listeningCount: Math.max(
+                        0,
+                        Math.min(20, Number(e.target.value) || 0),
+                      ),
+                    })
+                  }
                 />
               </Field>
 
@@ -440,13 +553,16 @@ function SelfPracticePage() {
         <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
             <span>
-              {questions.length} {t("questions").toLocaleLowerCase()} ·{" "}
+              {questions.length} {t("questions").toLocaleLowerCase()}
+              {" · "}{readings.length} {t("readings").toLocaleLowerCase()}
+              {" · "}{listenings.length} {t("listenings").toLocaleLowerCase()}
+              {" · "}
               {filters.feedbackMode === "instant" ? t("instant_feedback") : t("feedback_after_finish")}
             </span>
             {resumeChecked && !summary && <span className="text-xs text-muted-foreground">{t("saved_in_browser")}</span>}
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-6">
             {questions.map((question, index) => (
               <section key={question.id}>
                 <div className="mb-1 text-xs text-muted-foreground">
@@ -465,9 +581,49 @@ function SelfPracticePage() {
                 />
               </section>
             ))}
+
+            {readings.map((reading) => (
+              <StudentReadingBlock
+                key={reading.id}
+                reading={reading}
+                responses={responses}
+                feedback={feedback}
+                revealed={revealed}
+                showCheck={filters.feedbackMode === "instant"}
+                busyQuestion={busyQuestion}
+                onResponse={(id, response) => {
+                  const question = allQuestions.find((row) => row.id === id);
+                  if (question) updateResponse(question, response);
+                }}
+                onCheck={check}
+                onReveal={(id) =>
+                  setRevealed((current) => ({ ...current, [id]: true }))
+                }
+              />
+            ))}
+
+            {listenings.map((listening) => (
+              <StudentListeningBlock
+                key={listening.id}
+                listening={listening}
+                responses={responses}
+                feedback={feedback}
+                revealed={revealed}
+                showCheck={filters.feedbackMode === "instant"}
+                busyQuestion={busyQuestion}
+                onResponse={(id, response) => {
+                  const question = allQuestions.find((row) => row.id === id);
+                  if (question) updateResponse(question, response);
+                }}
+                onCheck={check}
+                onReveal={(id) =>
+                  setRevealed((current) => ({ ...current, [id]: true }))
+                }
+              />
+            ))}
           </div>
 
-          <div className="sticky bottom-0 mt-8 flex justify-end border-t border-border bg-background py-4">
+          <div className="sticky bottom-0 z-10 mt-8 flex justify-end border-t border-border bg-background py-4">
             <Button onClick={finish} disabled={finishing}>
               <CheckCircle2 className="h-4 w-4" />
               {t("finish_practice")}
