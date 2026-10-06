@@ -145,6 +145,8 @@ export function StudentContextSession(props: Props) {
             count: 0,
             readingCount: props.kind === "reading" ? 1 : 0,
             listeningCount: props.kind === "listening" ? 1 : 0,
+            sessionMode: "practice",
+            durationMinutes: 30,
             language: null,
             level: null,
             types: [],
