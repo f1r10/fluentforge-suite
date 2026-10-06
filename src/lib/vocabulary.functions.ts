@@ -245,6 +245,86 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
     return { id };
   });
 
+export const suggestVocabularyEnrichmentForEditor = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        word: z.string().trim().min(1).max(500),
+        learningLanguage: z.string().trim().min(2).max(10),
+        targetLanguages: z
+          .array(z.string().trim().min(2).max(10))
+          .max(20)
+          .default([]),
+        existing: z
+          .object({
+            definition: z.string().max(10_000).nullable().optional(),
+            ipa: z.string().max(500).nullable().optional(),
+            partOfSpeech: z.string().max(100).nullable().optional(),
+            translations: z
+              .array(translationSchema)
+              .max(50)
+              .default([]),
+          })
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+
+    try {
+      const { suggestVocabularyEnrichment } = await import("./ai.server");
+      const suggestion = await suggestVocabularyEnrichment({
+        word: data.word,
+        learningLanguage: data.learningLanguage,
+        targetLanguages: [
+          ...new Set(
+            data.targetLanguages
+              .map((value) => value.toLowerCase())
+              .filter((value) => value !== data.learningLanguage.toLowerCase()),
+          ),
+        ],
+        existing: data.existing,
+      });
+
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: context.userId,
+        action: "vocabulary_enrichment_suggested",
+        entity_type: "vocabulary",
+        summary: `Generated vocabulary enrichment suggestion for "${data.word}"`,
+        details: {
+          provider: suggestion.provider,
+          model: suggestion.model,
+          confidence: suggestion.confidence,
+          target_languages: data.targetLanguages,
+        },
+      });
+
+      return suggestion;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      const { notifyTeacher } = await import("./notifications.functions");
+      await notifyTeacher(admin, {
+        kind: "ai_error",
+        title: "Vocabulary enrichment failed",
+        body: message,
+        link: "/teacher/vocabulary",
+        data: {
+          word: data.word,
+          learning_language: data.learningLanguage,
+        },
+        dedupeKey: `vocabulary-ai-error:${data.word.toLowerCase()}:${Date.now()}`,
+      });
+      throw error;
+    }
+  });
+
 export const setVocabularyStatus = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
