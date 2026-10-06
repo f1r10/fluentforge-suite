@@ -871,9 +871,12 @@ function ImportItemCard({
   const title =
     item.item_type === "question" && typeof payload["prompt"] === "string"
       ? payload["prompt"]
-      : item.item_type === "raw_text" && typeof payload["text"] === "string"
-        ? payload["text"].slice(0, 160)
-        : item.item_type;
+      : (item.item_type === "reading" || item.item_type === "listening") &&
+          typeof payload["title"] === "string"
+        ? payload["title"]
+        : item.item_type === "raw_text" && typeof payload["text"] === "string"
+          ? payload["text"].slice(0, 160)
+          : item.item_type;
 
   async function update(
     decision: "pending" | "approved" | "rejected",
