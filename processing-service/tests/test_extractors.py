@@ -381,3 +381,37 @@ def test_questions_target_does_not_create_reading_context():
     questions = [item for item in items if item["item_type"] == "question"]
     assert len(questions) == 1
     assert questions[0]["payload"].get("import_context", {}).get("kind") != "reading"
+
+
+def test_checkbox_pdf_options_and_true_false_are_reconstructed():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1. Do you work on Saturdays? A \uf072 Yes, I work B \uf072 Yes, I do C \uf072 Yes, I am\n"
+                    "2. The post office is in their house. ❏ True ❏ False\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert [option["text"] for option in questions[0]["payload"]["payload"]["options"]] == [
+        "Yes, I work",
+        "Yes, I do",
+        "Yes, I am",
+    ]
+    assert questions[1]["payload"]["payload"]["options"] == [
+        {"id": "true", "text": "True"},
+        {"id": "false", "text": "False"},
+    ]
