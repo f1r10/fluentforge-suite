@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   hashRuntimePassword,
   verifyRuntimePassword,
@@ -8,6 +11,7 @@ import {
   verifyRuntimeJwt,
 } from "@/runtime/jwt.server";
 import {
+  createRuntimeStorageServer,
   createStorageCapability,
   validateRuntimeObjectPath,
   verifyStorageCapability,
@@ -15,15 +19,21 @@ import {
 
 const previousJwt = process.env["APP_JWT_SECRET"];
 const previousStorage = process.env["APP_STORAGE_SECRET"];
+const previousStorageRoot = process.env["LOCAL_STORAGE_ROOT"];
+let runtimeStorageRoot: string | null = null;
 
-beforeEach(() => {
+beforeEach(async () => {
   process.env["APP_JWT_SECRET"] =
     "ci-jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
   process.env["APP_STORAGE_SECRET"] =
     "ci-storage-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
+  runtimeStorageRoot = await mkdtemp(
+    path.join(tmpdir(), "fluentforge-storage-test-"),
+  );
+  process.env["LOCAL_STORAGE_ROOT"] = runtimeStorageRoot;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (previousJwt === undefined) delete process.env["APP_JWT_SECRET"];
   else process.env["APP_JWT_SECRET"] = previousJwt;
 
@@ -31,6 +41,16 @@ afterEach(() => {
     delete process.env["APP_STORAGE_SECRET"];
   } else {
     process.env["APP_STORAGE_SECRET"] = previousStorage;
+  }
+
+  if (runtimeStorageRoot) {
+    await rm(runtimeStorageRoot, { recursive: true, force: true });
+    runtimeStorageRoot = null;
+  }
+  if (previousStorageRoot === undefined) {
+    delete process.env["LOCAL_STORAGE_ROOT"];
+  } else {
+    process.env["LOCAL_STORAGE_ROOT"] = previousStorageRoot;
   }
 });
 
@@ -108,5 +128,27 @@ describe("plain runtime storage capabilities", () => {
     expect(() => validateRuntimeObjectPath("a/../../secret")).toThrow();
     expect(() => validateRuntimeObjectPath("/absolute/path")).toThrow();
     expect(() => validateRuntimeObjectPath("safe/file.pdf")).not.toThrow();
+  });
+
+  it("lists uploaded objects inside nested source folders", async () => {
+    const storage = createRuntimeStorageServer();
+    const source = storage.from("sources");
+    const object = "2026/10/import-fixture.pdf";
+
+    const upload = await source.upload(
+      object,
+      new Blob(["pdf fixture"], { type: "application/pdf" }),
+      { contentType: "application/pdf", upsert: false },
+    );
+    expect(upload.error).toBeNull();
+
+    const listed = await source.list("2026/10", {
+      search: "import-fixture.pdf",
+      limit: 10,
+    });
+    expect(listed.error).toBeNull();
+    expect(listed.data).toHaveLength(1);
+    expect(listed.data?.[0]?.name).toBe("import-fixture.pdf");
+    expect(Number(listed.data?.[0]?.metadata?.["size"])).toBeGreaterThan(0);
   });
 });
