@@ -800,12 +800,29 @@ export const getExamAttempt = createServerFn({ method: "GET" })
       attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
     }
 
-    const { data: answers, error } = await admin
-      .from("attempt_answers")
-      .select("item_key,response,flagged,change_count,time_spent_ms,updated_at")
-      .eq("attempt_id", attempt.id);
-    if (error) throw new Error(error.message);
+    const [answersResult, playsResult] = await Promise.all([
+      admin
+        .from("attempt_answers")
+        .select("item_key,response,flagged,change_count,time_spent_ms,updated_at")
+        .eq("attempt_id", attempt.id),
+      admin
+        .from("exam_listening_plays")
+        .select("listening_id,play_number")
+        .eq("attempt_id", attempt.id)
+        .order("play_number", { ascending: false }),
+    ]);
+    if (answersResult.error) throw new Error(answersResult.error.message);
+    if (playsResult.error) throw new Error(playsResult.error.message);
 
+    const listeningPlayCounts: Record<string, number> = {};
+    for (const play of playsResult.data ?? []) {
+      listeningPlayCounts[play.listening_id] = Math.max(
+        listeningPlayCounts[play.listening_id] ?? 0,
+        play.play_number,
+      );
+    }
+
+    const answers = answersResult.data ?? [];
     const snapshot = attempt.snapshot as unknown as AttemptSnapshot;
     const publicSnapshot = await hydrateAttemptMediaUrls(
       admin,
@@ -829,7 +846,8 @@ export const getExamAttempt = createServerFn({ method: "GET" })
         violations: attempt.violations,
       },
       snapshot: publicSnapshot,
-      answers: answers ?? [],
+      answers,
+      listeningPlayCounts,
       server_time: new Date().toISOString(),
     };
   });
