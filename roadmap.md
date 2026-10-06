@@ -74,7 +74,7 @@
 - [x] Optional AI adapters: disabled-by-default local OpenAI-compatible provider + optional Gemini provider
 - [x] Export Center: Questions, Vocabulary, Readings, Listenings, Catalogs, Exams, Students, Results, Logs and portable content package (JSON/XLSX/CSV)
 - [ ] Backup/restore
-- [ ] Trash retention and cleanup jobs
+- [x] Trash retention, expired export/upload cleanup, dependency-safe permanent cleanup and teacher retention controls
 - [ ] Production Docker/self-host deployment
 - [ ] Performance/security acceptance testing
 
