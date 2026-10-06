@@ -12,6 +12,7 @@ import { saveQuestion, type QuestionInput } from "@/lib/questions.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions, type TopicRow } from "@/components/app/topics";
 import { QuestionLabellingEditor, type SpatialLabel } from "@/components/app/QuestionLabellingEditor";
+import { QuestionMediaAttachment } from "@/components/app/QuestionMediaAttachment";
 import { useI18n } from "@/lib/i18n";
 
 type Opt = { id: string; text: string };
@@ -73,7 +74,22 @@ function toInput(f: Form, id?: string): QuestionInput {
       break;
     }
     case "fixed_choice": payload = { options: def.fixedOptions }; answer_key = { correct: f.correct }; break;
-    case "text": answer_key = { blanks: f.blanks.map((b) => b.split("|").map((x) => x.trim()).filter(Boolean)) }; payload = { blank_count: f.blanks.length }; break;
+    case "text":
+      answer_key = {
+        blanks: f.blanks.map((b) =>
+          b
+            .split("|")
+            .map((x) => x.trim())
+            .filter(Boolean),
+        ),
+      };
+      payload = {
+        blank_count: f.blanks.length,
+        ...(isAudioTextQuestion(f.question_type)
+          ? { media_id: f.media_id || null }
+          : {}),
+      };
+      break;
     case "open": answer_key = f.model_answer ? { model_answer: f.model_answer } : {}; break;
     case "matching":
       if (isSpatialLabelling(f.question_type)) {
@@ -110,6 +126,9 @@ function validate(f: Form): string | null {
   if ((def.editor === "choice" || def.editor === "fixed_choice") && f.correct.length === 0) return "Mark the correct answer.";
   if (def.editor === "choice" && !def.multiple && f.correct.length > 1) return "Only one correct answer is allowed.";
   if (def.editor === "text" && f.blanks.every((b) => !b.trim())) return "Enter at least one accepted answer.";
+  if (isAudioTextQuestion(f.question_type) && !f.media_id) {
+    return "Choose audio or video media for this question.";
+  }
   if (isSpatialLabelling(f.question_type)) {
     if (!f.media_id) return "Choose an image for this labelling question.";
     if (!f.labels.length) return "Add at least one label position on the image.";
@@ -205,6 +224,18 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
               <Button key={o} type="button" variant={f.correct[0] === o ? "default" : "outline"} onClick={() => set({ correct: [o] })}>{o}</Button>
             ))}
           </div>
+        )}
+        {def.editor === "text" && isAudioTextQuestion(f.question_type) && (
+          <QuestionMediaAttachment
+            mediaId={f.media_id}
+            mediaLabel={f.media_label}
+            onChange={(media) =>
+              set({
+                media_id: media?.id ?? "",
+                media_label: media?.label ?? "",
+              })
+            }
+          />
         )}
         {def.editor === "text" && (
           <>
@@ -329,6 +360,10 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
 
 function isSpatialLabelling(type: string) {
   return ["image_labelling", "diagram_labelling", "map_labelling"].includes(type);
+}
+
+function isAudioTextQuestion(type: string) {
+  return ["dictation", "listening_transcription"].includes(type);
 }
 
 function TopicPicker({ topics, value, onChange }: { topics: TopicRow[]; value: string[]; onChange: (v: string[]) => void }) {
