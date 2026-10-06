@@ -415,23 +415,43 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(200),
-      admin
-        .from("questions")
-        .select("learning_language")
-        .eq("status", "active")
-        .eq("context_kind", "none")
-        .is("deleted_at", null)
-        .not("learning_language", "is", null)
-        .limit(2_000),
+      Promise.all([
+        admin
+          .from("questions")
+          .select("learning_language")
+          .eq("status", "active")
+          .eq("context_kind", "none")
+          .is("deleted_at", null)
+          .not("learning_language", "is", null)
+          .limit(2_000),
+        admin
+          .from("readings")
+          .select("learning_language")
+          .eq("status", "active")
+          .is("deleted_at", null)
+          .not("learning_language", "is", null)
+          .limit(1_000),
+        admin
+          .from("listenings")
+          .select("learning_language")
+          .eq("status", "active")
+          .is("deleted_at", null)
+          .not("learning_language", "is", null)
+          .limit(1_000),
+      ]),
     ]);
 
-    for (const result of [topicsResult, catalogsResult, sourcesResult, languageResult]) {
+    for (const result of [topicsResult, catalogsResult, sourcesResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+    for (const result of languageResult) {
       if (result.error) throw new Error(result.error.message);
     }
 
     const languages = [
       ...new Set(
-        (languageResult.data ?? [])
+        languageResult
+          .flatMap((result) => result.data ?? [])
           .map((row) => row.learning_language)
           .filter((value): value is string => !!value),
       ),
@@ -654,8 +674,8 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
           .enum(["self", "question_bank", "reading", "listening"])
           .default("self"),
         contextId: z.string().uuid().nullable().default(null),
-        alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
-        presentedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
+        alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(500).default([]),
+        presentedQuestionIds: z.array(z.string().uuid()).max(500).default([]),
       })
       .parse(d),
   )
