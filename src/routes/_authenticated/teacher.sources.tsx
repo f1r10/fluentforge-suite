@@ -283,12 +283,63 @@ function ImportProfileDialog({
   const [level, setLevel] = useState("");
   const [status, setStatus] = useState<"draft" | "active">("draft");
   const [confidence, setConfidence] = useState(0.95);
+  const [mappingEnabled, setMappingEnabled] = useState(false);
+  const [mapping, setMapping] = useState({
+    include_sheets: "",
+    header_row: 1,
+    first_data_row: "",
+    sheet_as_section: false,
+    multi_value_separator: "|",
+    columns: {
+      prompt: "",
+      question_type: "",
+      correct_answer: "",
+      option_a: "",
+      option_b: "",
+      option_c: "",
+      option_d: "",
+      option_e: "",
+      option_f: "",
+      option_g: "",
+      option_h: "",
+      instructions: "",
+      explanation: "",
+      points: "",
+      difficulty: "",
+      learning_language: "",
+      level: "",
+      tags: "",
+      section: "",
+    },
+  });
   const [busy, setBusy] = useState(false);
+
+  function setMappingValue(
+    key: "include_sheets" | "header_row" | "first_data_row" | "multi_value_separator",
+    value: string | number,
+  ) {
+    setMapping((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function setColumn(key: keyof typeof mapping.columns, value: string) {
+    setMapping((previous) => ({
+      ...previous,
+      columns: { ...previous.columns, [key]: value },
+    }));
+  }
 
   async function save() {
     if (!name.trim()) return;
+    if (mappingEnabled && !mapping.columns.prompt.trim()) {
+      toast.error(t("mapping_prompt_required"));
+      return;
+    }
+
     setBusy(true);
     try {
+      const firstDataRow = mapping.first_data_row.trim()
+        ? Number(mapping.first_data_row)
+        : null;
       const result = await saveImportProfile({
         data: {
           name: name.trim(),
@@ -298,6 +349,25 @@ function ImportProfileDialog({
             level: level || null,
             status,
             auto_approve_confidence: confidence,
+            spreadsheet_mapping: mappingEnabled
+              ? {
+                  include_sheets: mapping.include_sheets
+                    .split(",")
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                  header_row: Number(mapping.header_row),
+                  first_data_row: firstDataRow,
+                  sheet_as_section: mapping.sheet_as_section,
+                  multi_value_separator:
+                    mapping.multi_value_separator.trim() || "|",
+                  columns: Object.fromEntries(
+                    Object.entries(mapping.columns).map(([key, value]) => [
+                      key,
+                      value.trim(),
+                    ]),
+                  ) as typeof mapping.columns,
+                }
+              : null,
           },
         },
       });
@@ -309,11 +379,29 @@ function ImportProfileDialog({
     }
   }
 
+  const columnFields: Array<
+    [keyof typeof mapping.columns, string]
+  > = [
+    ["prompt", "mapping_col_prompt"],
+    ["question_type", "mapping_col_type"],
+    ["correct_answer", "mapping_col_answer"],
+    ["instructions", "mapping_col_instructions"],
+    ["explanation", "mapping_col_explanation"],
+    ["points", "mapping_col_points"],
+    ["difficulty", "mapping_col_difficulty"],
+    ["learning_language", "mapping_col_language"],
+    ["level", "mapping_col_level"],
+    ["tags", "mapping_col_tags"],
+    ["section", "mapping_col_section"],
+  ];
+
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>{t("new_import_profile")}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t("new_import_profile")}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
           <input
             className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             value={name}
@@ -323,13 +411,16 @@ function ImportProfileDialog({
           <select
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             value={expectedContent}
-            onChange={(event) => setExpectedContent(event.target.value as typeof expectedContent)}
+            onChange={(event) =>
+              setExpectedContent(event.target.value as typeof expectedContent)
+            }
           >
             <option value="auto">{t("auto")}</option>
             <option value="questions">{t("questions")}</option>
             <option value="vocabulary">{t("vocabulary")}</option>
             <option value="mixed">{t("mixed")}</option>
           </select>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <select
               className="h-9 rounded-md border border-input bg-background px-2 text-sm"
@@ -348,21 +439,29 @@ function ImportProfileDialog({
               onChange={(event) => setLevel(event.target.value)}
             >
               <option value="">{t("level")}: —</option>
-              {["A1","A2","B1","B2","C1","C2"].map((value) => (
-                <option key={value} value={value}>{value}</option>
+              {["A1", "A2", "B1", "B2", "C1", "C2"].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
               ))}
             </select>
           </div>
+
           <select
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             value={status}
-            onChange={(event) => setStatus(event.target.value as typeof status)}
+            onChange={(event) =>
+              setStatus(event.target.value as typeof status)
+            }
           >
             <option value="draft">{t("draft")}</option>
             <option value="active">{t("active")}</option>
           </select>
+
           <label className="block text-sm">
-            <span className="text-muted-foreground">{t("auto_approve_confidence")}: {Math.round(confidence * 100)}%</span>
+            <span className="text-muted-foreground">
+              {t("auto_approve_confidence")}: {Math.round(confidence * 100)}%
+            </span>
             <input
               type="range"
               min="0.5"
@@ -373,13 +472,183 @@ function ImportProfileDialog({
               className="mt-2 w-full"
             />
           </label>
+
+          <section className="space-y-4 rounded-md border border-border p-4">
+            <label className="flex items-start gap-2">
+              <Checkbox
+                className="mt-0.5"
+                checked={mappingEnabled}
+                onCheckedChange={(checked) => setMappingEnabled(!!checked)}
+              />
+              <span>
+                <span className="block text-sm font-medium">
+                  {t("advanced_spreadsheet_mapping")}
+                </span>
+                <span className="block text-xs leading-5 text-muted-foreground">
+                  {t("advanced_spreadsheet_mapping_hint")}
+                </span>
+              </span>
+            </label>
+
+            {mappingEnabled && (
+              <div className="space-y-4 border-t border-border pt-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <MappingField
+                    label={t("mapping_header_row")}
+                    value={String(mapping.header_row)}
+                    type="number"
+                    onChange={(value) =>
+                      setMappingValue(
+                        "header_row",
+                        Math.max(1, Number(value) || 1),
+                      )
+                    }
+                  />
+                  <MappingField
+                    label={t("mapping_first_data_row")}
+                    value={mapping.first_data_row}
+                    type="number"
+                    placeholder={t("automatic")}
+                    onChange={(value) =>
+                      setMappingValue("first_data_row", value)
+                    }
+                  />
+                  <MappingField
+                    label={t("mapping_sheet_allowlist")}
+                    value={mapping.include_sheets}
+                    placeholder="Sheet1, Questions"
+                    onChange={(value) =>
+                      setMappingValue("include_sheets", value)
+                    }
+                  />
+                  <MappingField
+                    label={t("mapping_separator")}
+                    value={mapping.multi_value_separator}
+                    onChange={(value) =>
+                      setMappingValue("multi_value_separator", value)
+                    }
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={mapping.sheet_as_section}
+                    onCheckedChange={(checked) =>
+                      setMapping((previous) => ({
+                        ...previous,
+                        sheet_as_section: !!checked,
+                      }))
+                    }
+                  />
+                  {t("mapping_sheet_as_section")}
+                </label>
+
+                <div>
+                  <div className="text-sm font-medium">
+                    {t("mapping_columns")}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("mapping_columns_hint")}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {columnFields.map(([key, label]) => (
+                    <MappingField
+                      key={key}
+                      label={t(label)}
+                      value={mapping.columns[key]}
+                      required={key === "prompt"}
+                      onChange={(value) => setColumn(key, value)}
+                    />
+                  ))}
+                </div>
+
+                <div>
+                  <div className="mb-2 text-sm font-medium">
+                    {t("mapping_option_columns")}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {(
+                      [
+                        "option_a",
+                        "option_b",
+                        "option_c",
+                        "option_d",
+                        "option_e",
+                        "option_f",
+                        "option_g",
+                        "option_h",
+                      ] as const
+                    ).map((key) => (
+                      <MappingField
+                        key={key}
+                        label={key.replace("_", " ").toUpperCase()}
+                        value={mapping.columns[key]}
+                        onChange={(value) => setColumn(key, value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-md bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
+                  {t("mapping_section_hint")}
+                </div>
+              </div>
+            )}
+          </section>
+
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose} disabled={busy}>{t("cancel")}</Button>
-            <Button onClick={save} disabled={busy || !name.trim()}>{t("save")}</Button>
+            <Button variant="outline" onClick={onClose} disabled={busy}>
+              {t("cancel")}
+            </Button>
+            <Button
+              onClick={save}
+              disabled={
+                busy ||
+                !name.trim() ||
+                (mappingEnabled && !mapping.columns.prompt.trim())
+              }
+            >
+              {t("save")}
+            </Button>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function MappingField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "number";
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-xs text-muted-foreground">
+        {label}
+        {required ? " *" : ""}
+      </span>
+      <input
+        type={type}
+        min={type === "number" ? 1 : undefined}
+        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
 }
 
