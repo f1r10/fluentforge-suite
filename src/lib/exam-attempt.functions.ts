@@ -614,10 +614,11 @@ async function getOwnedAttempt(admin: Admin, studentId: string, attemptId: strin
   const { data, error } = await admin
     .from("exam_attempts")
     .select(
-      "id,exam_id,student_id,attempt_number,status,snapshot,started_at,deadline_at,submitted_at,score,max_score,passed,result_released,violations",
+      "id,exam_id,student_id,attempt_number,status,snapshot,started_at,deadline_at,submitted_at,score,max_score,passed,result_released,violations,reset_at",
     )
     .eq("id", attemptId)
     .eq("student_id", studentId)
+    .is("reset_at", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Attempt not found.");
@@ -646,6 +647,7 @@ export const listStudentExams = createServerFn({ method: "GET" })
         .select("id,exam_id,attempt_number,status,started_at,deadline_at,submitted_at,score,max_score,passed,result_released")
         .eq("student_id", studentId)
         .in("exam_id", ids)
+        .is("reset_at", null)
         .order("attempt_number", { ascending: false }),
     ]);
 
@@ -695,6 +697,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
       .eq("exam_id", data.examId)
       .eq("student_id", studentId)
       .eq("status", "in_progress")
+      .is("reset_at", null)
       .maybeSingle();
     if (existingError) throw new Error(existingError.message);
 
@@ -718,14 +721,30 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
       throw new Error("This exam is closed.");
     }
 
-    const { count, error: countError } = await admin
-      .from("exam_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("exam_id", data.examId)
-      .eq("student_id", studentId);
-    if (countError) throw new Error(countError.message);
+    const [countResult, latestNumberResult] = await Promise.all([
+      admin
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("exam_id", data.examId)
+        .eq("student_id", studentId)
+        .is("reset_at", null),
+      admin
+        .from("exam_attempts")
+        .select("attempt_number")
+        .eq("exam_id", data.examId)
+        .eq("student_id", studentId)
+        .order("attempt_number", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (countResult.error) throw new Error(countResult.error.message);
+    if (latestNumberResult.error) {
+      throw new Error(latestNumberResult.error.message);
+    }
 
-    const attemptsUsed = count ?? 0;
+    const attemptsUsed = countResult.count ?? 0;
+    const attemptNumber =
+      Number(latestNumberResult.data?.attempt_number ?? 0) + 1;
     if (attemptsUsed >= exam.settings.max_attempts) {
       throw new Error("You have used all allowed attempts.");
     }
@@ -749,7 +768,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
       .insert({
         exam_id: data.examId,
         student_id: studentId,
-        attempt_number: attemptsUsed + 1,
+        attempt_number: attemptNumber,
         status: "in_progress",
         snapshot: snapshot as never,
         started_at: startedAt.toISOString(),
@@ -765,6 +784,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
         .eq("exam_id", data.examId)
         .eq("student_id", studentId)
         .eq("status", "in_progress")
+        .is("reset_at", null)
         .maybeSingle();
       if (raced) return { attemptId: raced.id, resumed: true, autoSubmitted: false };
       throw new Error(error.message);
@@ -778,7 +798,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
       entity_id: data.examId,
       attempt_id: created.id,
       details: {
-        attempt_number: attemptsUsed + 1,
+        attempt_number: attemptNumber,
         deadline_at: deadline?.toISOString() ?? null,
       } as never,
     });
