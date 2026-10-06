@@ -575,13 +575,16 @@ function StudentDashboardSettings() {
     "exams",
     "practice",
     "today",
+    "correctness",
     "accuracy",
     "study_time",
     "streak",
     "progress",
+    "domain_progress",
     "weak_topics",
     "history",
     "favorites",
+    "completed_exams",
   ] as const;
   const raw = Array.isArray(dashboard["visible_widgets"])
     ? dashboard["visible_widgets"]
@@ -600,13 +603,16 @@ function StudentDashboardSettings() {
     exams: t("exams"),
     practice: t("self_practice"),
     today: t("today"),
+    correctness: t("correct_incorrect"),
     accuracy: t("accuracy"),
     study_time: t("study_time"),
     streak: t("streak"),
     progress: t("progress"),
+    domain_progress: t("domain_progress"),
     weak_topics: t("weak_topics"),
     history: t("practice_history"),
     favorites: t("favorites"),
+    completed_exams: t("completed_exams"),
   };
 
   async function save() {
