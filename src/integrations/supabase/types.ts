@@ -2666,6 +2666,18 @@ export type Database = {
         }
         Returns: { question_id: string }[]
       }
+      save_language_settings: {
+        Args: { p_languages: Json }
+        Returns: undefined
+      }
+      storage_usage_summary: {
+        Args: never
+        Returns: {
+          category: string
+          bytes: number
+          items: number
+        }[]
+      }
       student_practice_stats: {
         Args: { p_student_id: string }
         Returns: {
