@@ -633,34 +633,52 @@ export type Database = {
       }
       export_jobs: {
         Row: {
+          completed_at: string | null
           created_at: string
           error: string | null
+          expires_at: string
           format: string
           id: string
+          include_trash: boolean
           kind: string
+          mime_type: string | null
           params: Json
+          row_counts: Json
+          size_bytes: number | null
           status: Database["public"]["Enums"]["job_status"]
           storage_path: string | null
           updated_at: string
         }
         Insert: {
+          completed_at?: string | null
           created_at?: string
           error?: string | null
+          expires_at?: string
           format: string
           id?: string
+          include_trash?: boolean
           kind: string
+          mime_type?: string | null
           params?: Json
+          row_counts?: Json
+          size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
           updated_at?: string
         }
         Update: {
+          completed_at?: string | null
           created_at?: string
           error?: string | null
+          expires_at?: string
           format?: string
           id?: string
+          include_trash?: boolean
           kind?: string
+          mime_type?: string | null
           params?: Json
+          row_counts?: Json
+          size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
           updated_at?: string
