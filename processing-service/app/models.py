@@ -17,6 +17,13 @@ class DocumentImportRequest(BaseModel):
     profile: dict[str, Any] | None = None
 
 
+class TranscriptionRequest(BaseModel):
+    media_id: str
+    source_url: HttpUrl
+    filename: str = Field(min_length=1, max_length=255)
+    language: str | None = Field(default=None, max_length=16)
+
+
 class JobCreated(BaseModel):
     job_id: str
     status: JobStatus
@@ -39,3 +46,4 @@ class JobView(BaseModel):
     error: str | None = None
     stats: dict[str, Any] = Field(default_factory=dict)
     items: list[ImportCandidate] = Field(default_factory=list)
+    result: dict[str, Any] = Field(default_factory=dict)
