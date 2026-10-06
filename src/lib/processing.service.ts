@@ -106,7 +106,7 @@ export class PlaceholderProcessingService implements ProcessingService {
       method: "POST",
       body: JSON.stringify({
         media_id: input.mediaId,
-        source_url: input.sourceUrl,
+        source_url: this.sourceUrl(input.sourceUrl),
         filename: input.filename,
         language: input.language ?? null,
       }),
@@ -128,6 +128,22 @@ class HttpProcessingService implements ProcessingService {
     private readonly baseUrl: string,
     private readonly sharedSecret: string | null,
   ) {}
+
+  private sourceUrl(value: string) {
+    if (/^https?:\/\//i.test(value)) return value;
+    if (!value.startsWith("/")) {
+      throw new Error("Processing source URL is not valid.");
+    }
+    const internalBase =
+      process.env["RUNTIME_INTERNAL_URL"]?.trim() ||
+      process.env["APP_PUBLIC_URL"]?.trim();
+    if (!internalBase) {
+      throw new Error(
+        "RUNTIME_INTERNAL_URL is required for relative storage URLs.",
+      );
+    }
+    return new URL(value, internalBase).toString();
+  }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const controller = new AbortController();
@@ -171,7 +187,7 @@ class HttpProcessingService implements ProcessingService {
       method: "POST",
       body: JSON.stringify({
         source_file_id: input.sourceFileId,
-        source_url: input.sourceUrl,
+        source_url: this.sourceUrl(input.sourceUrl),
         filename: input.filename,
         mime_type: input.mimeType ?? null,
         mode: input.mode ?? "review",
