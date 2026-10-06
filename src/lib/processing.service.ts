@@ -15,6 +15,7 @@ export type ProcessingImportItem = {
   page?: number | null;
   sheet?: string | null;
   payload: Record<string, unknown>;
+  crop?: { x: number; y: number; width: number; height: number } | null;
   confidence?: number | null;
 };
 
