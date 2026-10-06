@@ -28,6 +28,7 @@ export type ProcessingJobRef = {
   error?: string | null;
   stats?: Record<string, unknown>;
   items?: ProcessingImportItem[];
+  result?: Record<string, unknown>;
 };
 
 export interface ProcessingService {
@@ -59,6 +60,8 @@ export interface ProcessingService {
 
   transcribeMedia(input: {
     mediaId: string;
+    sourceUrl: string;
+    filename: string;
     language?: string;
   }): Promise<ProcessingJobRef>;
 
@@ -89,7 +92,32 @@ export class PlaceholderProcessingService implements ProcessingService {
   runOCR = notImplemented;
   extractQuestions = notImplemented;
   extractVocabulary = notImplemented;
-  transcribeMedia = notImplemented;
+
+  async transcribeMedia(input: {
+    mediaId: string;
+    sourceUrl: string;
+    filename: string;
+    language?: string;
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/transcription", {
+      method: "POST",
+      body: JSON.stringify({
+        media_id: input.mediaId,
+        source_url: input.sourceUrl,
+        filename: input.filename,
+        language: input.language ?? null,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
   enrichVocabulary = notImplemented;
   analyzeDuplicates = notImplemented;
   processMedia = notImplemented;
@@ -166,6 +194,7 @@ class HttpProcessingService implements ProcessingService {
       error?: string | null;
       stats?: Record<string, unknown>;
       items?: ProcessingImportItem[];
+      result?: Record<string, unknown>;
     }>(`/v1/jobs/${encodeURIComponent(jobId)}`);
 
     return {
@@ -176,6 +205,7 @@ class HttpProcessingService implements ProcessingService {
       error: result.error ?? null,
       stats: result.stats ?? {},
       items: result.items ?? [],
+      result: result.result ?? {},
     };
   }
 
