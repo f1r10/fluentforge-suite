@@ -821,6 +821,7 @@ export type Database = {
           mode: string
           profile_id: string | null
           progress: number
+          processor_job_id: string | null
           source_file_id: string | null
           stats: Json
           status: Database["public"]["Enums"]["job_status"]
@@ -834,6 +835,7 @@ export type Database = {
           mode?: string
           profile_id?: string | null
           progress?: number
+          processor_job_id?: string | null
           source_file_id?: string | null
           stats?: Json
           status?: Database["public"]["Enums"]["job_status"]
@@ -847,6 +849,7 @@ export type Database = {
           mode?: string
           profile_id?: string | null
           progress?: number
+          processor_job_id?: string | null
           source_file_id?: string | null
           stats?: Json
           status?: Database["public"]["Enums"]["job_status"]
@@ -1728,6 +1731,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "source_collection_items_source_file_id_fkey"
+            columns: ["source_file_id"]
+            isOneToOne: false
+            referencedRelation: "source_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      source_upload_sessions: {
+        Row: {
+          id: string
+          storage_path: string
+          original_filename: string
+          mime_type: string | null
+          expected_size_bytes: number
+          keep_original: boolean
+          created_at: string
+          expires_at: string
+          finalized_at: string | null
+          source_file_id: string | null
+        }
+        Insert: {
+          id?: string
+          storage_path: string
+          original_filename: string
+          mime_type?: string | null
+          expected_size_bytes: number
+          keep_original?: boolean
+          created_at?: string
+          expires_at: string
+          finalized_at?: string | null
+          source_file_id?: string | null
+        }
+        Update: {
+          id?: string
+          storage_path?: string
+          original_filename?: string
+          mime_type?: string | null
+          expected_size_bytes?: number
+          keep_original?: boolean
+          created_at?: string
+          expires_at?: string
+          finalized_at?: string | null
+          source_file_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_upload_sessions_source_file_id_fkey"
             columns: ["source_file_id"]
             isOneToOne: false
             referencedRelation: "source_files"
