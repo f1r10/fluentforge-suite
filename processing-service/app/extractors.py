@@ -28,6 +28,7 @@ class Extraction:
 
 
 QUESTION_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s+(.+?)\s*$")
+QUESTION_NUMBER_ONLY_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s*$")
 OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.)]\s+(.+?)\s*$")
 INLINE_OPTION_RE = re.compile(
     r"(?<!\\w)([A-Ha-h])[\\.)]\\s*(.*?)(?=(?:\\s+[A-Ha-h][\\.)]\\s*)|$)"
@@ -72,8 +73,12 @@ def _extract_pdf(path: Path) -> Extraction:
     for index, page in enumerate(doc):
         rect = page.rect
         blocks = _page_blocks(page)
-        native_text = "\n".join(block["text"] for block in blocks if block["text"]).strip()
-        text = native_text or page.get_text("text").strip()
+        native_text = page.get_text("text", sort=False).strip()
+        if not native_text:
+            native_text = "\n".join(
+                block["text"] for block in blocks if block["text"]
+            ).strip()
+        text = native_text
         method = "native"
 
         if len(text) < 40:
@@ -502,7 +507,7 @@ def _question_crop_map(page: dict[str, Any]) -> dict[str, dict[str, float]]:
         if not crop:
             continue
         for line in str(block.get("text") or "").splitlines():
-            match = QUESTION_RE.match(line)
+            match = QUESTION_RE.match(line) or QUESTION_NUMBER_ONLY_RE.match(line)
             if match and match.group(1) not in out:
                 out[match.group(1)] = crop
     return out
@@ -511,7 +516,7 @@ def _question_crop_map(page: dict[str, Any]) -> dict[str, dict[str, float]]:
 def _text_before_first_question(text: str) -> str:
     lines: list[str] = []
     for line in text.splitlines():
-        if QUESTION_RE.match(line):
+        if QUESTION_RE.match(line) or QUESTION_NUMBER_ONLY_RE.match(line):
             break
         if ANSWER_RE.match(line):
             continue
@@ -740,7 +745,7 @@ def _normalize_choice_markers(line: str) -> str:
     # Common PDF checkbox glyphs are often extracted between the option letter
     # and its text instead of as A)/B) punctuation.
     return re.sub(
-        r"(?<!\\w)([A-Ha-h])\\s*[\\uf072☐☑□❏]\\s*",
+        r"(?<!\\w)([A-Ha-h])\\s*[\\ue000-\\uf8ff☐☑□❏]\\s*",
         r"\\1) ",
         line,
     )
@@ -780,7 +785,7 @@ def _split_prompt_and_inline_options(
             return prompt, options
 
     true_false = re.search(
-        r"\s+[\\uf072☐☑□❏]?\\s*True\\s+[\\uf072☐☑□❏]?\\s*False\\s*$",
+        r"\s+[\\ue000-\\uf8ff☐☑□❏]?\\s*True\\s+[\\ue000-\\uf8ff☐☑□❏]?\\s*False\\s*$",
         value,
         re.IGNORECASE,
     )
@@ -808,16 +813,55 @@ def _questions_from_text(
         if answer_match:
             for number, answer in ANSWER_PAIR_RE.findall(answer_match.group(1)):
                 answer_key[number] = answer.strip()
+            # A dedicated answer-key heading marks the end of question content.
+            # This avoids importing numbered answer lists as new questions.
+            heading = line.strip().casefold()
+            if (
+                heading.startswith("answers")
+                or heading.startswith("answer key")
+                or heading.startswith("cavablar")
+                or heading.startswith("cevaplar")
+            ):
+                break
+            continue
+
+        number_only = QUESTION_NUMBER_ONLY_RE.match(line)
+        if number_only:
+            if current:
+                questions.append(current)
+            current = {
+                "_number": number_only.group(1),
+                "_standalone_number": True,
+                "prompt": "",
+                "options": [],
+            }
             continue
 
         question_match = QUESTION_RE.match(line)
         if question_match:
+            question_body = question_match.group(2).strip()
+
+            # Some exam layouts put the main question number on its own line,
+            # then include numbered statements (1..5) inside that question.
+            # While such a standalone-number question has not reached A/B/C
+            # options yet, numbered inline lines belong to its prompt.
+            if (
+                current
+                and current.get("_standalone_number")
+                and not current["options"]
+            ):
+                addition = f"{question_match.group(1)}. {question_body}"
+                current["prompt"] = (
+                    f"{current['prompt']}\n{addition}".strip()
+                )
+                continue
+
             if current:
                 questions.append(current)
-            question_body = question_match.group(2).strip()
             prompt, inline_options = _split_prompt_and_inline_options(question_body)
             current = {
                 "_number": question_match.group(1),
+                "_standalone_number": False,
                 "prompt": prompt,
                 "options": inline_options,
             }
@@ -836,7 +880,7 @@ def _questions_from_text(
             continue
 
         if current and line.strip():
-            current["prompt"] += "\n" + line.strip()
+            current["prompt"] = f"{current['prompt']}\n{line.strip()}".strip()
 
     if current:
         questions.append(current)
@@ -845,6 +889,7 @@ def _questions_from_text(
     for q in questions:
         options = q["options"]
         number = q.pop("_number")
+        q.pop("_standalone_number", None)
         answer = answer_key.get(number)
         if len(options) >= 2:
             correct_id = None
