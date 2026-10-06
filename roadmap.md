@@ -8,7 +8,7 @@
 - [x] Students & groups management
 - [x] Security/data-integrity hardening and CI (test + lint + build)
 - [x] Heavy-processing service boundary for later OCR/AI/transcription workers
-- [ ] Plain PostgreSQL/self-host runtime adapter replacing mandatory Lovable/Supabase dependency
+- [x] Plain PostgreSQL/self-host runtime adapter: PostgreSQL + PostgREST, built-in scrypt/JWT sessions, signed local object storage, provider-compatible server/browser clients, dedicated Compose stack and Supabase-free CI smoke coverage
 
 ## Content
 - [x] Question Bank: filters, bulk actions, all planned question structures, versioning, duplicates, topics
@@ -76,7 +76,7 @@
 - [x] Validated application Backup/Restore: relational data + private media/source files, checksums, dry-run, empty-target guard and resumable restore
 - [x] Trash retention, expired export/upload cleanup, dependency-safe permanent cleanup and teacher retention controls
 - [x] Production Docker/self-host deployment: hardened Node/worker images, Compose, health/readiness, migration runner, CI smoke test and self-hosting runbook
-- [ ] Performance/security acceptance testing
+- [x] Performance/security acceptance testing: fresh-stack migrations, RLS/RPC/storage invariants, production security headers, hot-path index coverage, synthetic query-plan/latency checks and plain-runtime Docker smoke tests
 
 ## Branding polish
 - [x] Logo/favicon file upload: validated signed uploads, byte-signature checks, dynamic favicon/logo rendering and Backup/Restore portability
