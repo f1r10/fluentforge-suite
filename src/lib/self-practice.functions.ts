@@ -670,7 +670,7 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
     z
       .object({
         sessionId: z.string().uuid(),
-        answers: z.array(answerSchema).min(1).max(500),
+        answers: z.array(answerSchema).max(500),
         filters: generatorSchema,
         practiceKind: z
           .enum(["self", "question_bank", "reading", "listening"])
