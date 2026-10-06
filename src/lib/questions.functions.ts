@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireTeacher } from "./teacher-middleware";
+import { validateQuestionInput, type QuestionInput } from "./question-schema";
 
 const PAGE = 50;
 
@@ -60,35 +61,11 @@ export const getQuestion = createServerFn({ method: "GET" })
     };
   });
 
-const json = z.record(z.string(), z.any());
-const inputSchema = z.object({
-  id: z.string().uuid().optional(),
-  question_type: z.string().min(1).max(60),
-  prompt: z.string().max(20000),
-  instructions: z.string().max(5000).nullable().default(null),
-  payload: json.default({}),
-  answer_key: json.default({}),
-  scoring: json.default({ points: 1 }),
-  normalization: json.default({}),
-  explanation: z.string().max(10000).nullable().default(null),
-  teacher_notes: z.string().max(10000).nullable().default(null),
-  learning_language: z.string().max(10).nullable().default(null),
-  level: z.string().max(10).nullable().default(null),
-  difficulty: z.number().int().min(1).max(5).nullable().default(null),
-  grading_mode: z.enum(["automatic", "manual", "ai_assisted"]).default("automatic"),
-  status: z.enum(["active", "draft", "archived"]).default("active"),
-  reusable_independently: z.boolean().default(false),
-  topicIds: z.array(z.string().uuid()).default([]),
-  tags: z.array(z.string().trim().min(1).max(60)).default([]),
-  force: z.boolean().default(false),
-});
-export type QuestionInput = z.input<typeof inputSchema>;
-
 const VERSIONED = ["question_type", "prompt", "instructions", "payload", "answer_key", "scoring", "normalization", "explanation", "grading_mode"] as const;
 
 export const saveQuestion = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
-  .inputValidator((d) => inputSchema.parse(d))
+  .inputValidator((d) => validateQuestionInput(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
     const { sha256, adminClient, audit } = await import("./security.server");
