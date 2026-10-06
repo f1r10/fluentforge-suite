@@ -350,15 +350,21 @@ export async function refreshRuntimeSession(
     Date.now() + REFRESH_TTL_SECONDS * 1000,
   ).toISOString();
 
-  const { error: rotateError } = await service
+  const { data: rotated, error: rotateError } = await service
     .from("runtime_refresh_tokens")
     .update({
       token_hash: sha256(nextRefresh),
       expires_at: expiresAt,
     })
     .eq("id", row.id)
-    .eq("token_hash", hash);
+    .eq("token_hash", hash)
+    .is("revoked_at", null)
+    .select("id")
+    .maybeSingle();
   if (rotateError) throw authError(rotateError.message);
+  if (!rotated) {
+    throw authError("Refresh token was already rotated.");
+  }
 
   return {
     access_token: signRuntimeJwt({
