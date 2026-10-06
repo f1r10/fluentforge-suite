@@ -323,38 +323,89 @@ def detect_candidates(extraction: Extraction) -> list[dict[str, Any]]:
 
     for page in extraction.pages:
         page_number = page.get("page")
-        candidates.extend(_questions_from_text(page.get("text", ""), page=page_number))
+        question_crops = _question_crop_map(page)
+        questions = _questions_from_text(
+            page.get("text", ""),
+            page=page_number,
+            question_crops=question_crops,
+        )
 
-        for table in page.get("tables") or []:
-            rows = table.get("rows") or []
-            text = "\n".join("\t".join(str(cell) for cell in row) for row in rows)
-            candidates.append(
-                {
-                    "item_type": "raw_text",
-                    "page": page_number,
-                    "sheet": None,
-                    "crop": table.get("crop"),
-                    "payload": {
-                        "kind": "table",
-                        "rows": rows,
-                        "text": text,
-                    },
-                    "confidence": 0.92,
+        reading = _reading_candidate_from_page(page, questions)
+        if reading:
+            source_ref = str(reading["payload"]["source_ref"])
+            candidates.append(reading)
+            for index, question in enumerate(questions):
+                payload = question.get("payload") or {}
+                payload["import_context"] = {
+                    "kind": "reading",
+                    "source_ref": source_ref,
+                    "sort_order": index,
+                    "assets": _nearby_assets(page, question.get("crop")),
                 }
-            )
+                question["payload"] = payload
+                question["confidence"] = min(
+                    0.98,
+                    float(question.get("confidence") or 0) + 0.03,
+                )
+        else:
+            for question in questions:
+                assets = _nearby_assets(page, question.get("crop"))
+                if assets:
+                    payload = question.get("payload") or {}
+                    payload["import_context"] = {
+                        "kind": "independent",
+                        "assets": assets,
+                    }
+                    question["payload"] = payload
 
-        for image in page.get("images") or []:
+        candidates.extend(questions)
+
+        layout = _page_layout_elements(page)
+        associated_asset_keys = {
+            _asset_key(asset)
+            for question in questions
+            for asset in (
+                (question.get("payload") or {})
+                .get("import_context", {})
+                .get("assets", [])
+            )
+        }
+
+        for element in layout:
+            if element["kind"] not in {"table", "image_region"}:
+                continue
+            if _asset_key(element) in associated_asset_keys:
+                continue
+
+            if element["kind"] == "table":
+                rows = element.get("rows") or []
+                text = "\n".join(
+                    "\t".join(str(cell) for cell in row)
+                    for row in rows
+                )
+                payload = {
+                    "kind": "table",
+                    "rows": rows,
+                    "text": text,
+                    "layout_order": element["order"],
+                }
+                confidence = 0.92
+            else:
+                payload = {
+                    "kind": "image_region",
+                    "xref": element.get("xref"),
+                    "layout_order": element["order"],
+                }
+                confidence = 0.7
+
             candidates.append(
                 {
                     "item_type": "raw_text",
                     "page": page_number,
                     "sheet": None,
-                    "crop": image.get("crop"),
-                    "payload": {
-                        "kind": "image_region",
-                        "xref": image.get("xref"),
-                    },
-                    "confidence": 0.7,
+                    "crop": element.get("crop"),
+                    "payload": payload,
+                    "confidence": confidence,
                 }
             )
 
@@ -375,7 +426,225 @@ def detect_candidates(extraction: Extraction) -> list[dict[str, Any]]:
     return candidates
 
 
-def _questions_from_text(text: str, page: int | None) -> list[dict[str, Any]]:
+def _page_layout_elements(page: dict[str, Any]) -> list[dict[str, Any]]:
+    elements: list[dict[str, Any]] = []
+
+    for block in page.get("blocks") or []:
+        elements.append(
+            {
+                "kind": "text",
+                "text": block.get("text", ""),
+                "crop": block.get("crop"),
+            }
+        )
+
+    for table in page.get("tables") or []:
+        elements.append(
+            {
+                "kind": "table",
+                "rows": table.get("rows") or [],
+                "crop": table.get("crop"),
+            }
+        )
+
+    for image in page.get("images") or []:
+        elements.append(
+            {
+                "kind": "image_region",
+                "xref": image.get("xref"),
+                "crop": image.get("crop"),
+            }
+        )
+
+    elements.sort(
+        key=lambda item: (
+            float((item.get("crop") or {}).get("y", 1)),
+            float((item.get("crop") or {}).get("x", 1)),
+        )
+    )
+    for index, element in enumerate(elements):
+        element["order"] = index
+
+    return elements
+
+
+def _question_crop_map(page: dict[str, Any]) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for block in page.get("blocks") or []:
+        crop = block.get("crop")
+        if not crop:
+            continue
+        for line in str(block.get("text") or "").splitlines():
+            match = QUESTION_RE.match(line)
+            if match and match.group(1) not in out:
+                out[match.group(1)] = crop
+    return out
+
+
+def _text_before_first_question(text: str) -> str:
+    lines: list[str] = []
+    for line in text.splitlines():
+        if QUESTION_RE.match(line):
+            break
+        if ANSWER_RE.match(line):
+            continue
+        lines.append(line.rstrip())
+    return "\n".join(lines).strip()
+
+
+def _reading_candidate_from_page(
+    page: dict[str, Any],
+    questions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not questions:
+        return None
+
+    prefix = _text_before_first_question(str(page.get("text") or ""))
+    words = prefix.split()
+    if len(prefix) < 180 or len(words) < 30:
+        return None
+
+    lines = [line.strip() for line in prefix.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    if len(lines) > 1 and len(lines[0]) <= 120 and len(lines[0].split()) <= 16:
+        title = lines[0]
+        body = "\n".join(lines[1:]).strip()
+        if len(body.split()) < 25:
+            title = f"Reading passage — page {page.get('page') or 1}"
+            body = prefix
+    else:
+        title = f"Reading passage — page {page.get('page') or 1}"
+        body = prefix
+
+    first_question_y = min(
+        (
+            float((question.get("crop") or {}).get("y", 1))
+            for question in questions
+            if question.get("crop")
+        ),
+        default=1.0,
+    )
+    layout_context = [
+        element
+        for element in _page_layout_elements(page)
+        if float((element.get("crop") or {}).get("y", 1)) < first_question_y
+    ]
+
+    source_ref = f"reading:page:{page.get('page') or 1}"
+    return {
+        "item_type": "reading",
+        "page": page.get("page"),
+        "sheet": None,
+        "crop": _union_crops(
+            [
+                element["crop"]
+                for element in layout_context
+                if element.get("crop")
+            ]
+        ),
+        "payload": {
+            "source_ref": source_ref,
+            "title": title[:300],
+            "body": body[:250_000],
+            "display_layout": "split",
+            "status": "draft",
+            "metadata": {
+                "reconstructed_from": "pdf_layout",
+                "source_page": page.get("page"),
+                "layout_elements": layout_context[:200],
+            },
+        },
+        "confidence": 0.84,
+    }
+
+
+def _nearby_assets(
+    page: dict[str, Any],
+    question_crop: dict[str, float] | None,
+) -> list[dict[str, Any]]:
+    if not question_crop:
+        return []
+
+    q_center = float(question_crop.get("y", 0)) + float(
+        question_crop.get("height", 0)
+    ) / 2
+    assets: list[dict[str, Any]] = []
+
+    for element in _page_layout_elements(page):
+        if element["kind"] not in {"table", "image_region"}:
+            continue
+        crop = element.get("crop") or {}
+        center = float(crop.get("y", 0)) + float(crop.get("height", 0)) / 2
+        if abs(center - q_center) > 0.22:
+            continue
+
+        if element["kind"] == "table":
+            assets.append(
+                {
+                    "kind": "table",
+                    "rows": element.get("rows") or [],
+                    "crop": crop,
+                    "layout_order": element["order"],
+                }
+            )
+        else:
+            assets.append(
+                {
+                    "kind": "image_region",
+                    "xref": element.get("xref"),
+                    "crop": crop,
+                    "layout_order": element["order"],
+                }
+            )
+
+    return assets[:8]
+
+
+def _asset_key(asset: dict[str, Any]) -> str:
+    crop = asset.get("crop") or {}
+    return "|".join(
+        [
+            str(asset.get("kind") or ""),
+            str(asset.get("xref") or ""),
+            f"{float(crop.get('x', 0)):.5f}",
+            f"{float(crop.get('y', 0)):.5f}",
+            f"{float(crop.get('width', 0)):.5f}",
+            f"{float(crop.get('height', 0)):.5f}",
+        ]
+    )
+
+
+def _union_crops(
+    crops: list[dict[str, float]],
+) -> dict[str, float] | None:
+    if not crops:
+        return None
+
+    x0 = min(float(crop.get("x", 0)) for crop in crops)
+    y0 = min(float(crop.get("y", 0)) for crop in crops)
+    x1 = max(
+        float(crop.get("x", 0)) + float(crop.get("width", 0))
+        for crop in crops
+    )
+    y1 = max(
+        float(crop.get("y", 0)) + float(crop.get("height", 0))
+        for crop in crops
+    )
+    return {
+        "x": max(0.0, min(1.0, x0)),
+        "y": max(0.0, min(1.0, y0)),
+        "width": max(0.0, min(1.0, x1 - x0)),
+        "height": max(0.0, min(1.0, y1 - y0)),
+    }
+
+
+def _questions_from_text(
+    text: str,
+    page: int | None,
+    question_crops: dict[str, dict[str, float]] | None = None,
+) -> list[dict[str, Any]]:
     lines = [line.rstrip() for line in text.splitlines()]
     questions: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -446,6 +715,7 @@ def _questions_from_text(text: str, page: int | None) -> list[dict[str, Any]]:
                 "item_type": "question",
                 "page": page,
                 "sheet": None,
+                "crop": (question_crops or {}).get(number),
                 "payload": payload,
                 "confidence": confidence,
             }
