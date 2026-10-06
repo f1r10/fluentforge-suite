@@ -34,7 +34,11 @@ INLINE_OPTION_RE = re.compile(
     r"(?<!\w)([A-Ha-h])[\.)]\s*(.*?)(?=(?:\s+[A-Ha-h][\.)]\s*)|$)"
 )
 ANSWER_RE = re.compile(
-    r"^\s*(?:answer\s*key|answers?|cavab(?:lar)?|cevap(?:lar)?|ответы?)\s*[:\-]?\s*(.*)$",
+    r"^\s*(answer\s*key|answers?|cavab(?:lar)?|cevap(?:lar)?|ответы?)\s*[:\-]\s*(.*)$",
+    re.IGNORECASE,
+)
+ANSWER_SECTION_HEADING_RE = re.compile(
+    r"^\s*(?:answer\s*key|answers?|cavablar|cevaplar|ответы?|answers?\s+to\s+.{0,120}\b(?:test|exercise|questions?)\b)\s*:?[\s\-]*$",
     re.IGNORECASE,
 )
 ANSWER_PAIR_RE = re.compile(r"(\d{1,4})\s*[-.:)]?\s*([A-H]|True|False|Yes|No|Not Given)", re.IGNORECASE)
@@ -548,7 +552,7 @@ def _text_before_first_question(text: str) -> str:
     for line in text.splitlines():
         if QUESTION_RE.match(line) or QUESTION_NUMBER_ONLY_RE.match(line):
             break
-        if ANSWER_RE.match(line):
+        if ANSWER_RE.match(line) or ANSWER_SECTION_HEADING_RE.match(line):
             continue
         lines.append(line.rstrip())
     return "\n".join(lines).strip()
@@ -947,19 +951,16 @@ def _extract_global_answer_key(text: str) -> dict[str, str]:
     for raw_line in text.splitlines():
         line = raw_line.strip()
         lowered = line.casefold()
-        if (
-            lowered.startswith("answer key")
-            or lowered.startswith("answers to")
-            or lowered == "answers"
-        ):
+        heading_match = ANSWER_SECTION_HEADING_RE.match(line)
+        inline_match = ANSWER_RE.match(line)
+        inline_kind = inline_match.group(1).casefold() if inline_match else ""
+        if heading_match or inline_kind.startswith("answer key") or inline_kind.startswith("answers"):
             active = True
-            # Compact answers can appear on the same heading line.
-            line = re.sub(
-                r"^\s*(?:answer\s*key|answers(?:\s+to.*?)?)\s*[:\-]?\s*",
-                "",
-                line,
-                flags=re.IGNORECASE,
-            )
+            # Compact answers can appear on an explicit answer heading line.
+            if inline_match:
+                line = inline_match.group(2).strip()
+            else:
+                line = ""
 
         if not active or not line:
             continue
@@ -1041,18 +1042,23 @@ def _questions_from_text(
     answer_key: dict[str, str] = {}
 
     for line in lines:
+        if ANSWER_SECTION_HEADING_RE.match(line):
+            if current:
+                questions.append(current)
+                current = None
+            break
+
         answer_match = ANSWER_RE.match(line)
         if answer_match:
-            for number, answer in ANSWER_PAIR_RE.findall(answer_match.group(1)):
+            answer_kind = answer_match.group(1).casefold()
+            for number, answer in ANSWER_PAIR_RE.findall(answer_match.group(2)):
                 answer_key[number] = answer.strip()
-            # A dedicated answer-key heading marks the end of question content.
-            # This avoids importing numbered answer lists as new questions.
-            heading = line.strip().casefold()
+            # Plural answer blocks and answer-key labels end question content.
+            # A singular "Answer:" line may belong to the current exercise.
             if (
-                heading.startswith("answers")
-                or heading.startswith("answer key")
-                or heading.startswith("cavablar")
-                or heading.startswith("cevaplar")
+                answer_kind.startswith("answers")
+                or answer_kind.startswith("answer key")
+                or answer_kind in {"cavablar", "cevaplar", "ответы"}
             ):
                 if current:
                     questions.append(current)
