@@ -17,14 +17,20 @@ function Dashboard() {
   const { t, lang } = useI18n();
   const { data } = useSuspenseQuery(dashQuery);
   const c = data.counts;
+  const visible = new Set(data.visibleWidgets);
   const stats = [
     { label: t("students"), value: c.students, to: "/teacher/students" as const },
     { label: t("active_today"), value: c.activeToday, to: "/teacher/students" as const },
     { label: t("groups"), value: c.groups, to: "/teacher/groups" as const },
     { label: t("catalogs"), value: c.catalogs, to: "/teacher/catalogs" as const },
     { label: t("exams"), value: c.exams, to: "/teacher/exams" as const },
-    { label: t("pending_reviews"), value: c.pendingReviews, to: "/teacher" as const },
-  ];
+    { key: "students", label: t("students"), value: c.students, to: "/teacher/students" as const },
+    { key: "active_today", label: t("active_today"), value: c.activeToday, to: "/teacher/students" as const },
+    { key: "groups", label: t("groups"), value: c.groups, to: "/teacher/groups" as const },
+    { key: "catalogs", label: t("catalogs"), value: c.catalogs, to: "/teacher/catalogs" as const },
+    { key: "exams", label: t("exams"), value: c.exams, to: "/teacher/exams" as const },
+    { key: "pending_reviews", label: t("pending_reviews"), value: c.pendingReviews, to: "/teacher/reviews" as const },
+  ].filter((item) => visible.has(item.key));
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
@@ -40,7 +46,7 @@ function Dashboard() {
       </div>
 
       <div className="grid gap-8 lg:grid-cols-2">
-        <Section title={`${t("online_now")} (${data.online.length})`}>
+        {visible.has("online_now") && <Section title={`${t("online_now")} (${data.online.length})`}>
           {data.online.length === 0 ? <Empty>{t("nobody_online")}</Empty> : (
             <ul className="divide-y divide-border">
               {data.online.map((o) => (
@@ -51,9 +57,9 @@ function Dashboard() {
               ))}
             </ul>
           )}
-        </Section>
+        </Section>}
 
-        <Section title={t("recent_activity")}>
+        {visible.has("recent_activity") && <Section title={t("recent_activity")}>
           {data.activity.length === 0 ? <Empty>{t("no_activity")}</Empty> : (
             <ul className="divide-y divide-border">
               {data.activity.map((a) => (
@@ -64,9 +70,9 @@ function Dashboard() {
               ))}
             </ul>
           )}
-        </Section>
+        </Section>}
 
-        <Section title={t("upcoming_exams")} action={<Link to="/teacher/exams" className="text-sm text-primary hover:underline">{t("all")}</Link>}>
+        {visible.has("upcoming_exams") && <Section title={t("upcoming_exams")} action={<Link to="/teacher/exams" className="text-sm text-primary hover:underline">{t("all")}</Link>}>
           {data.upcomingExams.length === 0 ? <Empty>{t("no_results")}</Empty> : (
             <ul className="divide-y divide-border">
               {data.upcomingExams.map((e) => (
@@ -74,9 +80,9 @@ function Dashboard() {
               ))}
             </ul>
           )}
-        </Section>
+        </Section>}
 
-        <Section title={t("recent_catalogs")} action={<Link to="/teacher/catalogs" className="text-sm text-primary hover:underline">{t("all")}</Link>}>
+        {visible.has("recent_catalogs") && <Section title={t("recent_catalogs")} action={<Link to="/teacher/catalogs" className="text-sm text-primary hover:underline">{t("all")}</Link>}>
           {data.recentCatalogs.length === 0 ? <Empty>{t("no_results")}</Empty> : (
             <ul className="divide-y divide-border">
               {data.recentCatalogs.map((e) => (
@@ -84,7 +90,7 @@ function Dashboard() {
               ))}
             </ul>
           )}
-        </Section>
+        </Section>}
       </div>
     </div>
   );
