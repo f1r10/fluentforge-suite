@@ -72,6 +72,10 @@ export interface ProcessingService {
     preferredHeight?: number;
   }): Promise<ProcessingJobRef>;
 
+  renderPdfReport(input: {
+    html: string;
+  }): Promise<Uint8Array>;
+
   enrichVocabulary(input: {
     entryIds: string[];
     targetLanguages?: string[];
@@ -102,6 +106,9 @@ export class PlaceholderProcessingService implements ProcessingService {
 
   transcribeMedia = notImplemented;
   importYouTube = notImplemented;
+  async renderPdfReport(): Promise<Uint8Array> {
+    throw new Error("External processing service is not configured.");
+  }
   enrichVocabulary = notImplemented;
   analyzeDuplicates = notImplemented;
   processMedia = notImplemented;
@@ -151,6 +158,44 @@ class HttpProcessingService implements ProcessingService {
         );
       }
       return (await response.json()) as T;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async requestBinary(
+    path: string,
+    init?: RequestInit,
+  ): Promise<Uint8Array> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const headers = new Headers(init?.headers);
+      headers.set("content-type", "application/json");
+      if (this.sharedSecret) {
+        headers.set("x-processing-key", this.sharedSecret);
+      }
+
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+          `Processing service error ${response.status}: ${body.slice(0, 1000)}`,
+        );
+      }
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.toLowerCase().includes("application/pdf")) {
+        throw new Error(
+          `Processing service returned unexpected content type: ${contentType || "unknown"}`,
+        );
+      }
+
+      return new Uint8Array(await response.arrayBuffer());
     } finally {
       clearTimeout(timeout);
     }
@@ -261,6 +306,20 @@ class HttpProcessingService implements ProcessingService {
       jobId: result.job_id,
       status: result.status,
     };
+  }
+
+  async renderPdfReport(input: { html: string }) {
+    if (!input.html.trim()) {
+      throw new Error("PDF report HTML must not be empty.");
+    }
+    if (input.html.length > 8_000_000) {
+      throw new Error("PDF report HTML exceeds the 8 MB safety limit.");
+    }
+
+    return this.requestBinary("/v1/reports/pdf", {
+      method: "POST",
+      body: JSON.stringify({ html: input.html }),
+    });
   }
 
   enrichVocabulary = notImplemented;
