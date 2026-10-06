@@ -65,6 +65,13 @@ export interface ProcessingService {
     language?: string;
   }): Promise<ProcessingJobRef>;
 
+  importYouTube(input: {
+    sourceUrl: string;
+    uploadUrl: string;
+    maxBytes: number;
+    preferredHeight?: number;
+  }): Promise<ProcessingJobRef>;
+
   enrichVocabulary(input: {
     entryIds: string[];
     targetLanguages?: string[];
@@ -93,31 +100,8 @@ export class PlaceholderProcessingService implements ProcessingService {
   extractQuestions = notImplemented;
   extractVocabulary = notImplemented;
 
-  async transcribeMedia(input: {
-    mediaId: string;
-    sourceUrl: string;
-    filename: string;
-    language?: string;
-  }) {
-    const result = await this.request<{
-      job_id: string;
-      status: ProcessingJobStatus;
-    }>("/v1/jobs/transcription", {
-      method: "POST",
-      body: JSON.stringify({
-        media_id: input.mediaId,
-        source_url: this.sourceUrl(input.sourceUrl),
-        filename: input.filename,
-        language: input.language ?? null,
-      }),
-    });
-
-    return {
-      jobId: result.job_id,
-      status: result.status,
-    };
-  }
-
+  transcribeMedia = notImplemented;
+  importYouTube = notImplemented;
   enrichVocabulary = notImplemented;
   analyzeDuplicates = notImplemented;
   processMedia = notImplemented;
@@ -228,7 +212,57 @@ class HttpProcessingService implements ProcessingService {
   runOCR = notImplemented;
   extractQuestions = notImplemented;
   extractVocabulary = notImplemented;
-  transcribeMedia = notImplemented;
+
+  async transcribeMedia(input: {
+    mediaId: string;
+    sourceUrl: string;
+    filename: string;
+    language?: string;
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/transcription", {
+      method: "POST",
+      body: JSON.stringify({
+        media_id: input.mediaId,
+        source_url: this.sourceUrl(input.sourceUrl),
+        filename: input.filename,
+        language: input.language ?? null,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
+  async importYouTube(input: {
+    sourceUrl: string;
+    uploadUrl: string;
+    maxBytes: number;
+    preferredHeight?: number;
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/youtube-import", {
+      method: "POST",
+      body: JSON.stringify({
+        source_url: input.sourceUrl,
+        upload_url: this.sourceUrl(input.uploadUrl),
+        max_bytes: input.maxBytes,
+        preferred_height: input.preferredHeight ?? 1080,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
   enrichVocabulary = notImplemented;
   analyzeDuplicates = notImplemented;
   processMedia = notImplemented;
