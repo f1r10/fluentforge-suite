@@ -190,6 +190,111 @@ function PracticeQuestionAnswer({
     );
   }
 
+  if (def.editor === "matching" && isSpatialLabelling(question.question_type)) {
+    const labels = Array.isArray(payload["labels"])
+      ? (payload["labels"] as Array<{ id: string; x: number; y: number }>)
+      : [];
+    const rightOptions = Array.isArray(payload["right_options"])
+      ? (payload["right_options"] as string[])
+      : [];
+    const media =
+      payload["media"] && typeof payload["media"] === "object"
+        ? (payload["media"] as Record<string, unknown>)
+        : null;
+    const mediaUrl =
+      typeof media?.["external_url"] === "string"
+        ? media["external_url"]
+        : null;
+    const allowReuse = payload["allow_reuse"] === true;
+    const pairs =
+      response.pairs ??
+      labels.map((label) => ({ left: label.id, right: "" }));
+
+    return (
+      <div className="space-y-3">
+        {mediaUrl ? (
+          <div className="relative mx-auto w-full max-w-4xl overflow-hidden rounded-md border border-border bg-muted">
+            <img
+              src={mediaUrl}
+              alt=""
+              className="block h-auto max-h-[65vh] w-full object-contain"
+              draggable={false}
+            />
+            {labels.map((label, index) => (
+              <div
+                key={label.id}
+                className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background bg-foreground text-xs font-bold text-background shadow"
+                style={{ left: `${label.x}%`, top: `${label.y}%` }}
+                title={`${index + 1}`}
+              >
+                {index + 1}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+            {t("media_not_available")}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {labels.map((label, index) => {
+            const pair =
+              pairs.find((candidate) => candidate.left === label.id) ?? {
+                left: label.id,
+                right: "",
+              };
+            const used = new Set(
+              pairs
+                .filter((candidate) => candidate.left !== label.id)
+                .map((candidate) => candidate.right)
+                .filter(Boolean),
+            );
+
+            return (
+              <div
+                key={label.id}
+                className="grid items-center gap-2 sm:grid-cols-[42px_1fr]"
+              >
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
+                  {index + 1}
+                </div>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  value={pair.right}
+                  onChange={(event) => {
+                    const next = labels.map((item) => {
+                      const existing =
+                        pairs.find((candidate) => candidate.left === item.id) ?? {
+                          left: item.id,
+                          right: "",
+                        };
+                      return item.id === label.id
+                        ? { left: item.id, right: event.target.value }
+                        : existing;
+                    });
+                    onChange({ pairs: next });
+                  }}
+                >
+                  <option value="">—</option>
+                  {rightOptions.map((right) => (
+                    <option
+                      key={right}
+                      value={right}
+                      disabled={!allowReuse && used.has(right)}
+                    >
+                      {right}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (def.editor === "matching") {
     const leftItems = Array.isArray(payload["left_items"]) ? (payload["left_items"] as string[]) : [];
     const rightOptions = Array.isArray(payload["right_options"]) ? (payload["right_options"] as string[]) : [];
@@ -332,6 +437,20 @@ function formatAnswerKey(value: unknown, question: PracticeQuestion) {
     const pairs = Array.isArray(answer["pairs"])
       ? (answer["pairs"] as Array<{ left: string; right: string }>)
       : [];
+    if (isSpatialLabelling(question.question_type)) {
+      const labels = Array.isArray(question.payload["labels"])
+        ? (question.payload["labels"] as Array<{ id: string }>)
+        : [];
+      const indexById = new Map(labels.map((label, index) => [label.id, index + 1]));
+      return (
+        pairs
+          .map(
+            (pair) =>
+              `${indexById.get(pair.left) ?? pair.left} → ${pair.right}`,
+          )
+          .join(" · ") || "—"
+      );
+    }
     return pairs.map((pair) => `${pair.left} → ${pair.right}`).join(" · ") || "—";
   }
 
@@ -341,6 +460,10 @@ function formatAnswerKey(value: unknown, question: PracticeQuestion) {
   }
 
   return typeof answer["model_answer"] === "string" ? answer["model_answer"] : "—";
+}
+
+function isSpatialLabelling(type: string) {
+  return ["image_labelling", "diagram_labelling", "map_labelling"].includes(type);
 }
 
 function round(value: number) {
