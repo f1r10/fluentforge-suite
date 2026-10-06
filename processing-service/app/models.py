@@ -27,6 +27,7 @@ class ImportCandidate(BaseModel):
     page: int | None = None
     sheet: str | None = None
     payload: dict[str, Any]
+    crop: dict[str, float] | None = None
     confidence: float = Field(ge=0, le=1)
 
 
