@@ -24,6 +24,13 @@ class TranscriptionRequest(BaseModel):
     language: str | None = Field(default=None, max_length=16)
 
 
+class YouTubeImportRequest(BaseModel):
+    source_url: HttpUrl
+    upload_url: HttpUrl
+    max_bytes: int = Field(gt=0, le=2147483648)
+    preferred_height: int = Field(default=1080, ge=144, le=2160)
+
+
 class JobCreated(BaseModel):
     job_id: str
     status: JobStatus
