@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { changeCredentials, generateRecoveryCodes, getRecoveryStatus, getSettings, saveBranding, saveDashboardSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
+import { changeCredentials, generateRecoveryCodes, getLanguageSettings, getRecoveryStatus, getSettings, getStorageUsage, saveBranding, saveDashboardSettings, saveLanguageSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
 import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -21,9 +21,18 @@ import {
 const settingsQuery = queryOptions({ queryKey: ["settings"], queryFn: () => getSettings() });
 const recoveryQuery = queryOptions({ queryKey: ["recovery"], queryFn: () => getRecoveryStatus() });
 const maintenanceQuery = queryOptions({ queryKey: ["maintenance"], queryFn: () => getMaintenanceSettings() });
+const languagesQuery = queryOptions({ queryKey: ["language-settings"], queryFn: () => getLanguageSettings() });
+const storageUsageQuery = queryOptions({ queryKey: ["storage-usage"], queryFn: () => getStorageUsage() });
 
 export const Route = createFileRoute("/_authenticated/teacher/settings")({
-  loader: ({ context }) => Promise.all([context.queryClient.ensureQueryData(settingsQuery), context.queryClient.ensureQueryData(recoveryQuery), context.queryClient.ensureQueryData(maintenanceQuery)]),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(settingsQuery),
+      context.queryClient.ensureQueryData(recoveryQuery),
+      context.queryClient.ensureQueryData(maintenanceQuery),
+      context.queryClient.ensureQueryData(languagesQuery),
+      context.queryClient.ensureQueryData(storageUsageQuery),
+    ]),
   component: SettingsPage,
 });
 
@@ -35,6 +44,8 @@ function SettingsPage() {
       <BrandingForm />
       <DashboardSettings />
       <StudentDashboardSettings />
+      <LanguageSettings />
+      <StorageUsage />
       <CredentialsForm />
       <RecoveryCodes />
       <MaintenanceSettings />
@@ -598,6 +609,200 @@ function StudentDashboardSettings() {
       </Button>
     </section>
   );
+}
+
+function LanguageSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(languagesQuery);
+  const [rows, setRows] = useState(
+    data.map((language) => ({
+      code: language.code,
+      name: language.name,
+      native_name: language.native_name ?? "",
+      is_interface: language.is_interface,
+      is_learning: language.is_learning,
+      is_translation: language.is_translation,
+    })),
+  );
+  const [busy, setBusy] = useState(false);
+
+  function update(
+    index: number,
+    patch: Partial<(typeof rows)[number]>,
+  ) {
+    setRows((previous) =>
+      previous.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...patch } : row,
+      ),
+    );
+  }
+
+  function addLanguage() {
+    setRows((previous) => [
+      ...previous,
+      {
+        code: "",
+        name: "",
+        native_name: "",
+        is_interface: false,
+        is_learning: true,
+        is_translation: false,
+      },
+    ]);
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveLanguageSettings({
+        data: {
+          languages: rows.map((row) => ({
+            code: row.code,
+            name: row.name,
+            native_name: row.native_name || null,
+            is_learning: row.is_learning,
+            is_translation: row.is_translation,
+          })),
+        },
+      });
+      await qc.invalidateQueries({ queryKey: ["language-settings"] });
+      toast.success(t("language_settings_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("content_languages")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("content_languages_hint")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {rows.map((row, index) => (
+          <div
+            key={`${row.code || "new"}:${index}`}
+            className="grid gap-2 rounded-md border border-border p-3 md:grid-cols-[120px_1fr_1fr_auto_auto]"
+          >
+            <Input
+              value={row.code}
+              disabled={row.is_interface}
+              placeholder="en"
+              onChange={(event) =>
+                update(index, {
+                  code: event.target.value.toLowerCase(),
+                })
+              }
+            />
+            <Input
+              value={row.name}
+              placeholder={t("language_name")}
+              onChange={(event) =>
+                update(index, { name: event.target.value })
+              }
+            />
+            <Input
+              value={row.native_name}
+              placeholder={t("native_language_name")}
+              onChange={(event) =>
+                update(index, { native_name: event.target.value })
+              }
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={row.is_learning}
+                onCheckedChange={(checked) =>
+                  update(index, { is_learning: !!checked })
+                }
+              />
+              {t("learning")}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={row.is_translation}
+                onCheckedChange={(checked) =>
+                  update(index, { is_translation: !!checked })
+                }
+              />
+              {t("translation")}
+            </label>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" onClick={addLanguage}>
+          {t("add_language")}
+        </Button>
+        <Button type="button" onClick={save} disabled={busy}>
+          {t("save")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function StorageUsage() {
+  const { t } = useI18n();
+  const { data } = useSuspenseQuery(storageUsageQuery);
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("storage_usage")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("storage_usage_hint")}
+        </p>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {data.rows.map((row) => (
+          <div
+            key={row.category}
+            className="rounded-md border border-border p-3"
+          >
+            <div className="text-sm font-medium">
+              {t(`storage_${row.category}`)}
+            </div>
+            <div className="mt-1 text-xl font-bold">
+              {formatBytes(row.bytes)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {row.items} {t("items").toLocaleLowerCase()}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-md bg-muted/40 p-3">
+        <div className="text-sm font-medium">
+          {t("tracked_storage_total")}: {formatBytes(data.total_bytes)}
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t("tracked_storage_note")}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function CredentialsForm() {
