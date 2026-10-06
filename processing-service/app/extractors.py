@@ -63,10 +63,16 @@ def _extract_pdf(path: Path) -> Extraction:
     pages: list[dict[str, Any]] = []
     used_ocr = False
     chunks: list[str] = []
+    total_tables = 0
+    total_images = 0
 
     for index, page in enumerate(doc):
-        text = page.get_text("text").strip()
+        rect = page.rect
+        blocks = _page_blocks(page)
+        native_text = "\n".join(block["text"] for block in blocks if block["text"]).strip()
+        text = native_text or page.get_text("text").strip()
         method = "native"
+
         if len(text) < 40:
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
             image = Image.open(io.BytesIO(pix.tobytes("png")))
@@ -75,16 +81,133 @@ def _extract_pdf(path: Path) -> Extraction:
                 text = ocr_text
                 method = "ocr"
                 used_ocr = True
-        pages.append({"page": index + 1, "text": text, "method": method})
+
+        tables = _page_tables(page)
+        images = _page_images(page)
+        total_tables += len(tables)
+        total_images += len(images)
+
+        pages.append(
+            {
+                "page": index + 1,
+                "text": text,
+                "method": method,
+                "width": float(rect.width),
+                "height": float(rect.height),
+                "blocks": blocks,
+                "tables": tables,
+                "images": images,
+            }
+        )
         chunks.append(text)
 
     return Extraction(
-        "pdf_ocr" if used_ocr else "pdf_native",
+        "pdf_layout_ocr" if used_ocr else "pdf_layout_native",
         pages,
         [],
         "\n\n".join(chunks),
-        {"pages": len(pages), "ocr_pages": sum(1 for p in pages if p["method"] == "ocr")},
+        {
+            "pages": len(pages),
+            "ocr_pages": sum(1 for p in pages if p["method"] == "ocr"),
+            "tables": total_tables,
+            "image_regions": total_images,
+        },
     )
+
+
+def _page_blocks(page: fitz.Page) -> list[dict[str, Any]]:
+    rect = page.rect
+    raw = page.get_text("blocks")
+    blocks: list[dict[str, Any]] = []
+    for block in raw:
+        if len(block) < 5:
+            continue
+        x0, y0, x1, y1, text = block[:5]
+        cleaned = str(text).strip()
+        if not cleaned:
+            continue
+        blocks.append(
+            {
+                "text": cleaned,
+                "crop": _normalized_crop(rect, (x0, y0, x1, y1)),
+            }
+        )
+    blocks.sort(key=lambda item: (item["crop"]["y"], item["crop"]["x"]))
+    return blocks
+
+
+def _page_tables(page: fitz.Page) -> list[dict[str, Any]]:
+    rect = page.rect
+    out: list[dict[str, Any]] = []
+    try:
+        finder = page.find_tables()
+        for table in finder.tables:
+            rows = [
+                ["" if cell is None else str(cell).strip() for cell in row]
+                for row in table.extract()
+            ]
+            if not rows:
+                continue
+            out.append(
+                {
+                    "rows": rows,
+                    "crop": _normalized_crop(rect, table.bbox),
+                }
+            )
+    except Exception:
+        return []
+    return out
+
+
+def _page_images(page: fitz.Page) -> list[dict[str, Any]]:
+    rect = page.rect
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, float, float, float, float]] = set()
+    for image in page.get_images(full=True):
+        xref = int(image[0])
+        try:
+            image_rects = page.get_image_rects(xref)
+        except Exception:
+            image_rects = []
+        for image_rect in image_rects:
+            key = (
+                xref,
+                round(float(image_rect.x0), 2),
+                round(float(image_rect.y0), 2),
+                round(float(image_rect.x1), 2),
+                round(float(image_rect.y1), 2),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "xref": xref,
+                    "crop": _normalized_crop(
+                        rect,
+                        (image_rect.x0, image_rect.y0, image_rect.x1, image_rect.y1),
+                    ),
+                }
+            )
+    return out
+
+
+def _normalized_crop(
+    page_rect: fitz.Rect,
+    bbox: tuple[float, float, float, float] | fitz.Rect,
+) -> dict[str, float]:
+    if isinstance(bbox, fitz.Rect):
+        x0, y0, x1, y1 = bbox.x0, bbox.y0, bbox.x1, bbox.y1
+    else:
+        x0, y0, x1, y1 = bbox
+    width = max(float(page_rect.width), 1.0)
+    height = max(float(page_rect.height), 1.0)
+    return {
+        "x": max(0.0, min(1.0, float(x0) / width)),
+        "y": max(0.0, min(1.0, float(y0) / height)),
+        "width": max(0.0, min(1.0, (float(x1) - float(x0)) / width)),
+        "height": max(0.0, min(1.0, (float(y1) - float(y0)) / height)),
+    }
 
 
 def _extract_legacy_word(path: Path) -> Extraction:
@@ -199,7 +322,41 @@ def detect_candidates(extraction: Extraction) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
     for page in extraction.pages:
-        candidates.extend(_questions_from_text(page.get("text", ""), page=page.get("page")))
+        page_number = page.get("page")
+        candidates.extend(_questions_from_text(page.get("text", ""), page=page_number))
+
+        for table in page.get("tables") or []:
+            rows = table.get("rows") or []
+            text = "\n".join("\t".join(str(cell) for cell in row) for row in rows)
+            candidates.append(
+                {
+                    "item_type": "raw_text",
+                    "page": page_number,
+                    "sheet": None,
+                    "crop": table.get("crop"),
+                    "payload": {
+                        "kind": "table",
+                        "rows": rows,
+                        "text": text,
+                    },
+                    "confidence": 0.92,
+                }
+            )
+
+        for image in page.get("images") or []:
+            candidates.append(
+                {
+                    "item_type": "raw_text",
+                    "page": page_number,
+                    "sheet": None,
+                    "crop": image.get("crop"),
+                    "payload": {
+                        "kind": "image_region",
+                        "xref": image.get("xref"),
+                    },
+                    "confidence": 0.7,
+                }
+            )
 
     for sheet in extraction.sheets:
         candidates.extend(_questions_from_sheet(sheet))
