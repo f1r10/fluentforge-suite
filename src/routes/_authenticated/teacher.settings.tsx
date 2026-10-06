@@ -1017,11 +1017,11 @@ function CredentialsForm() {
   }
   return (
     <form onSubmit={submit} className="space-y-4">
-      <h2 className="border-b border-border pb-2 text-lg font-semibold">Sign-in details</h2>
+      <h2 className="border-b border-border pb-2 text-lg font-semibold">{t("sign_in_details")}</h2>
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label={t("username")}><Input value={f.newUsername} onChange={(e) => setF({ ...f, newUsername: e.target.value })} required minLength={3} /></Field>
-        <Field label="New password (optional)"><Input type="password" minLength={8} value={f.newPassword} onChange={(e) => setF({ ...f, newPassword: e.target.value })} /></Field>
-        <Field label="Current password"><Input type="password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required /></Field>
+        <Field label={t("new_password_optional")}><Input type="password" minLength={8} value={f.newPassword} onChange={(e) => setF({ ...f, newPassword: e.target.value })} /></Field>
+        <Field label={t("current_password")}><Input type="password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required /></Field>
       </div>
       <ErrorText>{error}</ErrorText>
       <Button type="submit">{t("save")}</Button>
@@ -1030,31 +1030,32 @@ function CredentialsForm() {
 }
 
 function RecoveryCodes() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { data } = useSuspenseQuery(recoveryQuery);
   const [codes, setCodes] = useState<string[] | null>(null);
   async function generate() {
-    if (data.remaining > 0 && !confirm("Creating new codes makes the old ones stop working. Continue?")) return;
+    if (data.remaining > 0 && !confirm(t("recovery_codes_regenerate_confirm"))) return;
     const r = await generateRecoveryCodes();
     setCodes(r.codes);
     qc.invalidateQueries({ queryKey: ["recovery"] });
   }
   function download() {
-    const blob = new Blob([`Recovery codes (each works once)\n\n${codes!.join("\n")}\n`], { type: "text/plain" });
+    const blob = new Blob([`${t("recovery_codes_file_heading")}\n\n${codes!.join("\n")}\n`], { type: "text/plain" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "recovery-codes.txt"; a.click();
   }
   return (
     <section className="space-y-4">
-      <h2 className="border-b border-border pb-2 text-lg font-semibold">Recovery codes</h2>
-      <p className="text-sm text-muted-foreground">If you forget your password, one of these codes lets you set a new one. Unused codes: <strong>{data.remaining}</strong> of 5.</p>
+      <h2 className="border-b border-border pb-2 text-lg font-semibold">{t("recovery_codes")}</h2>
+      <p className="text-sm text-muted-foreground">{t("recovery_codes_hint")} <strong>{data.remaining}</strong> / 5.</p>
       {codes && (
         <div className="space-y-2 rounded-md border border-border p-4">
-          <p className="text-sm">Save these now. They will not be shown again.</p>
+          <p className="text-sm">{t("recovery_codes_save_now")}</p>
           <ul className="grid gap-1 font-mono text-sm sm:grid-cols-2">{codes.map((c) => <li key={c}>{c}</li>)}</ul>
-          <Button variant="outline" size="sm" onClick={download}>Download</Button>
+          <Button variant="outline" size="sm" onClick={download}>{t("download")}</Button>
         </div>
       )}
-      <Button variant="outline" onClick={generate}>Create new recovery codes</Button>
+      <Button variant="outline" onClick={generate}>{t("create_recovery_codes")}</Button>
     </section>
   );
 }
