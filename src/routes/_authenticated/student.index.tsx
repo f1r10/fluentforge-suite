@@ -203,11 +203,18 @@ function StudentHome() {
                 />
               )}
               {visible.has("progress") && (
-                <ProgressCard
-                  icon={<BarChart3 className="h-4 w-4" />}
-                  label={t("week")}
-                  value={progress.stats.week_answers}
-                />
+                <>
+                  <ProgressCard
+                    icon={<BarChart3 className="h-4 w-4" />}
+                    label={t("week")}
+                    value={progress.stats.week_answers}
+                  />
+                  <ProgressCard
+                    icon={<BarChart3 className="h-4 w-4" />}
+                    label={t("month")}
+                    value={progress.stats.month_answers}
+                  />
+                </>
               )}
               {visible.has("accuracy") && (
                 <ProgressCard
