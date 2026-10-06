@@ -420,14 +420,17 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
 
     const ids = (selected ?? []).map((row) => row.question_id);
     const loaded = await loadSelfPracticeQuestions(admin, ids);
+    const ordered = ids
+      .map((id) => loaded.get(id))
+      .filter((question): question is LoadedQuestion => !!question);
+
+    const { hydrateQuestionMedia } = await import("./media.server");
+    const hydrated = await hydrateQuestionMedia(admin, ordered, 6 * 60 * 60);
 
     return {
       requested: data.count,
-      generated: ids.length,
-      questions: ids
-        .map((id) => loaded.get(id))
-        .filter((question): question is LoadedQuestion => !!question)
-        .map(publicQuestion),
+      generated: hydrated.length,
+      questions: hydrated.map(publicQuestion),
       filters: data,
     };
   });
