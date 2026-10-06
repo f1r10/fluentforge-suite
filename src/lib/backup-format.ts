@@ -70,7 +70,7 @@ export const SAFE_SETTING_KEYS = new Set([
 const rowSchema = z.record(z.string(), z.unknown());
 
 const storageObjectSchema = z.object({
-  bucket: z.enum(["media", "sources"]),
+  bucket: z.enum(["media", "sources", "branding"]),
   path: z
     .string()
     .min(1)
