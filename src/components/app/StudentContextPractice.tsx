@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Headphones } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -202,8 +202,72 @@ export function StudentListeningBlock({
 }: CommonProps & { listening: StudentListeningPractice }) {
   const { t } = useI18n();
   const [playCount, setPlayCount] = useState(0);
+  const [activeRun, setActiveRun] = useState(false);
+  const furthestTimeRef = useRef(0);
+  const seekingGuardRef = useRef(false);
   const max = listening.playback_rules.max_plays;
-  const blocked = max != null && playCount >= max;
+  const blocked = max != null && playCount >= max && !activeRun;
+
+  function handlePlay(event: React.SyntheticEvent<HTMLMediaElement>) {
+    if (blocked) {
+      event.currentTarget.pause();
+      return;
+    }
+    if (!activeRun) {
+      furthestTimeRef.current = event.currentTarget.currentTime;
+      setActiveRun(true);
+      setPlayCount((count) => count + 1);
+    }
+  }
+
+  function handleEnded() {
+    setActiveRun(false);
+    furthestTimeRef.current = 0;
+  }
+
+  function handleTimeUpdate(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (!media.seeking) {
+      furthestTimeRef.current = Math.max(
+        furthestTimeRef.current,
+        media.currentTime,
+      );
+    }
+  }
+
+  function handleSeeking(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (seekingGuardRef.current) return;
+
+    const target = media.currentTime;
+    const furthest = furthestTimeRef.current;
+    const blockAll = listening.playback_rules.allow_seek === false;
+    const blockRewind =
+      listening.playback_rules.allow_seek !== false &&
+      listening.playback_rules.allow_rewind === false &&
+      target + 0.35 < furthest;
+
+    if (blockAll || blockRewind) {
+      seekingGuardRef.current = true;
+      media.currentTime = furthest;
+      queueMicrotask(() => {
+        seekingGuardRef.current = false;
+      });
+    }
+  }
+
+  function handlePause(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (
+      listening.playback_rules.allow_pause === false &&
+      activeRun &&
+      !media.ended &&
+      media.currentTime > 0 &&
+      media.currentTime < media.duration
+    ) {
+      void media.play().catch(() => {});
+    }
+  }
 
   return (
     <section className="space-y-5 rounded-md border border-border p-4">
@@ -220,35 +284,44 @@ export function StudentListeningBlock({
           {listening.media.kind === "video" ? (
             <video
               className="w-full rounded-md bg-black"
-              controls={!blocked}
+              controls
               src={listening.media.external_url}
-              onPlay={(event) => {
-                if (blocked) {
-                  event.currentTarget.pause();
-                  return;
-                }
-                setPlayCount((count) => count + 1);
-              }}
+              onPlay={handlePlay}
+              onEnded={handleEnded}
+              onTimeUpdate={handleTimeUpdate}
+              onSeeking={handleSeeking}
+              onPause={handlePause}
             />
           ) : (
             <audio
               className="w-full"
-              controls={!blocked}
+              controls
               src={listening.media.external_url}
-              onPlay={(event) => {
-                if (blocked) {
-                  event.currentTarget.pause();
-                  return;
-                }
-                setPlayCount((count) => count + 1);
-              }}
+              onPlay={handlePlay}
+              onEnded={handleEnded}
+              onTimeUpdate={handleTimeUpdate}
+              onSeeking={handleSeeking}
+              onPause={handlePause}
             />
           )}
           {max != null && (
             <p className="mt-1 text-xs text-muted-foreground">
               {t("plays_used")}: {Math.min(playCount, max)} / {max}
+              {blocked ? ` · ${t("play_limit_reached")}` : ""}
             </p>
           )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            {listening.playback_rules.allow_pause === false
+              ? t("pause_disabled")
+              : ""}
+            {listening.playback_rules.allow_seek === false
+              ? ` · ${t("seek_disabled")}`
+              : ""}
+            {listening.playback_rules.allow_seek !== false &&
+            listening.playback_rules.allow_rewind === false
+              ? ` · ${t("rewind_disabled")}`
+              : ""}
+          </p>
         </div>
       ) : (
         <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
