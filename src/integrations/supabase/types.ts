@@ -2350,6 +2350,14 @@ export type Database = {
           correct: number
         }[]
       }
+      reorder_exam_sections: {
+        Args: { p_exam_id: string; p_section_ids: string[] }
+        Returns: undefined
+      }
+      reorder_exam_items: {
+        Args: { p_exam_id: string; p_section_id: string | null; p_item_ids: string[] }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "teacher" | "student"
