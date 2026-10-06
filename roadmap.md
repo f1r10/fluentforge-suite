@@ -17,7 +17,7 @@
 - [x] Vocabulary Bank: translations, definitions, IPA, POS, examples, topics/tags
 - [x] Reading library: passages, layouts, topics/tags, question sets
 - [x] Listening library: transcript, sections, playback rules, topics/tags, question sets
-- [ ] Media Library: upload/storage/deduplication/preview
+- [x] Media Library: private signed upload/storage, preview, trash/restore, checksum deduplication when available
 
 ## Catalogs & Practice
 - [x] Nested reusable catalogs
@@ -59,7 +59,7 @@
 - [x] Teacher approval queue for after-approval results
 - [ ] AI-assisted open-answer grading suggestion (score/confidence/reason)
 - [x] Full teacher attempt-monitoring / violation timeline UI
-- [ ] Strict server-controlled listening play limits (requires private Media Library delivery)
+- [ ] Strict server-controlled listening play limits (private delivery exists; counted streaming/proxy enforcement still required)
 
 ## Processing / Operations
 - [ ] Document import review pipeline
