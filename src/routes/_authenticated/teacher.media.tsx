@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Eye, FileUp, Image as ImageIcon, RotateCcw, Search, Trash2 } from "lucide-react";
+import { Eye, FileUp, Image as ImageIcon, RotateCcw, Search, Trash2, Youtube } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,7 +12,11 @@ import {
   finalizeMediaUpload,
   getMediaPreviewUrl,
   listMedia,
+  listYouTubeImports,
   restoreMedia,
+  saveYouTubeReference,
+  startYouTubeImport,
+  syncYouTubeImport,
   trashMedia,
 } from "@/lib/media.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,6 +39,7 @@ function MediaLibraryPage() {
   const [page, setPage] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaRow | null>(null);
+  const [youtubeOpen, setYoutubeOpen] = useState(false);
 
   const { data, isFetching } = useQuery({
     queryKey: ["media-library", search, kind, includeDeleted, page],
@@ -48,6 +53,34 @@ function MediaLibraryPage() {
         },
       }),
     placeholderData: keepPreviousData,
+  });
+
+  const { data: youtubeImports = [] } = useQuery({
+    queryKey: ["youtube-media-imports"],
+    queryFn: async () => {
+      let imports = await listYouTubeImports();
+      const active = imports.filter(
+        (job) => job.status === "queued" || job.status === "processing",
+      );
+      if (active.length) {
+        await Promise.allSettled(
+          active.map((job) =>
+            syncYouTubeImport({ data: { id: job.id } }),
+          ),
+        );
+        imports = await listYouTubeImports();
+        if (imports.some((job) => job.status === "completed")) {
+          await qc.invalidateQueries({ queryKey: ["media-library"] });
+        }
+      }
+      return imports;
+    },
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
+        (job) => job.status === "queued" || job.status === "processing",
+      )
+        ? 3_000
+        : 15_000,
   });
 
   const rows = data?.rows ?? [];
@@ -126,7 +159,7 @@ function MediaLibraryPage() {
           <h1 className="text-2xl font-bold">{t("media_library")}</h1>
           <p className="text-sm text-muted-foreground">{t("media_library_hint")}</p>
         </div>
-        <div>
+        <div className="flex flex-wrap gap-2">
           <input
             ref={fileInput}
             type="file"
@@ -136,12 +169,47 @@ function MediaLibraryPage() {
               if (file) upload(file);
             }}
           />
+          <Button
+            variant="outline"
+            onClick={() => setYoutubeOpen(true)}
+          >
+            <Youtube className="h-4 w-4" />
+            {t("import_youtube")}
+          </Button>
           <Button onClick={() => fileInput.current?.click()} disabled={uploading}>
             <FileUp className="h-4 w-4" />
             {uploading ? t("uploading") : t("upload_media")}
           </Button>
         </div>
       </div>
+
+      {youtubeImports.length > 0 && (
+        <section className="rounded-md border border-border">
+          <div className="border-b border-border px-3 py-2 text-sm font-medium">
+            {t("youtube_import_history")}
+          </div>
+          <div className="divide-y divide-border">
+            {youtubeImports.slice(0, 5).map((job) => (
+              <div
+                key={job.id}
+                className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[1fr_auto]"
+              >
+                <div className="min-w-0">
+                  <div className="truncate">{job.source_url}</div>
+                  {job.error && (
+                    <div className="text-xs text-destructive">
+                      {job.error}
+                    </div>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t(job.status)} · {job.progress}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-2 md:grid-cols-[1fr_180px_auto]">
         <div className="relative">
@@ -263,6 +331,17 @@ function MediaLibraryPage() {
       </div>
 
       {preview && <PreviewDialog media={preview} onClose={() => setPreview(null)} />}
+      {youtubeOpen && (
+        <YouTubeImportDialog
+          onClose={() => setYoutubeOpen(false)}
+          onChanged={async () => {
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: ["youtube-media-imports"] }),
+              qc.invalidateQueries({ queryKey: ["media-library"] }),
+            ]);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -283,6 +362,15 @@ function PreviewDialog({ media, onClose }: { media: MediaRow; onClose: () => voi
         </DialogHeader>
         {isLoading || !data ? (
           <div className="py-10 text-center text-sm text-muted-foreground">…</div>
+        ) : isYouTubeReference(media) ? (
+          <iframe
+            src={youtubeEmbedUrl(media)}
+            title={media.original_filename ?? "YouTube"}
+            className="aspect-video w-full rounded-md border border-border"
+            allow="accelerometer; autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
         ) : media.kind === "image" ? (
           <img src={data.url} alt="" className="mx-auto max-h-[70vh] max-w-full rounded-md object-contain" />
         ) : media.kind === "video" ? (
@@ -299,6 +387,180 @@ function PreviewDialog({ media, onClose }: { media: MediaRow; onClose: () => voi
       </DialogContent>
     </Dialog>
   );
+}
+
+function YouTubeImportDialog({
+  onClose,
+  onChanged,
+}: {
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [url, setUrl] = useState("");
+  const [mode, setMode] = useState<"download" | "reference">("download");
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [preferredHeight, setPreferredHeight] = useState(1080);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (mode === "download" && !rightsConfirmed) {
+      toast.error(t("youtube_rights_required"));
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (mode === "reference") {
+        await saveYouTubeReference({ data: { url } });
+        toast.success(t("youtube_reference_saved"));
+      } else {
+        await startYouTubeImport({
+          data: {
+            url,
+            rightsConfirmed: true,
+            preferredHeight,
+          },
+        });
+        toast.success(t("youtube_import_started"));
+      }
+      await onChanged();
+      onClose();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("import_youtube")}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              YouTube URL
+            </label>
+            <Input
+              type="url"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..."
+              required
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="radio"
+                name="youtube-mode"
+                checked={mode === "download"}
+                onChange={() => setMode("download")}
+                className="mt-1"
+              />
+              <span>
+                <strong className="block">{t("youtube_download_mode")}</strong>
+                <span className="text-xs text-muted-foreground">
+                  {t("youtube_download_mode_hint")}
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="radio"
+                name="youtube-mode"
+                checked={mode === "reference"}
+                onChange={() => setMode("reference")}
+                className="mt-1"
+              />
+              <span>
+                <strong className="block">{t("youtube_reference_mode")}</strong>
+                <span className="text-xs text-muted-foreground">
+                  {t("youtube_reference_mode_hint")}
+                </span>
+              </span>
+            </label>
+          </div>
+
+          {mode === "download" && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  {t("preferred_resolution")}
+                </label>
+                <select
+                  value={preferredHeight}
+                  onChange={(event) =>
+                    setPreferredHeight(Number(event.target.value))
+                  }
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value={720}>720p</option>
+                  <option value={1080}>1080p</option>
+                  <option value={1440}>1440p</option>
+                  <option value={2160}>2160p</option>
+                </select>
+              </div>
+
+              <label className="flex items-start gap-2 rounded-md bg-muted/40 p-3 text-sm">
+                <Checkbox
+                  checked={rightsConfirmed}
+                  onCheckedChange={(checked) =>
+                    setRightsConfirmed(!!checked)
+                  }
+                  className="mt-0.5"
+                />
+                <span>{t("youtube_rights_confirmation")}</span>
+              </label>
+            </>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={busy}
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                busy ||
+                !url.trim() ||
+                (mode === "download" && !rightsConfirmed)
+              }
+            >
+              {busy ? t("processing") : t("create")}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function isYouTubeReference(media: MediaRow) {
+  if (!media.metadata || typeof media.metadata !== "object") return false;
+  const metadata = media.metadata as Record<string, unknown>;
+  return (
+    metadata["source"] === "youtube" &&
+    metadata["reference_only"] === true
+  );
+}
+
+function youtubeEmbedUrl(media: MediaRow) {
+  if (!media.metadata || typeof media.metadata !== "object") return "";
+  const metadata = media.metadata as Record<string, unknown>;
+  return typeof metadata["embed_url"] === "string"
+    ? metadata["embed_url"]
+    : "";
 }
 
 async function sha256File(file: File) {
