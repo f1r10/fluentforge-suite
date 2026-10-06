@@ -736,7 +736,18 @@ def _union_crops(
     }
 
 
+def _normalize_choice_markers(line: str) -> str:
+    # Common PDF checkbox glyphs are often extracted between the option letter
+    # and its text instead of as A)/B) punctuation.
+    return re.sub(
+        r"(?<!\\w)([A-Ha-h])\\s*[\\uf072☐☑□❏]\\s*",
+        r"\\1) ",
+        line,
+    )
+
+
 def _options_from_line(line: str) -> list[dict[str, str]]:
+    line = _normalize_choice_markers(line)
     matches = list(INLINE_OPTION_RE.finditer(line))
     if not matches:
         return []
@@ -760,15 +771,26 @@ def _options_from_line(line: str) -> list[dict[str, str]]:
 def _split_prompt_and_inline_options(
     value: str,
 ) -> tuple[str, list[dict[str, str]]]:
-    first = re.search(r"\s+([A-Ha-h])[\.)]\s*", value)
-    if not first:
-        return value.strip(), []
+    normalized = _normalize_choice_markers(value)
+    first = re.search(r"\s+([A-Ha-h])[\.)]\s*", normalized)
+    if first:
+        prompt = normalized[: first.start()].strip()
+        options = _options_from_line(normalized[first.start() :].strip())
+        if len(options) >= 2:
+            return prompt, options
 
-    prompt = value[: first.start()].strip()
-    options = _options_from_line(value[first.start() :].strip())
-    if len(options) < 2:
-        return value.strip(), []
-    return prompt, options
+    true_false = re.search(
+        r"\s+[\\uf072☐☑□❏]?\\s*True\\s+[\\uf072☐☑□❏]?\\s*False\\s*$",
+        value,
+        re.IGNORECASE,
+    )
+    if true_false:
+        return value[: true_false.start()].strip(), [
+            {"id": "true", "text": "True"},
+            {"id": "false", "text": "False"},
+        ]
+
+    return value.strip(), []
 
 
 def _questions_from_text(
@@ -806,7 +828,7 @@ def _questions_from_text(
             current["options"].extend(inline_options)
             continue
 
-        option_match = OPTION_RE.match(line)
+        option_match = OPTION_RE.match(_normalize_choice_markers(line))
         if current and option_match:
             current["options"].append(
                 {"id": option_match.group(1).lower(), "text": option_match.group(2).strip()}
