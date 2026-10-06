@@ -562,7 +562,17 @@ def _reading_candidate_from_page(
     if not questions:
         return None
 
-    prefix = _text_before_first_question(str(page.get("text") or ""))
+    primary_prefix = _text_before_first_question(str(page.get("text") or ""))
+    block_text = "\n".join(
+        str(block.get("text") or "")
+        for block in page.get("blocks") or []
+        if str(block.get("text") or "").strip()
+    )
+    block_prefix = _text_before_first_question(block_text)
+    prefix = max(
+        (primary_prefix, block_prefix),
+        key=lambda value: (len(value.split()), len(value)),
+    )
     words = prefix.split()
     if explicit:
         if len(prefix) < 80 or len(words) < 15:
@@ -1044,6 +1054,9 @@ def _questions_from_text(
                 or heading.startswith("cavablar")
                 or heading.startswith("cevaplar")
             ):
+                if current:
+                    questions.append(current)
+                    current = None
                 break
             continue
 
