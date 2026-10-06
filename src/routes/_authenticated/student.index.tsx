@@ -1,13 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, BookOpen, ChevronRight, ClipboardList, Dumbbell, LogOut, Target } from "lucide-react";
+import { BarChart3, BookOpen, ChevronRight, ClipboardList, Dumbbell, History, LogOut, Target } from "lucide-react";
 import { heartbeat, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
 import { listStudentExams } from "@/lib/exam-attempt.functions";
 import { supabase } from "@/integrations/supabase/client";
-import { LanguageSelect } from "@/components/app/common";
+import { formatDateTime, LanguageSelect } from "@/components/app/common";
 import { useI18n, type Lang } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/student/")({
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/_authenticated/student/")({
 
 function StudentHome() {
   const { me } = Route.useRouteContext();
-  const { t, setLang } = useI18n();
+  const { t, setLang, lang } = useI18n();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: catalogs = [], isLoading } = useQuery({
@@ -203,6 +203,37 @@ function StudentHome() {
                 </div>
               </div>
             )}
+
+            <div className="rounded-md border border-border p-3">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <History className="h-4 w-4 text-muted-foreground" />
+                {t("practice_history")}
+              </div>
+              {progress.history.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t("no_practice_history")}</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {progress.history.slice(0, 8).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">
+                          {item.kind === "self" ? t("self_practice") : item.title || t("catalog_practice")}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDateTime(item.at, lang)} · {item.answered} {t("answered").toLocaleLowerCase()}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right text-xs text-muted-foreground">
+                        {item.accuracy == null ? "—" : `${Math.round(item.accuracy * 100)}%`}
+                        {item.score != null && item.max_score != null && (
+                          <div>{item.score} / {item.max_score}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>
