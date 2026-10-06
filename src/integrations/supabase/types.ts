@@ -459,6 +459,8 @@ export type Database = {
           max_score: number | null
           passed: boolean | null
           result_released: boolean
+          reset_at: string | null
+          reset_by: string | null
           score: number | null
           snapshot: Json
           started_at: string
@@ -476,6 +478,8 @@ export type Database = {
           max_score?: number | null
           passed?: boolean | null
           result_released?: boolean
+          reset_at?: string | null
+          reset_by?: string | null
           score?: number | null
           snapshot: Json
           started_at?: string
@@ -493,6 +497,8 @@ export type Database = {
           max_score?: number | null
           passed?: boolean | null
           result_released?: boolean
+          reset_at?: string | null
+          reset_by?: string | null
           score?: number | null
           snapshot?: Json
           started_at?: string
