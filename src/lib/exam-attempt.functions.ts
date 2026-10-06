@@ -852,6 +852,207 @@ export const getExamAttempt = createServerFn({ method: "GET" })
     };
   });
 
+export const startListeningPlayback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        attemptId: z.string().uuid(),
+        listeningId: z.string().uuid(),
+        requestId: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    const attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
+
+    if (
+      attempt.status !== "in_progress" ||
+      isExamDeadlineExpired(attempt.deadline_at)
+    ) {
+      throw new Error("This exam attempt is no longer active.");
+    }
+
+    const snapshot = attempt.snapshot as unknown as AttemptSnapshot;
+    const listening = findAttemptListening(snapshot, data.listeningId);
+    if (!listening) {
+      throw new Error("This listening is not part of the current exam attempt.");
+    }
+
+    const rules =
+      listening["playback_rules"] &&
+      typeof listening["playback_rules"] === "object"
+        ? (listening["playback_rules"] as Record<string, unknown>)
+        : {};
+    const maxPlays =
+      typeof rules["max_plays"] === "number" &&
+      Number.isInteger(rules["max_plays"]) &&
+      rules["max_plays"] > 0
+        ? rules["max_plays"]
+        : null;
+
+    const media =
+      listening["media"] && typeof listening["media"] === "object"
+        ? (listening["media"] as Record<string, unknown>)
+        : null;
+    if (!media) throw new Error("Listening media is not available.");
+
+    const storagePath =
+      typeof media["storage_path"] === "string"
+        ? media["storage_path"]
+        : null;
+    const externalUrl =
+      typeof media["external_url"] === "string"
+        ? media["external_url"]
+        : null;
+
+    if (!storagePath && !externalUrl) {
+      throw new Error("Listening media is not available.");
+    }
+    if (maxPlays != null && !storagePath) {
+      throw new Error(
+        "Strict play limits require private uploaded media. External media URLs cannot be strictly limited.",
+      );
+    }
+
+    const durationSeconds =
+      typeof media["duration_seconds"] === "number" &&
+      Number.isFinite(media["duration_seconds"])
+        ? Math.max(0, media["duration_seconds"])
+        : null;
+    const remainingSeconds = attempt.deadline_at
+      ? Math.max(
+          60,
+          Math.ceil(
+            (new Date(attempt.deadline_at).getTime() - Date.now()) / 1000,
+          ),
+        )
+      : 4 * 60 * 60;
+    const desiredLeaseSeconds = Math.ceil(
+      Math.max(5 * 60, (durationSeconds ?? 30 * 60) + 2 * 60),
+    );
+    const leaseSeconds = Math.max(
+      60,
+      Math.min(4 * 60 * 60, remainingSeconds, desiredLeaseSeconds),
+    );
+
+    const { data: claimed, error: claimError } = await admin.rpc(
+      "claim_exam_listening_play",
+      {
+        p_attempt_id: attempt.id,
+        p_student_id: studentId,
+        p_listening_id: data.listeningId,
+        p_request_id: data.requestId,
+        p_max_plays: maxPlays,
+        p_lease_seconds: leaseSeconds,
+      },
+    );
+    if (claimError) {
+      if (claimError.message.includes("PLAY_LIMIT_REACHED")) {
+        throw new Error("Listening play limit reached.");
+      }
+      throw new Error(claimError.message);
+    }
+
+    const lease = claimed?.[0];
+    if (!lease) throw new Error("Could not create listening playback lease.");
+
+    let url = externalUrl;
+    if (storagePath) {
+      const { data: signed, error: signedError } = await admin.storage
+        .from("media")
+        .createSignedUrl(storagePath, leaseSeconds);
+      if (signedError || !signed) {
+        throw new Error(
+          signedError?.message ?? "Could not authorize listening playback.",
+        );
+      }
+      url = signed.signedUrl;
+    }
+    if (!url) throw new Error("Listening media is not available.");
+
+    await admin.from("activity_events").insert({
+      student_id: studentId,
+      category: "exam",
+      event_type: "listening_play_started",
+      entity_type: "listening",
+      entity_id: data.listeningId,
+      attempt_id: attempt.id,
+      details: {
+        lease_id: lease.id,
+        play_number: lease.play_number,
+        max_plays: maxPlays,
+        expires_at: lease.expires_at,
+      } as never,
+    });
+
+    return {
+      leaseId: lease.id,
+      url,
+      playNumber: lease.play_number,
+      maxPlays,
+      expiresAt: lease.expires_at,
+      mediaKind:
+        typeof media["kind"] === "string" ? media["kind"] : "audio",
+      mimeType:
+        typeof media["mime_type"] === "string" ? media["mime_type"] : null,
+      rules: {
+        allow_pause: rules["allow_pause"] !== false,
+        allow_seek: rules["allow_seek"] !== false,
+        allow_rewind: rules["allow_rewind"] !== false,
+      },
+    };
+  });
+
+export const completeListeningPlayback = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        attemptId: z.string().uuid(),
+        leaseId: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const studentId = await currentStudentId(context.supabase);
+    const attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
+
+    const completedAt = new Date().toISOString();
+    const { data: lease, error } = await admin
+      .from("exam_listening_plays")
+      .update({ completed_at: completedAt })
+      .eq("id", data.leaseId)
+      .eq("attempt_id", attempt.id)
+      .eq("student_id", studentId)
+      .is("completed_at", null)
+      .select("id,listening_id,play_number")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+
+    if (lease) {
+      await admin.from("activity_events").insert({
+        student_id: studentId,
+        category: "exam",
+        event_type: "listening_play_completed",
+        entity_type: "listening",
+        entity_id: lease.listening_id,
+        attempt_id: attempt.id,
+        details: {
+          lease_id: lease.id,
+          play_number: lease.play_number,
+        } as never,
+      });
+    }
+
+    return { ok: true };
+  });
+
 export const saveExamAnswer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
