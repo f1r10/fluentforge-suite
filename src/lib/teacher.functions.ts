@@ -802,7 +802,7 @@ export const listLiveStudentSessions = createServerFn({ method: "GET" })
     const showIp = settings["show_ip"] === true;
     const needle = data.search.trim().toLocaleLowerCase();
 
-    return (sessionsResult.data ?? [])
+    const rows = (sessionsResult.data ?? [])
       .flatMap((session) => {
         const student = session.students as unknown as {
           id: string;
@@ -864,6 +864,15 @@ export const listLiveStudentSessions = createServerFn({ method: "GET" })
           },
         ];
       });
+
+    return {
+      rows,
+      privacy: {
+        show_browser_device: showBrowserDevice,
+        show_ip: showIp,
+      },
+      online_minutes: data.onlineMinutes,
+    };
   });
 
 function describeUserAgent(value: string) {
