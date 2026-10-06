@@ -89,6 +89,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
   ],
   results: [
     { key: "exam_attempts", table: "exam_attempts" },
+    { key: "exam_listening_plays", table: "exam_listening_plays" },
     { key: "attempt_answers", table: "attempt_answers" },
     { key: "manual_reviews", table: "manual_reviews" },
     { key: "teacher_feedback", table: "teacher_feedback" },
