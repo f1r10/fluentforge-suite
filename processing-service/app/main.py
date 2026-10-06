@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from .models import DocumentImportRequest, JobCreated, JobView, TranscriptionRequest
+from .models import DocumentImportRequest, JobCreated, JobView, TranscriptionRequest, YouTubeImportRequest
 from .store import create_job, get_job, init_db
 from .worker import start_worker, stop_worker
 
@@ -60,6 +60,16 @@ def submit_document_import(request: DocumentImportRequest):
 def submit_transcription(request: TranscriptionRequest):
     job_id = create_job("transcription", request.model_dump(mode="json"))
     return JobCreated(job_id=job_id, status="queued")
+
+@app.post(
+    "/v1/jobs/youtube-import",
+    response_model=JobCreated,
+    dependencies=[Depends(verify_key)],
+)
+def submit_youtube_import(request: YouTubeImportRequest):
+    job_id = create_job("youtube_import", request.model_dump(mode="json"))
+    return JobCreated(job_id=job_id, status="queued")
+
 
 @app.get(
     "/v1/jobs/{job_id}",
