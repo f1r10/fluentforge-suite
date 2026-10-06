@@ -155,3 +155,154 @@ jobs:
       - name: Stop local Supabase
         if: always()
         run: supabase stop --no-backup
+
+
+  plain-postgres-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create plain-runtime CI environment
+        run: |
+          cat >.env.postgres.ci <<'EOF'
+          POSTGRES_DB=fluentforge
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=ci-postgres-password-6c8357d85d454b47
+          APP_JWT_SECRET=ci-jwt-secret-2fef91657ac84675802bbd8c82553d03
+          APP_STORAGE_SECRET=ci-storage-secret-6e103818623349ecb119164711975e48
+          SETUP_TOKEN=ci-setup-token-cfbb3ba406844682
+          PROCESSING_SHARED_SECRET=ci-processing-secret-6469f35399b348af
+          APP_BIND_ADDRESS=127.0.0.1
+          APP_PORT=3400
+          AI_PROVIDER=disabled
+          WHISPER_LOCAL_FILES_ONLY=true
+          EOF
+
+      - name: Validate plain PostgreSQL Compose
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            config >/tmp/fluentforge-postgres-compose.yml
+
+      - name: Start Supabase-free stack
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            up -d --build app
+
+      - name: Verify plain runtime readiness
+        run: |
+          ok=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS \
+              http://127.0.0.1:3400/api/ready \
+              >/tmp/plain-ready.json; then
+              if grep -q '"database":"ok"' /tmp/plain-ready.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 2
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              ps || true
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              logs --no-color || true
+            exit 1
+          fi
+
+          cat /tmp/plain-ready.json
+          curl -fsS http://127.0.0.1:3400/setup >/tmp/plain-setup.html
+          test -s /tmp/plain-setup.html
+
+      - name: Verify local object storage upload and Range download
+        env:
+          APP_STORAGE_SECRET: ci-storage-secret-6e103818623349ecb119164711975e48
+        run: |
+          upload_token="$(node - <<'NODE'
+          const crypto = require('node:crypto');
+          const value = {
+            op: 'upload',
+            bucket: 'media',
+            path: 'ci/smoke.txt',
+            exp: Date.now() + 120000,
+          };
+          const payload = Buffer.from(JSON.stringify(value)).toString('base64url');
+          const sig = crypto.createHmac('sha256', process.env.APP_STORAGE_SECRET)
+            .update(payload, 'utf8').digest('base64url');
+          process.stdout.write(payload + '.' + sig);
+          NODE
+          )"
+
+          printf 'fluentforge-runtime-smoke' >/tmp/runtime-smoke.txt
+          curl -fsS -X PUT \
+            -H 'content-type: text/plain' \
+            -H 'x-runtime-storage-bucket: media' \
+            -H 'x-runtime-storage-path: ci/smoke.txt' \
+            --data-binary @/tmp/runtime-smoke.txt \
+            "http://127.0.0.1:3400/api/runtime-storage/upload?token=$upload_token" \
+            >/tmp/runtime-upload.json
+
+          read_token="$(node - <<'NODE'
+          const crypto = require('node:crypto');
+          const value = {
+            op: 'read',
+            bucket: 'media',
+            path: 'ci/smoke.txt',
+            exp: Date.now() + 120000,
+          };
+          const payload = Buffer.from(JSON.stringify(value)).toString('base64url');
+          const sig = crypto.createHmac('sha256', process.env.APP_STORAGE_SECRET)
+            .update(payload, 'utf8').digest('base64url');
+          process.stdout.write(payload + '.' + sig);
+          NODE
+          )"
+
+          curl -fsS \
+            -H 'Range: bytes=0-10' \
+            -D /tmp/runtime-range.headers \
+            "http://127.0.0.1:3400/api/runtime-storage/object?token=$read_token" \
+            >/tmp/runtime-range.bin
+
+          grep -qi '^content-range: bytes 0-10/25' /tmp/runtime-range.headers
+          test "$(cat /tmp/runtime-range.bin)" = "fluentforge-"
+
+      - name: Verify plain PostgreSQL bootstrap invariants
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            exec -T postgres \
+            psql -U postgres -d fluentforge -v ON_ERROR_STOP=1 <<'SQL'
+          select 1
+          where exists (
+            select 1 from pg_roles
+            where rolname = 'authenticated'
+          );
+          select 1
+          where exists (
+            select 1 from pg_roles
+            where rolname = 'service_role' and rolbypassrls
+          );
+          select 1
+          where to_regclass('public.runtime_auth_users') is not null;
+          select 1
+          where to_regclass('public.runtime_refresh_tokens') is not null;
+          SQL
+
+      - name: Stop Supabase-free stack
+        if: always()
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            down -v --remove-orphans
