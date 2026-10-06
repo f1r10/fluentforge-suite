@@ -29,6 +29,9 @@ class Extraction:
 
 QUESTION_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s+(.+?)\s*$")
 OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.)]\s+(.+?)\s*$")
+INLINE_OPTION_RE = re.compile(
+    r"(?<!\\w)([A-Ha-h])[\\.)]\\s*(.*?)(?=(?:\\s+[A-Ha-h][\\.)]\\s*)|$)"
+)
 ANSWER_RE = re.compile(
     r"^\s*(?:answer\s*key|answers?|cavab(?:lar)?|cevap(?:lar)?|ответы?)\s*[:\-]?\s*(.*)$",
     re.IGNORECASE,
@@ -324,6 +327,7 @@ def detect_candidates(
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     spreadsheet_mapping = _spreadsheet_mapping(profile)
+    expected_content = str((profile or {}).get("expected_content") or "auto")
 
     for page in extraction.pages:
         page_number = page.get("page")
@@ -334,14 +338,25 @@ def detect_candidates(
             question_crops=question_crops,
         )
 
-        reading = _reading_candidate_from_page(page, questions)
-        if reading:
-            source_ref = str(reading["payload"]["source_ref"])
-            candidates.append(reading)
+        context_item: dict[str, Any] | None = None
+        context_kind: str | None = None
+        if expected_content == "readings":
+            context_item = _reading_candidate_from_page(page, questions, explicit=True)
+            context_kind = "reading" if context_item else None
+        elif expected_content == "listenings":
+            context_item = _listening_candidate_from_page(page, questions)
+            context_kind = "listening" if context_item else None
+        elif expected_content not in {"questions", "vocabulary"}:
+            context_item = _reading_candidate_from_page(page, questions)
+            context_kind = "reading" if context_item else None
+
+        if context_item and context_kind:
+            source_ref = str(context_item["payload"]["source_ref"])
+            candidates.append(context_item)
             for index, question in enumerate(questions):
                 payload = question.get("payload") or {}
                 payload["import_context"] = {
-                    "kind": "reading",
+                    "kind": context_kind,
                     "source_ref": source_ref,
                     "sort_order": index,
                     "assets": _nearby_assets(page, question.get("crop")),
@@ -507,13 +522,17 @@ def _text_before_first_question(text: str) -> str:
 def _reading_candidate_from_page(
     page: dict[str, Any],
     questions: list[dict[str, Any]],
+    explicit: bool = False,
 ) -> dict[str, Any] | None:
     if not questions:
         return None
 
     prefix = _text_before_first_question(str(page.get("text") or ""))
     words = prefix.split()
-    if len(prefix) < 180 or len(words) < 30:
+    if explicit:
+        if len(prefix) < 80 or len(words) < 15:
+            return None
+    elif len(prefix) < 180 or len(words) < 30:
         return None
 
     lines = [line.strip() for line in prefix.splitlines() if line.strip()]
@@ -569,6 +588,71 @@ def _reading_candidate_from_page(
             },
         },
         "confidence": 0.84,
+    }
+
+
+def _listening_candidate_from_page(
+    page: dict[str, Any],
+    questions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not questions:
+        return None
+
+    prefix = _text_before_first_question(str(page.get("text") or "")).strip()
+    lines = [line.strip() for line in prefix.splitlines() if line.strip()]
+    page_number = page.get("page") or 1
+
+    title = f"Listening exercise — page {page_number}"
+    transcript = ""
+    if lines:
+        first = lines[0]
+        if len(first) <= 120 and len(first.split()) <= 16:
+            title = first
+            remainder = "\n".join(lines[1:]).strip()
+            if len(remainder.split()) >= 12:
+                transcript = remainder
+        elif len(prefix.split()) >= 12:
+            transcript = prefix
+
+    source_ref = f"listening:page:{page_number}"
+    first_question_y = min(
+        (
+            float((question.get("crop") or {}).get("y", 1))
+            for question in questions
+            if question.get("crop")
+        ),
+        default=1.0,
+    )
+    layout_context = [
+        element
+        for element in _page_layout_elements(page)
+        if float((element.get("crop") or {}).get("y", 1)) < first_question_y
+    ]
+
+    return {
+        "item_type": "listening",
+        "page": page.get("page"),
+        "sheet": None,
+        "crop": _union_crops(
+            [
+                element["crop"]
+                for element in layout_context
+                if element.get("crop")
+            ]
+        ),
+        "payload": {
+            "source_ref": source_ref,
+            "title": title[:300],
+            "transcript": transcript[:500_000],
+            "status": "draft",
+            "metadata": {
+                "reconstructed_from": "document_layout",
+                "source_page": page.get("page"),
+                "layout_elements": layout_context[:200],
+                "audio_required": True,
+            },
+        },
+        "confidence": 0.82 if transcript else 0.68,
     }
 
 
@@ -652,6 +736,41 @@ def _union_crops(
     }
 
 
+def _options_from_line(line: str) -> list[dict[str, str]]:
+    matches = list(INLINE_OPTION_RE.finditer(line))
+    if not matches:
+        return []
+    if line[: matches[0].start()].strip():
+        return []
+
+    options: list[dict[str, str]] = []
+    for match in matches:
+        value = match.group(2).strip()
+        if not value:
+            continue
+        options.append(
+            {
+                "id": match.group(1).lower(),
+                "text": value,
+            }
+        )
+    return options
+
+
+def _split_prompt_and_inline_options(
+    value: str,
+) -> tuple[str, list[dict[str, str]]]:
+    first = re.search(r"\s+([A-Ha-h])[\.)]\s*", value)
+    if not first:
+        return value.strip(), []
+
+    prompt = value[: first.start()].strip()
+    options = _options_from_line(value[first.start() :].strip())
+    if len(options) < 2:
+        return value.strip(), []
+    return prompt, options
+
+
 def _questions_from_text(
     text: str,
     page: int | None,
@@ -673,11 +792,18 @@ def _questions_from_text(
         if question_match:
             if current:
                 questions.append(current)
+            question_body = question_match.group(2).strip()
+            prompt, inline_options = _split_prompt_and_inline_options(question_body)
             current = {
                 "_number": question_match.group(1),
-                "prompt": question_match.group(2).strip(),
-                "options": [],
+                "prompt": prompt,
+                "options": inline_options,
             }
+            continue
+
+        inline_options = _options_from_line(line)
+        if current and inline_options:
+            current["options"].extend(inline_options)
             continue
 
         option_match = OPTION_RE.match(line)
