@@ -679,7 +679,7 @@ export const saveStudentDashboardSettings = createServerFn({
               "favorites",
             ]),
           )
-          .max(10),
+          .max(11),
       })
       .parse(d),
   )
