@@ -560,6 +560,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       finishedResult,
       monthResult,
       streakResult,
+      domainResult,
     ] = await Promise.all([
       admin.rpc("student_practice_stats", { p_student_id: studentId }),
       admin.rpc("student_topic_practice_stats", { p_student_id: studentId, p_limit: 12 }),
@@ -592,6 +593,9 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       admin.rpc("student_streak_stats", {
         p_student_id: studentId,
       }),
+      admin.rpc("student_domain_progress", {
+        p_student_id: studentId,
+      }),
     ]);
 
     for (const result of [
@@ -602,6 +606,7 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
       finishedResult,
       monthResult,
       streakResult,
+      domainResult,
     ]) {
       if (result.error) throw new Error(result.error.message);
     }
@@ -671,6 +676,13 @@ export const getMyPracticeProgress = createServerFn({ method: "GET" })
           streakResult.data?.[0]?.last_active_day ?? null,
       },
       topics: topicResult.data ?? [],
+      domains: (domainResult.data ?? []).map((row) => ({
+        domain: row.domain,
+        attempts: Number(row.attempts ?? 0),
+        correct: Number(row.correct ?? 0),
+        incorrect: Number(row.incorrect ?? 0),
+        accuracy: row.accuracy == null ? null : Number(row.accuracy),
+      })),
       daily: dailyResult.data ?? [],
       recent: recentResult.data ?? [],
       history,
