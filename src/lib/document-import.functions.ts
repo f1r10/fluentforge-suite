@@ -17,6 +17,15 @@ const readingImportPayloadSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
+const listeningImportPayloadSchema = z.object({
+  source_ref: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(300),
+  transcript: z.string().max(500_000).default(""),
+  learning_language: z.string().max(10).nullable().optional(),
+  level: z.string().max(20).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
 const spreadsheetMappingSchema = z
   .object({
     include_sheets: z
@@ -125,7 +134,7 @@ export const saveImportProfile = createServerFn({ method: "POST" })
         name: z.string().trim().min(1).max(120),
         config: z.object({
           expected_content: z
-            .enum(["auto", "questions", "vocabulary", "mixed"])
+            .enum(["auto", "questions", "vocabulary", "readings", "listenings", "mixed"])
             .default("auto"),
           learning_language: z.string().max(10).nullable().default(null),
           level: z.string().max(20).nullable().default(null),
@@ -341,6 +350,9 @@ export const startDocumentImport = createServerFn({ method: "POST" })
         sourceFileId: z.string().uuid(),
         mode: z.enum(["review", "auto"]).default("review"),
         profileId: z.string().uuid().nullable().default(null),
+        expectedContent: z
+          .enum(["auto", "questions", "vocabulary", "readings", "listenings", "mixed"])
+          .default("auto"),
       })
       .parse(d),
   )
@@ -358,7 +370,10 @@ export const startDocumentImport = createServerFn({ method: "POST" })
       throw new Error("Source file is not available.");
     }
 
-    let profile: Record<string, unknown> | null = null;
+    let profile: Record<string, unknown> | null =
+      data.expectedContent === "auto"
+        ? null
+        : { expected_content: data.expectedContent };
     if (data.profileId) {
       const { data: profileRow, error: profileError } = await admin
         .from("import_profiles")
@@ -367,10 +382,14 @@ export const startDocumentImport = createServerFn({ method: "POST" })
         .maybeSingle();
       if (profileError) throw new Error(profileError.message);
       if (!profileRow) throw new Error("Import profile not found.");
-      profile =
+      const savedProfile =
         profileRow.config && typeof profileRow.config === "object"
           ? (profileRow.config as Record<string, unknown>)
           : {};
+      profile =
+        data.expectedContent === "auto"
+          ? savedProfile
+          : { ...savedProfile, expected_content: data.expectedContent };
     }
 
     const { data: signed, error: signedError } = await admin.storage
@@ -656,9 +675,14 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       string,
       { readingId: string; questionSetId: string }
     >();
+    const listeningContexts = new Map<
+      string,
+      { listeningId: string; questionSetId: string }
+    >();
 
     let importedQuestions = 0;
     let importedReadings = 0;
+    let importedListenings = 0;
     let skipped = 0;
 
     // Context entities must exist before their dependent questions are inserted.
@@ -748,8 +772,101 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     }
 
     for (const item of approvedItems) {
+      if (item.item_type !== "listening") continue;
+
+      const raw = listeningImportPayloadSchema.parse(item.payload);
+
+      let listeningId = item.created_entity_id;
+      if (!listeningId) {
+        const transcript = raw.transcript.trim();
+        const { data: createdListening, error: listeningError } = await admin
+          .from("listenings")
+          .insert({
+            title: raw.title,
+            media_id: null,
+            transcript: transcript || null,
+            transcript_source: transcript ? "imported" : "none",
+            learning_language: raw.learning_language ?? "en",
+            level: raw.level ?? null,
+            playback_rules: {
+              max_plays: null,
+              allow_pause: true,
+              allow_seek: true,
+              allow_rewind: true,
+              show_transcript: false,
+            },
+            status: "draft",
+            source_file_id: job.source_file_id,
+            metadata: {
+              ...raw.metadata,
+              import_job_id: job.id,
+              import_item_id: item.id,
+              source_page: item.page,
+              source_crop: item.crop,
+              extraction: "document_import",
+            },
+          } as never)
+          .select("id")
+          .single();
+        if (listeningError || !createdListening) {
+          throw new Error(
+            listeningError?.message ?? "Could not create imported listening.",
+          );
+        }
+        listeningId = createdListening.id;
+
+        await admin
+          .from("import_items")
+          .update({ created_entity_id: listeningId })
+          .eq("id", item.id);
+
+        await admin.from("source_collection_items").upsert({
+          source_file_id: job.source_file_id,
+          entity_type: "listening",
+          entity_id: listeningId,
+        });
+
+        importedListenings += 1;
+      }
+
+      const { data: existingSets, error: existingSetError } = await admin
+        .from("listening_question_sets")
+        .select("id")
+        .eq("listening_id", listeningId)
+        .order("sort_order")
+        .limit(1);
+      if (existingSetError) throw new Error(existingSetError.message);
+
+      let questionSetId = existingSets?.[0]?.id ?? null;
+      if (!questionSetId) {
+        const { data: createdSet, error: setError } = await admin
+          .from("listening_question_sets")
+          .insert({
+            listening_id: listeningId,
+            section_id: null,
+            title: "Imported questions",
+            instructions: null,
+            sort_order: 0,
+          })
+          .select("id")
+          .single();
+        if (setError || !createdSet) {
+          throw new Error(
+            setError?.message ?? "Could not create listening question set.",
+          );
+        }
+        questionSetId = createdSet.id;
+      }
+
+      listeningContexts.set(raw.source_ref, {
+        listeningId,
+        questionSetId,
+      });
+    }
+
+    for (const item of approvedItems) {
       if (item.item_type !== "question") {
-        if (item.item_type !== "reading") skipped += 1;
+        if (item.item_type !== "reading" && item.item_type !== "listening") skipped += 1;
         continue;
       }
       if (item.created_entity_id) continue;
@@ -799,14 +916,23 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         ]),
       );
 
+      const contextKind =
+        importContext?.["kind"] === "reading" ||
+        importContext?.["kind"] === "listening"
+          ? importContext["kind"]
+          : null;
       const sourceRef =
-        importContext?.["kind"] === "reading" &&
-        typeof importContext["source_ref"] === "string"
+        contextKind && typeof importContext?.["source_ref"] === "string"
           ? importContext["source_ref"]
           : null;
-      const readingContext = sourceRef
-        ? readingContexts.get(sourceRef) ?? null
-        : null;
+      const readingContext =
+        contextKind === "reading" && sourceRef
+          ? readingContexts.get(sourceRef) ?? null
+          : null;
+      const listeningContext =
+        contextKind === "listening" && sourceRef
+          ? listeningContexts.get(sourceRef) ?? null
+          : null;
       const contextSort =
         typeof importContext?.["sort_order"] === "number"
           ? Math.max(0, Math.floor(importContext["sort_order"]))
@@ -818,10 +944,14 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
           ...fields,
           status: "draft",
           current_version: 1,
-          context_kind: readingContext ? "reading" : "none",
+          context_kind: readingContext
+            ? "reading"
+            : listeningContext
+              ? "listening"
+              : "none",
           reading_question_set_id: readingContext?.questionSetId ?? null,
-          listening_question_set_id: null,
-          context_sort: readingContext ? contextSort : 0,
+          listening_question_set_id: listeningContext?.questionSetId ?? null,
+          context_sort: readingContext || listeningContext ? contextSort : 0,
           reusable_independently: false,
           source_file_id: job.source_file_id,
           source_page: item.page,
@@ -834,7 +964,13 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
             source_crop: item.crop,
             import_context: importContext,
             unresolved_reading_context:
-              sourceRef && !readingContext ? sourceRef : null,
+              contextKind === "reading" && sourceRef && !readingContext
+                ? sourceRef
+                : null,
+            unresolved_listening_context:
+              contextKind === "listening" && sourceRef && !listeningContext
+                ? sourceRef
+                : null,
           },
           content_hash: contentHash,
         } as never)
@@ -851,10 +987,14 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         version: 1,
         snapshot: {
           ...fields,
-          context_kind: readingContext ? "reading" : "none",
+          context_kind: readingContext
+            ? "reading"
+            : listeningContext
+              ? "listening"
+              : "none",
           reading_question_set_id: readingContext?.questionSetId ?? null,
-          listening_question_set_id: null,
-          context_sort: readingContext ? contextSort : 0,
+          listening_question_set_id: listeningContext?.questionSetId ?? null,
+          context_sort: readingContext || listeningContext ? contextSort : 0,
         } as never,
       });
 
@@ -903,7 +1043,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       importedQuestions += 1;
     }
 
-    const imported = importedQuestions + importedReadings;
+    const imported = importedQuestions + importedReadings + importedListenings;
 
     await admin
       .from("import_jobs")
@@ -943,11 +1083,12 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       action: "document_import_committed",
       entity_type: "import_job",
       entity_id: job.id,
-      summary: `Imported ${importedQuestions} question(s) and ${importedReadings} reading(s) from document review`,
+      summary: `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s) from document review`,
       details: {
         imported,
         imported_questions: importedQuestions,
         imported_readings: importedReadings,
+        imported_listenings: importedListenings,
         skipped,
         original_deleted: originalDeleted,
       },
@@ -957,12 +1098,13 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     await notifyTeacher(admin, {
       kind: "import_committed",
       title: "Document import completed",
-      body: `Imported ${importedQuestions} question(s) and ${importedReadings} reading(s). ${skipped} item(s) skipped.`,
+      body: `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s). ${skipped} item(s) skipped.`,
       link: "/teacher/sources",
       data: {
         import_job_id: job.id,
         imported_questions: importedQuestions,
         imported_readings: importedReadings,
+        imported_listenings: importedListenings,
         skipped,
       },
       dedupeKey: `import-committed:${job.id}`,
@@ -972,6 +1114,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       imported,
       importedQuestions,
       importedReadings,
+      importedListenings,
       skipped,
       originalDeleted,
     };
