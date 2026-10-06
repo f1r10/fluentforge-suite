@@ -14,6 +14,7 @@ import {
   resetExamAttempt,
 } from "@/lib/review.functions";
 import { formatDateTime } from "@/components/app/common";
+import { listLiveStudentSessions } from "@/lib/teacher.functions";
 import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/teacher/monitoring")({
@@ -37,6 +38,18 @@ function MonitoringPage() {
   const { data: exams = [] } = useQuery({
     queryKey: ["review-exams"],
     queryFn: () => listReviewExams(),
+  });
+
+  const { data: liveSessions, isFetching: liveFetching } = useQuery({
+    queryKey: ["live-student-sessions", search],
+    queryFn: () =>
+      listLiveStudentSessions({
+        data: {
+          search,
+          onlineMinutes: 5,
+        },
+      }),
+    refetchInterval: 30_000,
   });
 
   const { data, isFetching } = useQuery({
@@ -64,6 +77,103 @@ function MonitoringPage() {
         <h1 className="text-2xl font-bold">{t("exam_monitoring")}</h1>
         <p className="text-sm text-muted-foreground">{t("exam_monitoring_hint")}</p>
       </div>
+
+      <section className="space-y-3 rounded-md border border-border">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <h2 className="font-semibold">
+              {t("live_sessions")} ({liveSessions?.rows.length ?? 0})
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {t("live_sessions_hint")}
+            </p>
+          </div>
+          {liveFetching && (
+            <span className="text-xs text-muted-foreground">…</span>
+          )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">{t("student")}</th>
+                <th className="px-3 py-2 font-medium">
+                  {t("current_page")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("session_duration")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("last_seen")}
+                </th>
+                {liveSessions?.privacy.show_browser_device && (
+                  <th className="px-3 py-2 font-medium">
+                    {t("browser_device")}
+                  </th>
+                )}
+                {liveSessions?.privacy.show_ip && (
+                  <th className="px-3 py-2 font-medium">IP</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {(liveSessions?.rows ?? []).length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={
+                      4 +
+                      (liveSessions?.privacy.show_browser_device ? 1 : 0) +
+                      (liveSessions?.privacy.show_ip ? 1 : 0)
+                    }
+                    className="px-3 py-6 text-center text-muted-foreground"
+                  >
+                    {liveFetching ? "…" : t("no_live_sessions")}
+                  </td>
+                </tr>
+              ) : (
+                liveSessions!.rows.map((session) => (
+                  <tr key={session.id}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium">
+                        {session.student_name}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {session.username}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      {session.current_location || "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {formatDuration(session.session_duration_ms)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {formatDateTime(session.last_seen_at, lang)}
+                    </td>
+                    {liveSessions?.privacy.show_browser_device && (
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {[
+                          session.browser,
+                          session.operating_system,
+                          session.device,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </td>
+                    )}
+                    {liveSessions?.privacy.show_ip && (
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {session.ip || "—"}
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="grid gap-2 md:grid-cols-[1fr_220px_180px_auto]">
         <div className="relative">
