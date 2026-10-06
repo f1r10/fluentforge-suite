@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, FileArchive, FileJson2, FileSpreadsheet } from "lucide-react";
+import { Download, FileArchive, FileJson2, FileSpreadsheet, FileText } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -94,7 +94,12 @@ function ExportCenter() {
               <button
                 key={option.kind}
                 type="button"
-                onClick={() => setKind(option.kind)}
+                onClick={() => {
+                  setKind(option.kind);
+                  if (format === "pdf" && option.kind !== "analytics") {
+                    setFormat("xlsx");
+                  }
+                }}
                 className={[
                   "rounded-md border p-4 text-left transition-colors",
                   selected
@@ -122,9 +127,14 @@ function ExportCenter() {
               <option value="xlsx">Excel (.xlsx)</option>
               <option value="json">Portable JSON</option>
               {kind !== "content_package" && <option value="csv">CSV</option>}
+              {kind === "analytics" && <option value="pdf">PDF report</option>}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
-              {format === "csv" ? t("csv_primary_table_hint") : t("full_export_format_hint")}
+              {format === "csv"
+                ? t("csv_primary_table_hint")
+                : format === "pdf"
+                  ? t("pdf_report_hint")
+                  : t("full_export_format_hint")}
             </p>
           </div>
 
@@ -149,6 +159,8 @@ function ExportCenter() {
               <FileSpreadsheet className="h-4 w-4" />
             ) : format === "json" ? (
               <FileJson2 className="h-4 w-4" />
+            ) : format === "pdf" ? (
+              <FileText className="h-4 w-4" />
             ) : (
               <FileArchive className="h-4 w-4" />
             )}
