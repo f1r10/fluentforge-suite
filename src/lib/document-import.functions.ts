@@ -17,6 +17,51 @@ const readingImportPayloadSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
+const spreadsheetMappingSchema = z
+  .object({
+    include_sheets: z
+      .array(z.string().trim().min(1).max(120))
+      .max(50)
+      .default([]),
+    header_row: z.number().int().min(1).max(100).default(1),
+    first_data_row: z.number().int().min(1).max(10_000).nullable().default(null),
+    sheet_as_section: z.boolean().default(false),
+    multi_value_separator: z.string().min(1).max(5).default("|"),
+    columns: z.object({
+      prompt: z.string().trim().min(1).max(120),
+      question_type: z.string().trim().max(120).default(""),
+      correct_answer: z.string().trim().max(120).default(""),
+      option_a: z.string().trim().max(120).default(""),
+      option_b: z.string().trim().max(120).default(""),
+      option_c: z.string().trim().max(120).default(""),
+      option_d: z.string().trim().max(120).default(""),
+      option_e: z.string().trim().max(120).default(""),
+      option_f: z.string().trim().max(120).default(""),
+      option_g: z.string().trim().max(120).default(""),
+      option_h: z.string().trim().max(120).default(""),
+      instructions: z.string().trim().max(120).default(""),
+      explanation: z.string().trim().max(120).default(""),
+      points: z.string().trim().max(120).default(""),
+      difficulty: z.string().trim().max(120).default(""),
+      learning_language: z.string().trim().max(120).default(""),
+      level: z.string().trim().max(120).default(""),
+      tags: z.string().trim().max(120).default(""),
+      section: z.string().trim().max(120).default(""),
+    }),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.first_data_row != null &&
+      value.first_data_row <= value.header_row
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["first_data_row"],
+        message: "First data row must be after the header row.",
+      });
+    }
+  });
+
 const allowedExtensions = new Set([
   "pdf",
   "doc",
@@ -86,6 +131,7 @@ export const saveImportProfile = createServerFn({ method: "POST" })
           level: z.string().max(20).nullable().default(null),
           status: z.enum(["draft", "active"]).default("draft"),
           auto_approve_confidence: z.number().min(0.5).max(1).default(0.95),
+          spreadsheet_mapping: spreadsheetMappingSchema.nullable().default(null),
         }),
       })
       .parse(d),
