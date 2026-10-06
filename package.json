@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "bun scripts/migrate.mjs",
-    "verify": "bun run test && bun run lint && bun run build"
+    "verify": "bun run test && bun run lint && bun run build",
+    "acceptance:db": "bun scripts/acceptance-db.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
