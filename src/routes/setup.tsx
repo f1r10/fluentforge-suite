@@ -1,10 +1,12 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthLayout, ErrorText, setTokens } from "@/components/app/common";
 import { getSetupState, setupTeacher, teacherLogin } from "@/lib/auth.functions";
+import { brandingQuery } from "@/routes/__root";
 
 export const Route = createFileRoute("/setup")({
   head: () => ({
@@ -24,6 +26,7 @@ export const Route = createFileRoute("/setup")({
 });
 
 function Setup() {
+  const { data: b } = useSuspenseQuery(brandingQuery);
   const navigate = useNavigate();
   const { requiresSetupToken } = Route.useLoaderData();
   const [f, setF] = useState({ username: "", password: "", confirm: "", setupToken: "" });
@@ -154,7 +157,7 @@ function Setup() {
         )}
         <ErrorText>{error}</ErrorText>
         <Button type="submit" className="h-11 w-full" disabled={busy}>
-          Create account
+          {b.setup_button || "Create account"}
         </Button>
       </form>
     </AuthLayout>
