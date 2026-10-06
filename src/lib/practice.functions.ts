@@ -906,6 +906,7 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     const admin = await adminClient();
     await currentStudentId(context.supabase);
 
+    const assignedIds = await assignedCatalogIds(admin, studentId);
     const [topics, sources, catalogs] = await Promise.all([
       admin
         .from("topics")
@@ -918,12 +919,15 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
         .select("id,original_filename")
         .order("created_at", { ascending: false })
         .limit(200),
-      admin
-        .from("catalogs")
-        .select("id,name")
-        .eq("status", "active")
-        .is("deleted_at", null)
-        .order("name"),
+      assignedIds.length
+        ? admin
+            .from("catalogs")
+            .select("id,name")
+            .in("id", assignedIds)
+            .eq("status", "active")
+            .is("deleted_at", null)
+            .order("name")
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     for (const result of [topics, sources, catalogs]) {
@@ -951,6 +955,7 @@ export const createSelfPractice = createServerFn({ method: "POST" })
 
     let catalogQuestionIds: string[] | null = null;
     if (data.catalogId) {
+      await accessibleCatalog(admin, studentId, data.catalogId);
       const { data: items, error } = await admin
         .from("catalog_items")
         .select("entity_id")
@@ -1006,6 +1011,7 @@ export const createSelfPractice = createServerFn({ method: "POST" })
         .select("entity_id,is_correct,created_at")
         .eq("student_id", studentId)
         .eq("entity_type", "question")
+        .in("event_type", ["practice_answer", "self_practice_answer"])
         .in("entity_id", candidateIds)
         .order("created_at", { ascending: false });
       if (activityError) throw new Error(activityError.message);
