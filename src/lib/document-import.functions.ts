@@ -459,7 +459,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
 
     const { data: job, error: jobError } = await admin
       .from("import_jobs")
-      .select("id,source_file_id,status")
+      .select("id,source_file_id,status,source_files(storage_path,keep_original)")
       .eq("id", data.jobId)
       .maybeSingle();
     if (jobError) throw new Error(jobError.message);
@@ -569,6 +569,29 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       })
       .eq("id", job.id);
 
+    const source = job.source_files as unknown as {
+      storage_path: string | null;
+      keep_original: boolean;
+    } | null;
+
+    let originalDeleted = false;
+    if (source?.storage_path && !source.keep_original) {
+      const { error: removeError } = await admin.storage
+        .from(SOURCE_BUCKET)
+        .remove([source.storage_path]);
+      if (removeError) throw new Error(removeError.message);
+
+      const { error: sourceUpdateError } = await admin
+        .from("source_files")
+        .update({
+          storage_path: null,
+          original_deleted_at: new Date().toISOString(),
+        })
+        .eq("id", job.source_file_id);
+      if (sourceUpdateError) throw new Error(sourceUpdateError.message);
+      originalDeleted = true;
+    }
+
     await audit(admin, {
       actor_type: "teacher",
       actor_id: context.userId,
@@ -576,10 +599,10 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       entity_type: "import_job",
       entity_id: job.id,
       summary: `Imported ${imported} question(s) from document review`,
-      details: { imported, skipped },
+      details: { imported, skipped, original_deleted: originalDeleted },
     });
 
-    return { imported, skipped };
+    return { imported, skipped, originalDeleted };
   });
 
 async function prepareItems(
