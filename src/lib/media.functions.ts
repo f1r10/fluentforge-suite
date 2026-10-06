@@ -564,7 +564,7 @@ export const syncYouTubeImport = createServerFn({ method: "POST" })
     }
 
     const completedAt = new Date().toISOString();
-    await jobs
+    await admin
       .from("media_import_jobs")
       .update({
         status: "completed",
