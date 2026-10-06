@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migrate": "bun scripts/migrate.mjs",
+    "verify": "bun run test && bun run lint && bun run build"
   },
   "overrides": {
     "rolldown": "1.2.1"
