@@ -16,7 +16,9 @@ type Admin = Awaited<ReturnType<typeof import("./security.server")["adminClient"
 const historyModeSchema = z.enum(["all", "mistakes", "unused"]);
 
 const generatorSchema = z.object({
-  count: z.number().int().min(1).max(100).default(20),
+  count: z.number().int().min(0).max(100).default(20),
+  readingCount: z.number().int().min(0).max(20).default(0),
+  listeningCount: z.number().int().min(0).max(20).default(0),
   language: z.string().max(10).nullable().default(null),
   level: z.string().max(20).nullable().default(null),
   types: z.array(z.string().max(60)).max(50).default([]),
@@ -70,6 +72,9 @@ type LoadedQuestion = {
   current_version: number;
   learning_language: string | null;
   level: string | null;
+  context_kind: "none" | "reading" | "listening";
+  reading_question_set_id: string | null;
+  listening_question_set_id: string | null;
 };
 
 async function getStudentId(
@@ -222,16 +227,80 @@ async function loadSelfPracticeQuestions(admin: Admin, ids: string[]) {
   const { data, error } = await admin
     .from("questions")
     .select(
-      "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,learning_language,level",
+      "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,learning_language,level,context_kind,reading_question_set_id,listening_question_set_id",
     )
     .in("id", unique)
     .eq("status", "active")
-    .eq("context_kind", "none")
     .is("deleted_at", null);
 
   if (error) throw new Error(error.message);
 
-  return new Map((data ?? []).map((row) => [row.id, row as LoadedQuestion]));
+  const rows = (data ?? []) as unknown as LoadedQuestion[];
+  const readingSetIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.context_kind === "reading")
+        .map((row) => row.reading_question_set_id)
+        .filter((value): value is string => !!value),
+    ),
+  ];
+  const listeningSetIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.context_kind === "listening")
+        .map((row) => row.listening_question_set_id)
+        .filter((value): value is string => !!value),
+    ),
+  ];
+
+  const [readingSets, listeningSets] = await Promise.all([
+    readingSetIds.length
+      ? admin
+          .from("reading_question_sets")
+          .select("id,readings!inner(id,status,deleted_at)")
+          .in("id", readingSetIds)
+          .eq("readings.status", "active")
+          .is("readings.deleted_at", null)
+      : Promise.resolve({ data: [], error: null }),
+    listeningSetIds.length
+      ? admin
+          .from("listening_question_sets")
+          .select("id,listenings!inner(id,status,deleted_at)")
+          .in("id", listeningSetIds)
+          .eq("listenings.status", "active")
+          .is("listenings.deleted_at", null)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (readingSets.error) throw new Error(readingSets.error.message);
+  if (listeningSets.error) throw new Error(listeningSets.error.message);
+
+  const validReadingSets = new Set(
+    (readingSets.data ?? []).map((row) => row.id),
+  );
+  const validListeningSets = new Set(
+    (listeningSets.data ?? []).map((row) => row.id),
+  );
+
+  return new Map(
+    rows
+      .filter((row) => {
+        if (row.context_kind === "none") return true;
+        if (row.context_kind === "reading") {
+          return (
+            !!row.reading_question_set_id &&
+            validReadingSets.has(row.reading_question_set_id)
+          );
+        }
+        if (row.context_kind === "listening") {
+          return (
+            !!row.listening_question_set_id &&
+            validListeningSets.has(row.listening_question_set_id)
+          );
+        }
+        return false;
+      })
+      .map((row) => [row.id, row]),
+  );
 }
 
 async function gradeAnswers(
@@ -268,6 +337,8 @@ async function logPracticeAnswers(
   studentId: string,
   sessionId: string,
   results: Awaited<ReturnType<typeof gradeAnswers>>,
+  practiceKind = "self",
+  contextId: string | null = null,
 ) {
   if (!results.length) return;
 
@@ -282,7 +353,8 @@ async function logPracticeAnswers(
       response: result.response as never,
       duration_ms: result.duration_ms,
       details: {
-        practice_kind: "self",
+        practice_kind: practiceKind,
+        context_id: contextId,
         session_id: sessionId,
         score: result.score,
         max_score: result.max_score,
@@ -300,9 +372,18 @@ async function gradeAndLog(
   studentId: string,
   sessionId: string,
   answers: Array<z.infer<typeof answerSchema>>,
+  practiceKind = "self",
+  contextId: string | null = null,
 ) {
   const results = await gradeAnswers(admin, answers);
-  await logPracticeAnswers(admin, studentId, sessionId, results);
+  await logPracticeAnswers(
+    admin,
+    studentId,
+    sessionId,
+    results,
+    practiceKind,
+    contextId,
+  );
   return results.map(({ response, duration_ms, ...result }) => result);
 }
 
@@ -442,6 +523,10 @@ export const submitSelfPracticeAnswer = createServerFn({ method: "POST" })
       .object({
         sessionId: z.string().uuid(),
         answer: answerSchema,
+        practiceKind: z
+          .enum(["self", "question_bank", "reading", "listening"])
+          .default("self"),
+        contextId: z.string().uuid().nullable().default(null),
       })
       .parse(d),
   )
@@ -450,7 +535,14 @@ export const submitSelfPracticeAnswer = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
 
-    const [result] = await gradeAndLog(admin, studentId, data.sessionId, [data.answer]);
+    const [result] = await gradeAndLog(
+      admin,
+      studentId,
+      data.sessionId,
+      [data.answer],
+      data.practiceKind,
+      data.contextId,
+    );
     return { result };
   });
 
@@ -460,8 +552,12 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
     z
       .object({
         sessionId: z.string().uuid(),
-        answers: z.array(answerSchema).min(1).max(100),
+        answers: z.array(answerSchema).min(1).max(500),
         filters: generatorSchema,
+        practiceKind: z
+          .enum(["self", "question_bank", "reading", "listening"])
+          .default("self"),
+        contextId: z.string().uuid().nullable().default(null),
         alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
         presentedQuestionIds: z.array(z.string().uuid()).max(100).default([]),
       })
@@ -479,6 +575,8 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
       studentId,
       data.sessionId,
       gradedWithPrivate.filter((result) => !alreadyLogged.has(result.question_id)),
+      data.practiceKind,
+      data.contextId,
     );
 
     const answeredIds = new Set(data.answers.map((answer) => answer.questionId));
@@ -506,7 +604,8 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
           is_correct: null,
           duration_ms: 0,
           details: {
-            practice_kind: "self",
+            practice_kind: data.practiceKind,
+            context_id: data.contextId,
             session_id: data.sessionId,
           } as never,
         })),
@@ -534,7 +633,8 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
       entity_type: "self_practice",
       entity_id: null,
       details: {
-        practice_kind: "self",
+        practice_kind: data.practiceKind,
+        context_id: data.contextId,
         session_id: data.sessionId,
         filters: data.filters,
         ...summary,
