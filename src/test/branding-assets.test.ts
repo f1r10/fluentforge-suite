@@ -19,6 +19,20 @@ describe("branding asset request validation", () => {
     });
   });
 
+  it("accepts supported login background formats", () => {
+    expect(
+      validateBrandingAssetRequest(
+        "login_image",
+        "login.webp",
+        "image/webp",
+        2048,
+      ),
+    ).toEqual({
+      extension: "webp",
+      contentType: "image/webp",
+    });
+  });
+
   it("rejects SVG logos", () => {
     expect(() =>
       validateBrandingAssetRequest(
