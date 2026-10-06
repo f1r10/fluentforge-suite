@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Activity, AlertTriangle, Eye, Flag, Search } from "lucide-react";
+import { Activity, AlertTriangle, Eye, Flag, RotateCcw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import {
   getReviewAttemptSummary,
   listExamAttemptsMonitoring,
   listReviewExams,
+  resetExamAttempt,
 } from "@/lib/review.functions";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
@@ -151,7 +152,9 @@ function MonitoringPage() {
                   <div className="text-xs text-muted-foreground">{row.student.username}</div>
                 </td>
                 <td className="px-3 py-2">{row.exam.title}</td>
-                <td className="px-3 py-2">{t(row.status)}</td>
+                <td className="px-3 py-2">
+                  {row.reset_at ? t("reset") : t(row.status)}
+                </td>
                 <td className="hidden px-3 py-2 sm:table-cell">#{row.attempt_number}</td>
                 <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">
                   {formatDateTime(row.started_at, lang)}
@@ -230,6 +233,8 @@ function AttemptDialog({
   onClose: () => void;
 }) {
   const { t, lang } = useI18n();
+  const qc = useQueryClient();
+  const [resetting, setResetting] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ["exam-attempt-monitoring-detail", attempt.id],
     queryFn: () => getReviewAttemptSummary({ data: { attemptId: attempt.id } }),
@@ -239,9 +244,49 @@ function AttemptDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {attempt.student.name} — {attempt.exam.title}
-          </DialogTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <DialogTitle>
+              {attempt.student.name} — {attempt.exam.title}
+            </DialogTitle>
+            {attempt.reset_at ? (
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {t("attempt_reset")} · {formatDateTime(attempt.reset_at, lang)}
+              </span>
+            ) : (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={resetting}
+                onClick={async () => {
+                  if (!confirm(t("reset_attempt_confirm"))) return;
+                  const reason =
+                    window.prompt(t("reset_attempt_reason_prompt"), "") ?? "";
+                  setResetting(true);
+                  try {
+                    await resetExamAttempt({
+                      data: {
+                        attemptId: attempt.id,
+                        reason,
+                      },
+                    });
+                    await Promise.all([
+                      qc.invalidateQueries({ queryKey: ["exam-monitoring"] }),
+                      qc.invalidateQueries({ queryKey: ["manual-reviews"] }),
+                      qc.invalidateQueries({ queryKey: ["release-queue"] }),
+                      qc.invalidateQueries({ queryKey: ["teacher-analytics"] }),
+                    ]);
+                    onClose();
+                  } finally {
+                    setResetting(false);
+                  }
+                }}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t("reset_attempt")}
+              </Button>
+            )}
+          </div>
         </DialogHeader>
 
         {isLoading || !data ? (
