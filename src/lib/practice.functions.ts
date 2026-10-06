@@ -66,7 +66,7 @@ const vocabularyPracticeModeSchema = z.enum([
 ]);
 
 const vocabularyPracticeInputSchema = z.object({
-  catalogId: z.string().uuid(),
+  catalogId: z.string().uuid().nullable().default(null),
   sessionId: z.string().uuid(),
   entryId: z.string().uuid(),
   mode: vocabularyPracticeModeSchema,
@@ -806,18 +806,22 @@ export const submitVocabularyPracticeAnswer = createServerFn({
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
     const studentId = await currentStudentId(context.supabase);
-    await accessibleCatalog(admin, studentId, data.catalogId);
 
-    const { data: catalogItem, error: itemError } = await admin
-      .from("catalog_items")
-      .select("id")
-      .eq("catalog_id", data.catalogId)
-      .eq("entity_type", "vocabulary")
-      .eq("entity_id", data.entryId)
-      .maybeSingle();
-    if (itemError) throw new Error(itemError.message);
-    if (!catalogItem) {
-      throw new Error("This vocabulary entry is not available in the catalog.");
+    if (data.catalogId) {
+      await accessibleCatalog(admin, studentId, data.catalogId);
+      const { data: catalogItem, error: itemError } = await admin
+        .from("catalog_items")
+        .select("id")
+        .eq("catalog_id", data.catalogId)
+        .eq("entity_type", "vocabulary")
+        .eq("entity_id", data.entryId)
+        .maybeSingle();
+      if (itemError) throw new Error(itemError.message);
+      if (!catalogItem) {
+        throw new Error(
+          "This vocabulary entry is not available in the catalog.",
+        );
+      }
     }
 
     const { data: entry, error: entryError } = await admin
