@@ -54,7 +54,18 @@ function TeacherLayout() {
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="border-b border-border bg-sidebar md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
         <div className="flex items-center justify-between gap-2 px-4 py-3">
-          <span className="truncate font-bold">{b.short_name || b.system_name}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            {b.logo_url && (
+              <img
+                src={b.logo_url}
+                alt=""
+                className="h-8 w-8 shrink-0 object-contain"
+              />
+            )}
+            <span className="truncate font-bold">
+              {b.short_name || b.system_name}
+            </span>
+          </div>
           <button onClick={signOut} className="text-muted-foreground md:hidden" aria-label={t("sign_out")}><LogOut className="h-5 w-5" /></button>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:overflow-visible">
