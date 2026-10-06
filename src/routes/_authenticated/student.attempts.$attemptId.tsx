@@ -20,10 +20,12 @@ import {
 } from "@/components/app/PracticeQuestionCard";
 import {
   autoSubmitExamAttempt,
+  completeListeningPlayback,
   getExamAttempt,
   getExamResult,
   recordExamViolation,
   saveExamAnswer,
+  startListeningPlayback,
   submitExamAttempt,
 } from "@/lib/exam-attempt.functions";
 import { useI18n } from "@/lib/i18n";
@@ -63,8 +65,8 @@ type ListeningContext = {
   title: string;
   media: {
     kind?: string;
-    external_url?: string | null;
     mime_type?: string | null;
+    duration_seconds?: number | null;
   } | null;
   playback_rules: {
     max_plays?: number | null;
@@ -76,6 +78,21 @@ type ListeningContext = {
   transcript: string | null;
   setTitle: string | null;
   setInstructions: string | null;
+};
+
+type ListeningPlaybackSession = {
+  leaseId: string;
+  url: string;
+  playNumber: number;
+  maxPlays: number | null;
+  expiresAt: string;
+  mediaKind: string;
+  mimeType: string | null;
+  rules: {
+    allow_pause: boolean;
+    allow_seek: boolean;
+    allow_rewind: boolean;
+  };
 };
 
 type QuestionView = {
@@ -143,7 +160,13 @@ function ActiveAttempt({
         ).length
       : 0,
   );
-  const [playCounts, setPlayCounts] = useState<Record<string, number>>({});
+  const [playCounts, setPlayCounts] = useState<Record<string, number>>(
+    data.listeningPlayCounts ?? {},
+  );
+  const [playbackSessions, setPlaybackSessions] = useState<
+    Record<string, ListeningPlaybackSession>
+  >({});
+  const [playStarting, setPlayStarting] = useState<string | null>(null);
 
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const autoSubmitting = useRef(false);
@@ -377,6 +400,55 @@ function ActiveAttempt({
     scheduleSave(question);
   }
 
+  async function startListening(context: ListeningContext) {
+    if (playStarting === context.listeningId) return;
+    setPlayStarting(context.listeningId);
+    try {
+      const result = await startListeningPlayback({
+        data: {
+          attemptId,
+          listeningId: context.listeningId,
+          requestId: crypto.randomUUID(),
+        },
+      });
+
+      setPlayCounts((previous) => ({
+        ...previous,
+        [context.listeningId]: result.playNumber,
+      }));
+      setPlaybackSessions((previous) => ({
+        ...previous,
+        [context.listeningId]: result,
+      }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPlayStarting(null);
+    }
+  }
+
+  async function finishListening(context: ListeningContext, leaseId: string) {
+    setPlaybackSessions((previous) => {
+      const next = { ...previous };
+      if (next[context.listeningId]?.leaseId === leaseId) {
+        delete next[context.listeningId];
+      }
+      return next;
+    });
+
+    try {
+      await completeListeningPlayback({
+        data: {
+          attemptId,
+          leaseId,
+        },
+      });
+    } catch {
+      // The lease is already counted server-side. Completion logging is
+      // best-effort and must not interrupt the exam.
+    }
+  }
+
   async function submit() {
     const answered = views.filter((view) =>
       hasPracticeResponse(
@@ -522,11 +594,14 @@ function ActiveAttempt({
             <ListeningContextCard
               context={current.context}
               count={playCounts[current.context.listeningId] ?? 0}
-              onPlay={() =>
-                setPlayCounts((previous) => ({
-                  ...previous,
-                  [current.context!.kind === "listening" ? current.context!.listeningId : ""]: (previous[current.context!.kind === "listening" ? current.context!.listeningId : ""] ?? 0) + 1,
-                }))
+              session={playbackSessions[current.context.listeningId] ?? null}
+              starting={playStarting === current.context.listeningId}
+              onStart={() => startListening(current.context as ListeningContext)}
+              onEnded={(leaseId) =>
+                finishListening(
+                  current.context as ListeningContext,
+                  leaseId,
+                )
               }
             />
           )}
@@ -667,16 +742,110 @@ function ReadingContextCard({ context }: { context: ReadingContext }) {
 function ListeningContextCard({
   context,
   count,
-  onPlay,
+  session,
+  starting,
+  onStart,
+  onEnded,
 }: {
   context: ListeningContext;
   count: number;
-  onPlay: () => void;
+  session: ListeningPlaybackSession | null;
+  starting: boolean;
+  onStart: () => void;
+  onEnded: (leaseId: string) => void;
 }) {
   const { t } = useI18n();
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const furthestTimeRef = useRef(0);
+  const seekingGuardRef = useRef(false);
+
   const maxPlays = context.playback_rules.max_plays ?? null;
   const blocked = maxPlays != null && count >= maxPlays;
-  const url = context.media?.external_url ?? null;
+  const activeSession =
+    session && new Date(session.expiresAt).getTime() > Date.now()
+      ? session
+      : null;
+  const rules = activeSession?.rules ?? {
+    allow_pause: context.playback_rules.allow_pause !== false,
+    allow_seek: context.playback_rules.allow_seek !== false,
+    allow_rewind: context.playback_rules.allow_rewind !== false,
+  };
+
+  function handleTimeUpdate(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (!media.seeking) {
+      furthestTimeRef.current = Math.max(
+        furthestTimeRef.current,
+        media.currentTime,
+      );
+    }
+  }
+
+  function handleSeeking(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (seekingGuardRef.current) return;
+
+    const target = media.currentTime;
+    const furthest = furthestTimeRef.current;
+    const shouldBlockAllSeek = !rules.allow_seek;
+    const shouldBlockRewind =
+      rules.allow_seek && !rules.allow_rewind && target + 0.35 < furthest;
+
+    if (shouldBlockAllSeek || shouldBlockRewind) {
+      seekingGuardRef.current = true;
+      media.currentTime = furthest;
+      queueMicrotask(() => {
+        seekingGuardRef.current = false;
+      });
+    }
+  }
+
+  function handlePause(event: React.SyntheticEvent<HTMLMediaElement>) {
+    const media = event.currentTarget;
+    if (
+      !rules.allow_pause &&
+      !media.ended &&
+      media.currentTime > 0 &&
+      media.currentTime < media.duration
+    ) {
+      void media.play().catch(() => {});
+    }
+  }
+
+  const player =
+    activeSession?.mediaKind === "video" ? (
+      <video
+        ref={(node) => {
+          mediaRef.current = node;
+        }}
+        src={activeSession.url}
+        className="w-full rounded-md bg-black"
+        controls
+        autoPlay
+        preload="auto"
+        onTimeUpdate={handleTimeUpdate}
+        onSeeking={handleSeeking}
+        onPause={handlePause}
+        onEnded={() => onEnded(activeSession.leaseId)}
+      />
+    ) : (
+      <audio
+        ref={(node) => {
+          mediaRef.current = node;
+        }}
+        src={activeSession?.url}
+        className="w-full"
+        controls
+        autoPlay
+        preload="auto"
+        onTimeUpdate={handleTimeUpdate}
+        onSeeking={handleSeeking}
+        onPause={handlePause}
+        onEnded={() => {
+          if (activeSession) onEnded(activeSession.leaseId);
+        }}
+      />
+    );
 
   return (
     <section className="rounded-md border border-border p-4">
@@ -685,54 +854,64 @@ function ListeningContextCard({
         {t("listening")}
       </div>
       <h2 className="mt-1 font-semibold">{context.title}</h2>
-      {context.setTitle && <h3 className="mt-3 text-sm font-medium">{context.setTitle}</h3>}
-      {context.setInstructions && <p className="mt-1 text-xs text-muted-foreground">{context.setInstructions}</p>}
+      {context.setTitle && (
+        <h3 className="mt-3 text-sm font-medium">{context.setTitle}</h3>
+      )}
+      {context.setInstructions && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {context.setInstructions}
+        </p>
+      )}
 
-      <div className="mt-4">
-        {url ? (
-          context.media?.kind === "video" ? (
-            <video
-              src={url}
-              className="w-full rounded-md bg-black"
-              controls={!blocked}
-              onPlay={(event) => {
-                if (blocked) {
-                  event.currentTarget.pause();
-                  return;
-                }
-                onPlay();
-              }}
-            />
-          ) : (
-            <audio
-              src={url}
-              className="w-full"
-              controls={!blocked}
-              onPlay={(event) => {
-                if (blocked) {
-                  event.currentTarget.pause();
-                  return;
-                }
-                onPlay();
-              }}
-            />
-          )
+      <div className="mt-4 space-y-2">
+        {activeSession ? (
+          player
+        ) : context.media ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={blocked || starting}
+            onClick={onStart}
+          >
+            <Headphones className="h-4 w-4" />
+            {starting ? t("authorizing_playback") : t("start_listening")}
+          </Button>
         ) : (
           <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
             {t("media_not_available")}
           </div>
         )}
+
         {maxPlays != null && (
-          <div className="mt-1 text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             {t("plays_used")}: {Math.min(count, maxPlays)} / {maxPlays}
+          </div>
+        )}
+        {blocked && !activeSession && (
+          <div className="text-xs font-medium text-destructive">
+            {t("play_limit_reached")}
+          </div>
+        )}
+        {activeSession && (
+          <div className="text-xs text-muted-foreground">
+            {t("play_session")}: {activeSession.playNumber}
+            {!rules.allow_pause ? ` · ${t("pause_disabled")}` : ""}
+            {!rules.allow_seek ? ` · ${t("seek_disabled")}` : ""}
+            {rules.allow_seek && !rules.allow_rewind
+              ? ` · ${t("rewind_disabled")}`
+              : ""}
           </div>
         )}
       </div>
 
       {context.transcript && (
         <details className="mt-4 rounded-md border border-border p-3">
-          <summary className="cursor-pointer text-sm font-medium">{t("transcript")}</summary>
-          <div className="mt-3 whitespace-pre-wrap text-sm leading-6">{context.transcript}</div>
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("transcript")}
+          </summary>
+          <div className="mt-3 whitespace-pre-wrap text-sm leading-6">
+            {context.transcript}
+          </div>
         </details>
       )}
     </section>
@@ -770,8 +949,8 @@ function flattenAttempt(data: AttemptData): QuestionView[] {
               title: string;
               media?: {
                 kind?: string;
-                external_url?: string | null;
                 mime_type?: string | null;
+                duration_seconds?: number | null;
               } | null;
               playback_rules?: {
                 max_plays?: number | null;
