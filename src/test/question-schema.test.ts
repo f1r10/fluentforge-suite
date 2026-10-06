@@ -167,6 +167,32 @@ describe("question schema", () => {
     ).toThrow(/exactly one matching answer/i);
   });
 
+  it("requires media for listening transcription", () => {
+    expect(() =>
+      validateQuestionInput({
+        ...base,
+        question_type: "listening_transcription",
+        payload: { blank_count: 1 },
+        answer_key: { blanks: [["hello"]] },
+      }),
+    ).toThrow(/require audio or video media/i);
+  });
+
+  it("accepts dictation with attached media", () => {
+    const q = validateQuestionInput({
+      ...base,
+      question_type: "dictation",
+      payload: {
+        blank_count: 1,
+        media_id: "44444444-4444-4444-8444-444444444444",
+      },
+      answer_key: { blanks: [["hello world"]] },
+    });
+    expect((q.payload as { media_id: string }).media_id).toBe(
+      "44444444-4444-4444-8444-444444444444",
+    );
+  });
+
   it("requires at least two ordering items", () => {
     expect(() =>
       validateQuestionInput({
