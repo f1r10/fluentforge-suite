@@ -82,9 +82,13 @@ def _process_document_import(job: dict) -> None:
         )
 
         items = detect_candidates(extraction)
+        profile = request.get("profile") or {}
+        _apply_profile(items, profile)
+
+        auto_threshold = float(profile.get("auto_approve_confidence", 0.95))
         needs_review = (
             request.get("mode") != "auto"
-            or any(item["confidence"] < 0.9 for item in items)
+            or any(item["confidence"] < auto_threshold for item in items)
             or any(
                 item["item_type"] == "question"
                 and _question_missing_answer(item["payload"])
@@ -107,6 +111,29 @@ def _process_document_import(job: dict) -> None:
         )
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+
+
+def _apply_profile(items: list[dict], profile: dict) -> None:
+    learning_language = profile.get("learning_language")
+    level = profile.get("level")
+    status = profile.get("status") or "draft"
+    expected_content = profile.get("expected_content") or "auto"
+
+    for item in items:
+        if expected_content == "questions" and item["item_type"] != "question":
+            item["confidence"] = min(float(item["confidence"]), 0.4)
+        if item["item_type"] != "question":
+            continue
+
+        payload = item.get("payload") or {}
+        if learning_language and not payload.get("learning_language"):
+            payload["learning_language"] = learning_language
+        if level and not payload.get("level"):
+            payload["level"] = level
+        payload["status"] = status
+        item["payload"] = payload
 
 
 def _question_missing_answer(payload: dict) -> bool:
