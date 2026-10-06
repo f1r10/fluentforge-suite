@@ -745,11 +745,15 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         status: raw["status"] ?? "draft",
         reusable_independently: false,
         topicIds: [],
-        tags: [],
+        tags: Array.isArray(raw["tags"])
+          ? raw["tags"].filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [],
         force: true,
       });
 
-      const { topicIds: _topics, tags: _tags, force: _force, ...fields } =
+      const { topicIds: _topics, tags, force: _force, ...fields } =
         validated;
       const contentHash = sha256(
         JSON.stringify([
@@ -829,6 +833,37 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         entity_type: "question",
         entity_id: created.id,
       });
+
+      if (tags.length) {
+        const uniqueTags = [
+          ...new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean)),
+        ];
+        if (uniqueTags.length) {
+          const { error: tagUpsertError } = await admin.from("tags").upsert(
+            uniqueTags.map((name) => ({ name })),
+            { onConflict: "name", ignoreDuplicates: true },
+          );
+          if (tagUpsertError) throw new Error(tagUpsertError.message);
+
+          const { data: tagRows, error: tagSelectError } = await admin
+            .from("tags")
+            .select("id,name")
+            .in("name", uniqueTags);
+          if (tagSelectError) throw new Error(tagSelectError.message);
+
+          if (tagRows?.length) {
+            const { error: relationError } = await admin
+              .from("question_tags")
+              .insert(
+                tagRows.map((tag) => ({
+                  question_id: created.id,
+                  tag_id: tag.id,
+                })),
+              );
+            if (relationError) throw new Error(relationError.message);
+          }
+        }
+      }
 
       importedQuestions += 1;
     }
