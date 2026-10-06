@@ -161,6 +161,11 @@ const SPATIAL_LABELLING_TYPES = new Set([
   "map_labelling",
 ]);
 
+const AUDIO_TEXT_TYPES = new Set([
+  "dictation",
+  "listening_transcription",
+]);
+
 function parseMatching(input: QuestionInput) {
   const payload = z
     .object({
@@ -269,6 +274,16 @@ export function validateQuestionInput(raw: unknown): QuestionInput {
       break;
     default:
       fail(["question_type"], "Question type has no validator.");
+  }
+
+  if (
+    AUDIO_TEXT_TYPES.has(input.question_type) &&
+    typeof typed.payload["media_id"] !== "string"
+  ) {
+    fail(
+      ["payload", "media_id"],
+      "Dictation and listening transcription questions require audio or video media.",
+    );
   }
 
   const uniqueTopics = [...new Set(input.topicIds)];
