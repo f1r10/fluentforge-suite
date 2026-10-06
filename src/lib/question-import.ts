@@ -286,7 +286,7 @@ export function buildQuestionInputFromImportRow(
 }
 
 export function parseDelimitedText(input: string): string[][] {
-  const normalized = input.replace(/^﻿/, "");
+  const normalized = input.replace(/^\uFEFF/, "");
   const delimiter = detectDelimiter(normalized);
   const rows: string[][] = [];
   let row: string[] = [];
@@ -313,10 +313,8 @@ export function parseDelimitedText(input: string): string[][] {
       continue;
     }
 
-    if (!quoted && (char === "
-" || char === "")) {
-      if (char === "" && next === "
-") index++;
+    if (!quoted && (char === "\n" || char === "\r")) {
+      if (char === "\r" && next === "\n") index++;
       row.push(cell);
       if (row.some((value) => value.trim())) rows.push(row);
       row = [];
@@ -333,11 +331,9 @@ export function parseDelimitedText(input: string): string[][] {
 }
 
 function detectDelimiter(input: string) {
-  const sample = input.split(/?
-/).slice(0, 5).join("
-");
-  const candidates = ["	", ",", ";"] as const;
-  let best = "	";
+  const sample = input.split(/\r?\n/).slice(0, 5).join("\n");
+  const candidates = ["\t", ",", ";"] as const;
+  let best: (typeof candidates)[number] = "\t";
   let bestScore = -1;
 
   for (const delimiter of candidates) {
@@ -357,7 +353,7 @@ function detectDelimiter(input: string) {
 }
 
 function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replace(/[s_-]+/g, " ");
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, " ");
 }
 
 function parseJsonObject(value: string, field: string) {
@@ -406,7 +402,7 @@ function parseBlankAnswers(raw: string) {
 function parsePairs(raw: string) {
   return splitDoubleSemicolon(raw)
     .map((entry) => {
-      const parts = entry.split(/s*(?:=>|→|=)s*/, 2);
+      const parts = entry.split(/\s*(?:=>|→|=)\s*/, 2);
       return {
         left: parts[0]?.trim() ?? "",
         right: parts[1]?.trim() ?? "",
@@ -417,8 +413,7 @@ function parsePairs(raw: string) {
 
 function splitDoubleSemicolon(value: string) {
   return value
-    .split(/;;|?
-/)
+    .split(/;;|\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
