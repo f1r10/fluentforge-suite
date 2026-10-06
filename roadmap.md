@@ -65,13 +65,14 @@
 ## Processing / Operations
 - [x] Document import review pipeline: private source upload, queued extraction, confidence/duplicate review, approve/reject/edit, provenance and commit
 - [x] PDF/scanned PDF text extraction with Tesseract OCR fallback
-- [ ] Document layout/table/image association and structured section reconstruction
+- [x] Document layout/table/image association, reading-order reconstruction and linked Reading/question context import
 - [x] Native DOCX/XLS/XLSX/CSV/TSV/TXT extraction + legacy DOC/RTF conversion
-- [ ] Reusable document import profiles and advanced field/section mappings
+- [x] Reusable document import profiles with language/level/status/content defaults and confidence policy
+- [ ] Advanced custom field/section mapping templates
 - [x] External Python/FastAPI processing worker with durable local queue and CI
-- [ ] Local Whisper transcription
+- [x] Local Whisper transcription via processing worker and Listening editor
 - [ ] Optional local AI / Gemini adapters
-- [ ] Export packages and reports
+- [x] Export Center: Questions, Vocabulary, Readings, Listenings, Catalogs, Exams, Students, Results, Logs and portable content package (JSON/XLSX/CSV)
 - [ ] Backup/restore
 - [ ] Trash retention and cleanup jobs
 - [ ] Production Docker/self-host deployment
