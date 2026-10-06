@@ -1436,6 +1436,51 @@ export type Database = {
           },
         ]
       }
+      processing_jobs: {
+        Row: {
+          id: string
+          kind: string
+          entity_type: string | null
+          entity_id: string | null
+          processor_job_id: string
+          status: Database["public"]["Enums"]["job_status"]
+          progress: number
+          params: Json
+          result: Json
+          error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          kind: string
+          entity_type?: string | null
+          entity_id?: string | null
+          processor_job_id: string
+          status?: Database["public"]["Enums"]["job_status"]
+          progress?: number
+          params?: Json
+          result?: Json
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          kind?: string
+          entity_type?: string | null
+          entity_id?: string | null
+          processor_job_id?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          progress?: number
+          params?: Json
+          result?: Json
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       questions: {
         Row: {
           answer_key: Json
