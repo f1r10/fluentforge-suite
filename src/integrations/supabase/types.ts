@@ -1154,6 +1154,53 @@ export type Database = {
           },
         ]
       }
+      media_upload_sessions: {
+        Row: {
+          id: string
+          storage_path: string
+          kind: Database["public"]["Enums"]["media_kind"]
+          original_filename: string
+          mime_type: string | null
+          expected_size_bytes: number
+          created_at: string
+          expires_at: string
+          finalized_at: string | null
+          media_asset_id: string | null
+        }
+        Insert: {
+          id?: string
+          storage_path: string
+          kind: Database["public"]["Enums"]["media_kind"]
+          original_filename: string
+          mime_type?: string | null
+          expected_size_bytes: number
+          created_at?: string
+          expires_at: string
+          finalized_at?: string | null
+          media_asset_id?: string | null
+        }
+        Update: {
+          id?: string
+          storage_path?: string
+          kind?: Database["public"]["Enums"]["media_kind"]
+          original_filename?: string
+          mime_type?: string | null
+          expected_size_bytes?: number
+          created_at?: string
+          expires_at?: string
+          finalized_at?: string | null
+          media_asset_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_upload_sessions_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "media_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_assets: {
         Row: {
           checksum: string | null
