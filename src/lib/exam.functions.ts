@@ -1224,6 +1224,17 @@ export const publishExam = createServerFn({ method: "POST" })
       throw new Error("The exam close time is already in the past.");
     }
 
+    const publishSettings = normalizeSettings(exam.settings);
+    const needsCloseTime =
+      publishSettings.result_release === "after_close" ||
+      publishSettings.answer_visibility === "after_close" ||
+      publishSettings.explanation_visibility === "after_close";
+    if (needsCloseTime && !exam.available_until) {
+      throw new Error(
+        'A closing time is required when result, answer, or explanation visibility uses "after close".',
+      );
+    }
+
     const [sectionsResult, itemsResult] = await Promise.all([
       admin
         .from("exam_sections")
