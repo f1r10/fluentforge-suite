@@ -58,7 +58,7 @@
 - [x] Result release: immediate / after close / after teacher approval
 - [x] Answer/explanation visibility timing enforcement
 - [x] Teacher approval queue for after-approval results
-- [ ] AI-assisted open-answer grading suggestion (score/confidence/reason)
+- [x] AI-assisted open-answer grading suggestion with explicit teacher apply/save and audit
 - [x] Full teacher attempt-monitoring / violation timeline UI
 - [ ] Strict server-controlled listening play limits (private delivery exists; counted streaming/proxy enforcement still required)
 
@@ -71,7 +71,7 @@
 - [ ] Advanced custom field/section mapping templates
 - [x] External Python/FastAPI processing worker with durable local queue and CI
 - [x] Local Whisper transcription via processing worker and Listening editor
-- [ ] Optional local AI / Gemini adapters
+- [x] Optional AI adapters: disabled-by-default local OpenAI-compatible provider + optional Gemini provider
 - [x] Export Center: Questions, Vocabulary, Readings, Listenings, Catalogs, Exams, Students, Results, Logs and portable content package (JSON/XLSX/CSV)
 - [ ] Backup/restore
 - [ ] Trash retention and cleanup jobs
