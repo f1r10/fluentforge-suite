@@ -394,8 +394,6 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
-    await getStudentId(context.supabase);
-
     const studentId = await getStudentId(context.supabase);
     const assignedIds = await assignedCatalogIds(admin, studentId);
 
@@ -576,7 +574,58 @@ async function selectContextPracticeIds(
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  return shuffle((data ?? []).map((row) => row.id)).slice(0, count);
+  const candidateIds = (data ?? []).map((row) => row.id);
+  if (!candidateIds.length) return [];
+
+  const questionSetTable =
+    kind === "reading"
+      ? "reading_question_sets"
+      : "listening_question_sets";
+  const parentColumn =
+    kind === "reading" ? "reading_id" : "listening_id";
+  const questionSetColumn =
+    kind === "reading"
+      ? "reading_question_set_id"
+      : "listening_question_set_id";
+
+  const { data: questionSets, error: questionSetError } = await admin
+    .from(questionSetTable)
+    .select(`id,${parentColumn}`)
+    .in(parentColumn, candidateIds);
+  if (questionSetError) throw new Error(questionSetError.message);
+
+  const setIds = (questionSets ?? []).map((row) => row.id);
+  if (!setIds.length) return [];
+
+  const { data: linkedQuestions, error: linkedError } = await admin
+    .from("questions")
+    .select(questionSetColumn)
+    .in(questionSetColumn, setIds)
+    .eq("status", "active")
+    .is("deleted_at", null);
+  if (linkedError) throw new Error(linkedError.message);
+
+  const setsWithQuestions = new Set(
+    (linkedQuestions ?? [])
+      .map((row) =>
+        String(
+          (row as Record<string, unknown>)[questionSetColumn] ?? "",
+        ),
+      )
+      .filter(Boolean),
+  );
+  const parentsWithQuestions = new Set(
+    (questionSets ?? [])
+      .filter((row) => setsWithQuestions.has(row.id))
+      .map((row) =>
+        String((row as Record<string, unknown>)[parentColumn] ?? ""),
+      )
+      .filter(Boolean),
+  );
+
+  return shuffle(
+    candidateIds.filter((id) => parentsWithQuestions.has(id)),
+  ).slice(0, count);
 }
 
 export const generateSelfPractice = createServerFn({ method: "POST" })
