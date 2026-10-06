@@ -10,10 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   listManualReviews,
+  listReleaseQueue,
   listReviewExams,
   releaseAttemptResult,
   reviewManualAnswer,
 } from "@/lib/review.functions";
+import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/teacher/reviews")({
@@ -23,7 +25,7 @@ export const Route = createFileRoute("/_authenticated/teacher/reviews")({
 type ReviewRow = Awaited<ReturnType<typeof listManualReviews>>["rows"][number];
 
 function ReviewsPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const qc = useQueryClient();
   const [status, setStatus] = useState<"pending" | "reviewed" | "all">("pending");
   const [search, setSearch] = useState("");
@@ -49,6 +51,11 @@ function ReviewsPage() {
     queryFn: () => listReviewExams(),
   });
 
+  const { data: releaseQueue = [] } = useQuery({
+    queryKey: ["release-queue"],
+    queryFn: () => listReleaseQueue(),
+  });
+
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
   const pageSize = data?.pageSize ?? 40;
@@ -57,6 +64,7 @@ function ReviewsPage() {
   async function refresh() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["manual-reviews"] }),
+      qc.invalidateQueries({ queryKey: ["release-queue"] }),
       qc.invalidateQueries({ queryKey: ["exams-detailed"] }),
     ]);
   }
@@ -67,6 +75,67 @@ function ReviewsPage() {
         <h1 className="text-2xl font-bold">{t("student_questions_box")}</h1>
         <p className="text-sm text-muted-foreground">{t("review_box_hint")}</p>
       </div>
+
+      <section className="space-y-3 rounded-md border border-border p-4">
+        <div>
+          <h2 className="font-semibold">{t("results_waiting_approval")}</h2>
+          <p className="text-sm text-muted-foreground">{t("approval_queue_hint")}</p>
+        </div>
+        {releaseQueue.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("no_results_waiting_approval")}</p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">{t("student")}</th>
+                  <th className="px-3 py-2 font-medium">{t("exam")}</th>
+                  <th className="hidden px-3 py-2 font-medium sm:table-cell">{t("submitted_at")}</th>
+                  <th className="px-3 py-2 font-medium">{t("score")}</th>
+                  <th className="hidden px-3 py-2 font-medium md:table-cell">{t("pending_reviews")}</th>
+                  <th className="w-36" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {releaseQueue.map((attempt) => (
+                  <tr key={attempt.id}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{attempt.student.name}</div>
+                      <div className="text-xs text-muted-foreground">{attempt.student.username}</div>
+                    </td>
+                    <td className="px-3 py-2">{attempt.exam.title}</td>
+                    <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">
+                      {formatDateTime(attempt.submitted_at, lang)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {attempt.score ?? 0} / {attempt.max_score ?? 0}
+                    </td>
+                    <td className="hidden px-3 py-2 md:table-cell">{attempt.pending_reviews}</td>
+                    <td className="px-2 py-1 text-right">
+                      <Button
+                        size="sm"
+                        disabled={attempt.pending_reviews > 0}
+                        onClick={async () => {
+                          try {
+                            await releaseAttemptResult({ data: { attemptId: attempt.id } });
+                            toast.success(t("result_released"));
+                            await refresh();
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : String(err));
+                          }
+                        }}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {t("release_result")}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="grid gap-2 md:grid-cols-[1fr_180px_240px]">
         <div className="relative">
