@@ -15,6 +15,7 @@ RUN apt-get update \
        libreoffice-core \
        libreoffice-writer \
        ffmpeg \
+       nodejs \
        libgl1 \
        libglib2.0-0 \
        tini \
