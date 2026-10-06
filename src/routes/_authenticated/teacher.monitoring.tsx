@@ -292,6 +292,48 @@ function AttemptDetail({ data, lang }: { data: AttemptSummary; lang: string }) {
       </div>
 
       <section>
+        <h3 className="mb-2 font-semibold">{t("listening_play_history")}</h3>
+        {data.listening_plays.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("no_listening_plays")}
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">{t("listening")}</th>
+                  <th className="px-3 py-2 font-medium">{t("play_session")}</th>
+                  <th className="px-3 py-2 font-medium">{t("started_at")}</th>
+                  <th className="px-3 py-2 font-medium">{t("completed_at")}</th>
+                  <th className="px-3 py-2 font-medium">{t("lease_expires")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.listening_plays.map((play) => (
+                  <tr key={play.id}>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {play.listening_id}
+                    </td>
+                    <td className="px-3 py-2">#{play.play_number}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {formatDateTime(play.started_at, lang)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {formatDateTime(play.completed_at, lang)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {formatDateTime(play.expires_at, lang)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
         <h3 className="mb-2 font-semibold">{t("assessment_log")}</h3>
         {data.timeline.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("no_activity")}</p>
@@ -451,6 +493,8 @@ function formatEvent(type: string, t: (key: string) => string) {
     exam_submitted: "exam_submitted",
     exam_auto_submitted: "exam_auto_submitted",
     exam_violation: "exam_violation",
+    listening_play_started: "listening_play_started",
+    listening_play_completed: "listening_play_completed",
   };
   return t(keys[type] ?? type);
 }
