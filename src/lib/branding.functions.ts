@@ -6,7 +6,7 @@ import { validateBrandingAssetRequest, verifyBrandingAssetBytes } from "./brandi
 const BUCKET = "branding";
 
 const uploadSchema = z.object({
-  kind: z.enum(["logo", "favicon"]),
+  kind: z.enum(["logo", "favicon", "login_image"]),
   filename: z.string().trim().min(1).max(255),
   mimeType: z.string().trim().max(255).default(""),
   sizeBytes: z.number().int().min(1),
@@ -46,7 +46,7 @@ export const finalizeBrandingAssetUpload = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z
       .object({
-        kind: z.enum(["logo", "favicon"]),
+        kind: z.enum(["logo", "favicon", "login_image"]),
         path: z.string().min(1).max(500),
       })
       .parse(d),
