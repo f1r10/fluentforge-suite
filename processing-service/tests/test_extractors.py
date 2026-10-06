@@ -587,3 +587,115 @@ def test_wrapped_option_text_is_joined_and_section_heading_is_not_appended():
         "What's her job?",
     ]
     assert "Exercise 3" not in questions[0]["payload"]["prompt"]
+
+
+def test_global_answer_key_fills_unique_choice_and_short_answers():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1. Pick one.\nA) Alpha B) Beta C) Gamma\n"
+                    "2. I ____ here. (to work)\n"
+                ),
+            },
+            {
+                "page": 2,
+                "text": (
+                    "Answer Key:\n"
+                    "1: B\n"
+                    "2. work\n"
+                ),
+            },
+        ],
+        [],
+        (
+            "1. Pick one.\nA) Alpha B) Beta C) Gamma\n"
+            "2. I ____ here. (to work)\n"
+            "Answer Key:\n1: B\n2. work\n"
+        ),
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 2
+    assert questions[0]["payload"]["answer_key"] == {"correct": ["b"]}
+    assert questions[1]["payload"]["answer_key"] == {"blanks": [["work"]]}
+
+
+def test_standalone_true_false_lines_become_choices():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1. The restaurant was expensive.\n"
+                    "❏ True\n"
+                    "❏ False\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    question = [item for item in items if item["item_type"] == "question"][0]
+
+    assert question["payload"]["payload"]["options"] == [
+        {"id": "true", "text": "True"},
+        {"id": "false", "text": "False"},
+    ]
+
+
+def test_listening_target_splits_multiple_tasks_on_one_page():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 9,
+                "text": (
+                    "SECTION III: Listening Comprehension\n"
+                    "Listening Task 1\n"
+                    "Listen and mark True or False.\n"
+                    "1. Brazilians like coffee.\n❏ True\n❏ False\n"
+                    "2. Filipinos eat rice.\n❏ True\n❏ False\n"
+                    "Listening Task 2\n"
+                    "Listen and mark True or False.\n"
+                    "1. Snakes can hear.\n❏ True\n❏ False\n"
+                    "2. Penguins can swim.\n❏ True\n❏ False\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "listenings"})
+    listenings = [item for item in items if item["item_type"] == "listening"]
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert [item["payload"]["title"] for item in listenings] == [
+        "Listening Task 1",
+        "Listening Task 2",
+    ]
+    assert len(questions) == 4
+    assert {
+        question["payload"]["import_context"]["source_ref"]
+        for question in questions
+    } == {
+        "listening:page:9:task:1",
+        "listening:page:9:task:2",
+    }
