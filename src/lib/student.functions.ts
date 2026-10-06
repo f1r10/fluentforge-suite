@@ -234,12 +234,16 @@ export const getMyDashboardSettings = createServerFn({ method: "GET" })
               "exams",
               "practice",
               "today",
+              "correctness",
               "accuracy",
               "study_time",
+              "streak",
               "progress",
+              "domain_progress",
               "weak_topics",
               "history",
               "favorites",
+              "completed_exams",
             ],
     };
   });
