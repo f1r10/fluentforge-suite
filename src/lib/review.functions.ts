@@ -304,6 +304,121 @@ export const listReleaseQueue = createServerFn({ method: "GET" })
     });
   });
 
+export const listQuestionReports = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        status: z.enum(["open", "resolved", "all"]).default("open"),
+        page: z.number().int().min(0).default(0),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const pageSize = 30;
+    let query = context.supabase
+      .from("question_reports")
+      .select(
+        "id,comment,created_at,resolved_at,student_id,question_id,students!inner(id,first_name,last_name,username),questions!inner(id,prompt,question_type,status,deleted_at)",
+        { count: "exact" },
+      )
+      .order("created_at", { ascending: false })
+      .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
+
+    if (data.status === "open") query = query.is("resolved_at", null);
+    if (data.status === "resolved") query = query.not("resolved_at", "is", null);
+
+    const { data: rows, count, error } = await query;
+    if (error) throw new Error(error.message);
+
+    return {
+      rows: (rows ?? []).map((row) => {
+        const student = row.students as unknown as {
+          id: string;
+          first_name: string;
+          last_name: string;
+          username: string;
+        };
+        const question = row.questions as unknown as {
+          id: string;
+          prompt: string;
+          question_type: string;
+          status: string;
+          deleted_at: string | null;
+        };
+        return {
+          id: row.id,
+          comment: row.comment,
+          created_at: row.created_at,
+          resolved_at: row.resolved_at,
+          student: {
+            id: student.id,
+            name: `${student.first_name} ${student.last_name}`,
+            username: student.username,
+          },
+          question: {
+            id: question.id,
+            prompt: question.prompt,
+            question_type: question.question_type,
+            status: question.status,
+            deleted_at: question.deleted_at,
+          },
+        };
+      }),
+      total: count ?? 0,
+      pageSize,
+    };
+  });
+
+export const resolveQuestionReport = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        resolved: z.boolean().default(true),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: report, error: reportError } = await admin
+      .from("question_reports")
+      .select("id,student_id,question_id,resolved_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (reportError) throw new Error(reportError.message);
+    if (!report) throw new Error("Question report not found.");
+
+    const resolvedAt = data.resolved ? new Date().toISOString() : null;
+    const { error } = await admin
+      .from("question_reports")
+      .update({ resolved_at: resolvedAt })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: data.resolved
+        ? "question_report_resolved"
+        : "question_report_reopened",
+      entity_type: "question_report",
+      entity_id: report.id,
+      summary: data.resolved
+        ? "Resolved a student question report"
+        : "Reopened a student question report",
+      details: {
+        student_id: report.student_id,
+        question_id: report.question_id,
+      },
+    });
+
+    return { ok: true, resolved_at: resolvedAt };
+  });
+
 async function recomputeAttempt(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: any,
