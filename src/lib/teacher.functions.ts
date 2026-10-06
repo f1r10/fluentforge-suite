@@ -622,7 +622,7 @@ export const saveDashboardSettings = createServerFn({ method: "POST" })
               "recent_catalogs",
             ]),
           )
-          .max(11),
+          .max(10),
       })
       .parse(d),
   )
