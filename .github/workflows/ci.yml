@@ -192,7 +192,7 @@ jobs:
           docker compose \
             --env-file .env.postgres.ci \
             -f docker-compose.postgres.yml \
-            up -d --build app
+            up -d --build app scheduler
 
       - name: Verify plain runtime readiness
         run: |
@@ -291,6 +291,59 @@ jobs:
           test "$(dc "select count(*) from pg_roles where rolname = 'service_role' and rolbypassrls")" = "1"
           test "$(dc "select (to_regclass('public.runtime_auth_users') is not null)::int")" = "1"
           test "$(dc "select (to_regclass('public.runtime_refresh_tokens') is not null)::int")" = "1"
+
+      - name: Verify scheduled-backup trigger security
+        run: |
+          unauthorized="$(
+            curl -sS -o /tmp/scheduled-unauthorized.json -w '%{http_code}' \
+              -X POST http://127.0.0.1:3400/api/scheduled-backup
+          )"
+          test "$unauthorized" = "401"
+
+          set -a
+          . ./.env.postgres.ci
+          set +a
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $SCHEDULED_JOB_SECRET" \
+            http://127.0.0.1:3400/api/scheduled-backup \
+            >/tmp/scheduled-authorized.json
+
+          grep -q '"status":"disabled"' /tmp/scheduled-authorized.json
+
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            ps --status running --services \
+            | grep -qx scheduler
+
+      - name: Install Chromium acceptance runner
+        run: |
+          mkdir -p "$RUNNER_TEMP/fluentforge-playwright"
+          cd "$RUNNER_TEMP/fluentforge-playwright"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run teacher and student browser acceptance
+        run: |
+          set -a
+          . ./.env.postgres.ci
+          set +a
+          export NODE_PATH="$RUNNER_TEMP/fluentforge-playwright/node_modules"
+          export E2E_BASE_URL="http://127.0.0.1:3400"
+          export E2E_SETUP_TOKEN="$SETUP_TOKEN"
+          export E2E_TEACHER_USERNAME="release.teacher"
+          export E2E_TEACHER_PASSWORD="Ci-$(openssl rand -hex 12)-Aa1!"
+          export E2E_SCREENSHOT_PATH="$RUNNER_TEMP/fluentforge-release-smoke-failure.png"
+          node scripts/release-browser-smoke.cjs
+
+      - name: Upload browser failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-smoke-failure
+          path: ${{ runner.temp }}/fluentforge-release-smoke-failure.png
+          if-no-files-found: ignore
 
       - name: Stop Supabase-free stack
         if: always()
