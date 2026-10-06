@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { changeCredentials, generateRecoveryCodes, getLanguageSettings, getRecoveryStatus, getSettings, getStorageUsage, saveBranding, saveDashboardSettings, saveLanguageSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
+import { changeCredentials, generateRecoveryCodes, getLanguageSettings, getRecoveryStatus, getSettings, getStorageUsage, saveBranding, saveDashboardSettings, saveLanguageSettings, saveMediaSettings, saveStudentDashboardSettings } from "@/lib/teacher.functions";
 import { beginBrandingAssetUpload, finalizeBrandingAssetUpload } from "@/lib/branding.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LANGS, useI18n } from "@/lib/i18n";
@@ -45,6 +45,7 @@ function SettingsPage() {
       <DashboardSettings />
       <StudentDashboardSettings />
       <LanguageSettings />
+      <MediaSettings />
       <StorageUsage />
       <CredentialsForm />
       <RecoveryCodes />
@@ -746,6 +747,62 @@ function LanguageSettings() {
           {t("save")}
         </Button>
       </div>
+    </section>
+  );
+}
+
+function MediaSettings() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const { data } = useSuspenseQuery(settingsQuery);
+  const media = (data["media"] ?? {}) as Record<string, unknown>;
+  const [maxVideoMb, setMaxVideoMb] = useState(
+    Number(media["max_video_mb"] ?? 700),
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await saveMediaSettings({
+        data: { max_video_mb: maxVideoMb },
+      });
+      await qc.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(t("media_settings_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="border-b border-border pb-2 text-lg font-semibold">
+          {t("media_settings")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("media_settings_hint")}
+        </p>
+      </div>
+      <Field label={t("max_video_upload_mb")}>
+        <Input
+          type="number"
+          min={10}
+          max={700}
+          step={10}
+          value={maxVideoMb}
+          onChange={(event) =>
+            setMaxVideoMb(
+              Math.max(10, Math.min(700, Number(event.target.value) || 10)),
+            )
+          }
+        />
+      </Field>
+      <Button type="button" onClick={save} disabled={busy}>
+        {t("save")}
+      </Button>
     </section>
   );
 }
