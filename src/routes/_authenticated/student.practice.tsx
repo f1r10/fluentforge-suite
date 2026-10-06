@@ -134,7 +134,11 @@ function SelfPracticePage() {
             storedListenings.length
           ) {
             setSessionId(parsed.sessionId);
-            setFilters(parsed.filters);
+            setFilters({
+              ...parsed.filters,
+              readingCount: parsed.filters.readingCount ?? 0,
+              listeningCount: parsed.filters.listeningCount ?? 0,
+            });
             setQuestions(storedQuestions);
             setReadings(storedReadings);
             setListenings(storedListenings);
