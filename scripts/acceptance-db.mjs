@@ -35,8 +35,8 @@ async function verifySchemaSecurity() {
     select count(*)::int as count
     from public.fluentforge_schema_migrations
   `;
-  if (migrationCount < 29) {
-    fail(`Expected at least 29 applied migrations, found ${migrationCount}.`);
+  if (migrationCount < 30) {
+    fail(`Expected at least 30 applied migrations, found ${migrationCount}.`);
   } else {
     pass(`Applied migrations: ${migrationCount}`);
   }
@@ -83,6 +83,7 @@ async function verifySchemaSecurity() {
     "student_practice_stats",
     "student_topic_practice_stats",
     "student_practice_daily_stats",
+    "student_streak_stats",
   ];
   const functionRows = await sql`
     select
