@@ -411,12 +411,30 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
             .order("sort_order")
             .order("name")
         : Promise.resolve({ data: [], error: null }),
-      admin
-        .from("source_files")
-        .select("id,original_filename,created_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(200),
+      Promise.all([
+        admin
+          .from("questions")
+          .select("source_file_id")
+          .eq("status", "active")
+          .eq("context_kind", "none")
+          .is("deleted_at", null)
+          .not("source_file_id", "is", null)
+          .limit(2_000),
+        admin
+          .from("readings")
+          .select("source_file_id")
+          .eq("status", "active")
+          .is("deleted_at", null)
+          .not("source_file_id", "is", null)
+          .limit(1_000),
+        admin
+          .from("listenings")
+          .select("source_file_id")
+          .eq("status", "active")
+          .is("deleted_at", null)
+          .not("source_file_id", "is", null)
+          .limit(1_000),
+      ]),
       Promise.all([
         admin
           .from("questions")
@@ -443,11 +461,35 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
       ]),
     ]);
 
-    for (const result of [topicsResult, catalogsResult, sourcesResult]) {
+    for (const result of [topicsResult, catalogsResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+    for (const result of sourcesResult) {
       if (result.error) throw new Error(result.error.message);
     }
     for (const result of languageResult) {
       if (result.error) throw new Error(result.error.message);
+    }
+
+    const sourceIds = [
+      ...new Set(
+        sourcesResult
+          .flatMap((result) => result.data ?? [])
+          .map((row) => row.source_file_id)
+          .filter((value): value is string => !!value),
+      ),
+    ];
+    const sourceFilesResult = sourceIds.length
+      ? await admin
+          .from("source_files")
+          .select("id,original_filename,created_at")
+          .in("id", sourceIds)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : { data: [], error: null };
+    if (sourceFilesResult.error) {
+      throw new Error(sourceFilesResult.error.message);
     }
 
     const languages = [
@@ -462,7 +504,7 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     return {
       topics: topicsResult.data ?? [],
       catalogs: catalogsResult.data ?? [],
-      sources: sourcesResult.data ?? [],
+      sources: sourceFilesResult.data ?? [],
       languages,
       questionTypes: QUESTION_TYPES.map((type) => ({ id: type.id, label: type.label })),
     };
