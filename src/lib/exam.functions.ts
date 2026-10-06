@@ -114,6 +114,70 @@ async function getExamRow(
   return data;
 }
 
+async function assignedStudentIdsForExam(
+  admin: Admin,
+  examId: string,
+) {
+  const { data: assignments, error } = await admin
+    .from("exam_assignments")
+    .select("student_id,group_id")
+    .eq("exam_id", examId);
+  if (error) throw new Error(error.message);
+
+  const direct = (assignments ?? [])
+    .map((row) => row.student_id)
+    .filter((value): value is string => !!value);
+  const groupIds = [
+    ...new Set(
+      (assignments ?? [])
+        .map((row) => row.group_id)
+        .filter((value): value is string => !!value),
+    ),
+  ];
+
+  let grouped: string[] = [];
+  if (groupIds.length) {
+    const { data: memberships, error: membershipError } = await admin
+      .from("group_memberships")
+      .select("student_id")
+      .in("group_id", groupIds);
+    if (membershipError) throw new Error(membershipError.message);
+    grouped = (memberships ?? []).map((row) => row.student_id);
+  }
+
+  return [...new Set([...direct, ...grouped])];
+}
+
+async function notifyExamAvailability(
+  admin: Admin,
+  exam: {
+    id: string;
+    title: string;
+    published_at?: string | null;
+    status?: string;
+    available_from?: string | null;
+  },
+  studentIds?: string[],
+) {
+  if (!exam.published_at) return;
+  const ids = studentIds ?? (await assignedStudentIdsForExam(admin, exam.id));
+  if (!ids.length) return;
+
+  const { notifyStudents } = await import("./notifications.functions");
+  await notifyStudents(admin, ids, {
+    kind: "exam_assigned",
+    title: "New exam assigned",
+    body: exam.available_from
+      ? `${exam.title} is assigned to you. It opens at ${new Date(
+          exam.available_from,
+        ).toLocaleString()}.`
+      : `${exam.title} is assigned to you.`,
+    link: "/student/exams",
+    data: { exam_id: exam.id },
+    dedupeKey: `exam-assigned:${exam.id}`,
+  });
+}
+
 async function ensureDraftExam(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: any,
@@ -878,7 +942,7 @@ export const addExamAssignment = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    await getExamRow(context.supabase, data.examId);
+    const exam = await getExamRow(context.supabase, data.examId);
 
     if (data.kind === "group") {
       const { data: target, error } = await context.supabase
@@ -910,6 +974,23 @@ export const addExamAssignment = createServerFn({ method: "POST" })
         { onConflict: "exam_id,student_id", ignoreDuplicates: true },
       );
       if (insertError) throw new Error(insertError.message);
+    }
+
+    if (exam.published_at) {
+      const { adminClient } = await import("./security.server");
+      const admin = await adminClient();
+      let studentIds: string[] = [];
+      if (data.kind === "student") {
+        studentIds = [data.targetId];
+      } else {
+        const { data: memberships, error: membershipError } = await admin
+          .from("group_memberships")
+          .select("student_id")
+          .eq("group_id", data.targetId);
+        if (membershipError) throw new Error(membershipError.message);
+        studentIds = (memberships ?? []).map((row) => row.student_id);
+      }
+      await notifyExamAvailability(admin, exam, studentIds);
     }
 
     return { ok: true };
@@ -1355,6 +1436,14 @@ export const publishExam = createServerFn({ method: "POST" })
         assessable_count: assessableCount,
         sections: sectionSnapshots.length,
       },
+    });
+
+    await notifyExamAvailability(admin, {
+      id: exam.id,
+      title: exam.title,
+      published_at: publishedAt,
+      status,
+      available_from: exam.available_from,
     });
 
     return {
