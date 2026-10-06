@@ -11,6 +11,12 @@ import {
 } from "./grading";
 import { TYPE_BY_ID } from "./question-types";
 import { examSettingsSchema, type ExamSettings } from "./exam.functions";
+import {
+  calculateExamDeadline,
+  isExamDeadlineExpired,
+  isResultContentVisible,
+  tabSwitchLimitExceeded,
+} from "./exam-policy";
 
 type Admin = Awaited<ReturnType<typeof import("./security.server")["adminClient"]>>;
 
@@ -538,24 +544,6 @@ function examAvailability(exam: {
   return "available" as const;
 }
 
-function calculateDeadline(
-  startedAt: Date,
-  durationMinutes: number | null,
-  closeAt: string | null,
-  fullDurationAfterStart: boolean,
-) {
-  const durationDeadline = durationMinutes
-    ? new Date(startedAt.getTime() + durationMinutes * 60_000)
-    : null;
-  const closeDeadline = closeAt ? new Date(closeAt) : null;
-
-  if (fullDurationAfterStart) return durationDeadline ?? closeDeadline;
-  if (durationDeadline && closeDeadline) {
-    return durationDeadline.getTime() < closeDeadline.getTime() ? durationDeadline : closeDeadline;
-  }
-  return durationDeadline ?? closeDeadline;
-}
-
 async function getOwnedAttempt(admin: Admin, studentId: string, attemptId: string) {
   const { data, error } = await admin
     .from("exam_attempts")
@@ -568,10 +556,6 @@ async function getOwnedAttempt(admin: Admin, studentId: string, attemptId: strin
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Attempt not found.");
   return data;
-}
-
-function isExpired(deadline: string | null) {
-  return !!deadline && Date.now() >= new Date(deadline).getTime();
 }
 
 export const listStudentExams = createServerFn({ method: "GET" })
@@ -635,13 +619,10 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const studentId = await currentStudentId(context.supabase);
     const exam = await getAssignedExam(admin, studentId, data.examId);
-    const availability = examAvailability(exam);
 
-    if (availability === "upcoming") throw new Error("This exam has not opened yet.");
-    if (availability === "closed" || availability === "finished" || availability === "archived") {
-      throw new Error("This exam is closed.");
-    }
-
+    // Active attempts are handled before the exam availability window.
+    // With full_duration_after_start=true an attempt may legally continue
+    // beyond available_until until its own deadline.
     const { data: existing, error: existingError } = await admin
       .from("exam_attempts")
       .select("id,status,deadline_at")
@@ -652,11 +633,23 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
     if (existingError) throw new Error(existingError.message);
 
     if (existing) {
-      if (isExpired(existing.deadline_at)) {
+      if (isExamDeadlineExpired(existing.deadline_at)) {
         await submitAttemptInternal(admin, studentId, existing.id, true);
-      } else {
-        return { attemptId: existing.id, resumed: true };
+        return { attemptId: existing.id, resumed: false, autoSubmitted: true };
       }
+
+      if (!exam.settings.resume_after_disconnect) {
+        await submitAttemptInternal(admin, studentId, existing.id, true);
+        return { attemptId: existing.id, resumed: false, autoSubmitted: true };
+      }
+
+      return { attemptId: existing.id, resumed: true, autoSubmitted: false };
+    }
+
+    const availability = examAvailability(exam);
+    if (availability === "upcoming") throw new Error("This exam has not opened yet.");
+    if (availability === "closed" || availability === "finished" || availability === "archived") {
+      throw new Error("This exam is closed.");
     }
 
     const { count, error: countError } = await admin
@@ -672,7 +665,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
     }
 
     const startedAt = new Date();
-    const deadline = calculateDeadline(
+    const deadline = calculateExamDeadline(
       startedAt,
       exam.duration_minutes,
       exam.available_until,
@@ -707,7 +700,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
         .eq("student_id", studentId)
         .eq("status", "in_progress")
         .maybeSingle();
-      if (raced) return { attemptId: raced.id, resumed: true };
+      if (raced) return { attemptId: raced.id, resumed: true, autoSubmitted: false };
       throw new Error(error.message);
     }
 
@@ -724,7 +717,7 @@ export const startOrResumeExam = createServerFn({ method: "POST" })
       } as never,
     });
 
-    return { attemptId: created.id, resumed: false };
+    return { attemptId: created.id, resumed: false, autoSubmitted: false };
   });
 
 export const getExamAttempt = createServerFn({ method: "GET" })
@@ -736,7 +729,7 @@ export const getExamAttempt = createServerFn({ method: "GET" })
     const studentId = await currentStudentId(context.supabase);
     let attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
 
-    if (attempt.status === "in_progress" && isExpired(attempt.deadline_at)) {
+    if (attempt.status === "in_progress" && isExamDeadlineExpired(attempt.deadline_at)) {
       await submitAttemptInternal(admin, studentId, attempt.id, true);
       attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
     }
@@ -790,7 +783,7 @@ export const saveExamAnswer = createServerFn({ method: "POST" })
     const attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
 
     if (attempt.status !== "in_progress") throw new Error("This attempt is no longer active.");
-    if (isExpired(attempt.deadline_at)) {
+    if (isExamDeadlineExpired(attempt.deadline_at)) {
       await submitAttemptInternal(admin, studentId, attempt.id, true);
       throw new Error("Time is up. The exam was submitted automatically.");
     }
@@ -835,7 +828,7 @@ export const recordExamViolation = createServerFn({ method: "POST" })
     const attempt = await getOwnedAttempt(admin, studentId, data.attemptId);
     if (attempt.status !== "in_progress") return { ok: false };
 
-    const { error } = await admin.rpc("append_exam_violation", {
+    const { data: violations, error } = await admin.rpc("append_exam_violation", {
       p_attempt_id: attempt.id,
       p_event: {
         type: data.type,
@@ -857,7 +850,25 @@ export const recordExamViolation = createServerFn({ method: "POST" })
       } as never,
     });
 
-    return { ok: true };
+    let autoSubmitted = false;
+    if (data.type === "tab_hidden") {
+      const snapshot = attempt.snapshot as unknown as AttemptSnapshot;
+      const settings = examSettingsSchema.parse(snapshot.exam.settings ?? {});
+      const allViolations = Array.isArray(violations) ? violations : [];
+      const tabHiddenCount = allViolations.filter(
+        (entry) =>
+          !!entry &&
+          typeof entry === "object" &&
+          (entry as Record<string, unknown>)["type"] === "tab_hidden",
+      ).length;
+
+      if (tabSwitchLimitExceeded(tabHiddenCount, settings.max_tab_switches)) {
+        await submitAttemptInternal(admin, studentId, attempt.id, true);
+        autoSubmitted = true;
+      }
+    }
+
+    return { ok: true, autoSubmitted };
   });
 
 async function submitAttemptInternal(
@@ -1108,14 +1119,19 @@ export const getExamResult = createServerFn({ method: "GET" })
       .eq("attempt_id", attempt.id);
     if (error) throw new Error(error.message);
 
-    const answerVisibility =
-      settings.answer_visibility === "after_submit" ||
-      settings.answer_visibility === "after_close" ||
-      settings.answer_visibility === "after_approval";
-    const explanationVisibility =
-      settings.explanation_visibility === "after_submit" ||
-      settings.explanation_visibility === "after_close" ||
-      settings.explanation_visibility === "after_approval";
+    const visibilityContext = {
+      submittedAt: attempt.submitted_at,
+      closeAt: snapshot.exam.available_until,
+      resultReleased: attempt.result_released,
+    };
+    const answerVisibility = isResultContentVisible(
+      settings.answer_visibility,
+      visibilityContext,
+    );
+    const explanationVisibility = isResultContentVisible(
+      settings.explanation_visibility,
+      visibilityContext,
+    );
 
     return {
       ready: true as const,
