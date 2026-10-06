@@ -38,14 +38,23 @@ export function useContentLanguages() {
     ? translationConfigured
     : effectiveAll;
 
+  const settingsLoaded = query.data !== undefined;
+
   return {
     ...query,
     all: effectiveAll,
     learning,
     translation,
-    defaultLearningCode: learning[0]?.code ?? FALLBACK_LANGUAGE.code,
-    defaultTranslationCode:
-      translation[0]?.code ?? FALLBACK_LANGUAGE.code,
+    defaultLearningCode: settingsLoaded
+      ? learning[0]?.code ?? FALLBACK_LANGUAGE.code
+      : query.isError
+        ? FALLBACK_LANGUAGE.code
+        : "",
+    defaultTranslationCode: settingsLoaded
+      ? translation[0]?.code ?? FALLBACK_LANGUAGE.code
+      : query.isError
+        ? FALLBACK_LANGUAGE.code
+        : "",
   };
 }
 
