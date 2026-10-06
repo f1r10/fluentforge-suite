@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { BarChart3, Bell, BookOpen, ChevronRight, ClipboardList, Clock3, Dumbbell, Flame, Heart, History, LogOut, Target } from "lucide-react";
+import { BarChart3, Bell, BookOpen, CheckCircle2, ChevronRight, ClipboardList, Clock3, Dumbbell, Flame, Heart, History, LogOut, Target, XCircle } from "lucide-react";
 import { getMyDashboardSettings, heartbeat, listMyFavorites, setMyLanguage } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
@@ -46,14 +46,21 @@ function StudentHome() {
       "exams",
       "practice",
       "today",
+      "correctness",
       "accuracy",
       "study_time",
+      "streak",
       "progress",
+      "domain_progress",
       "weak_topics",
       "history",
       "favorites",
+      "completed_exams",
     ],
   );
+  const completedExams = exams.filter(
+    (exam) => Number(exam.completed_attempts ?? 0) > 0,
+  ).length;
 
   useEffect(() => {
     if (me.interface_language) setLang(me.interface_language as Lang);
@@ -183,17 +190,21 @@ function StudentHome() {
       )}
 
       {(visible.has("today") ||
+        visible.has("correctness") ||
         visible.has("accuracy") ||
         visible.has("study_time") ||
         visible.has("streak") ||
         visible.has("progress") ||
+        visible.has("domain_progress") ||
         visible.has("weak_topics") ||
-        visible.has("history")) && (
+        visible.has("history") ||
+        visible.has("completed_exams")) && (
       <section>
         <h2 className="mb-3 border-b border-border pb-2 font-semibold">{t("your_progress")}</h2>
         {!progress ||
         (progress.stats.total_answers === 0 &&
-          progress.stats.current_streak === 0) ? (
+          progress.stats.current_streak === 0 &&
+          completedExams === 0) ? (
           <p className="py-6 text-sm text-muted-foreground">{t("progress_coming_from_activity")}</p>
         ) : (
           <div className="space-y-5">
@@ -203,6 +214,27 @@ function StudentHome() {
                   icon={<Target className="h-4 w-4" />}
                   label={t("today")}
                   value={progress.stats.today_answers}
+                />
+              )}
+              {visible.has("correctness") && (
+                <>
+                  <ProgressCard
+                    icon={<CheckCircle2 className="h-4 w-4" />}
+                    label={t("correct")}
+                    value={progress.stats.correct_answers}
+                  />
+                  <ProgressCard
+                    icon={<XCircle className="h-4 w-4" />}
+                    label={t("incorrect")}
+                    value={progress.stats.wrong_answers}
+                  />
+                </>
+              )}
+              {visible.has("completed_exams") && (
+                <ProgressCard
+                  icon={<ClipboardList className="h-4 w-4" />}
+                  label={t("completed_exams")}
+                  value={completedExams}
                 />
               )}
               {visible.has("progress") && (
@@ -263,6 +295,39 @@ function StudentHome() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {visible.has("domain_progress") &&
+              progress.domains.some((row) => row.attempts > 0) && (
+              <div className="rounded-md border border-border p-3">
+                <div className="mb-3 text-sm font-medium">
+                  {t("domain_progress")}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {progress.domains.map((row) => (
+                    <div
+                      key={row.domain}
+                      className="rounded-md bg-muted/40 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium">
+                          {t(row.domain)}
+                        </span>
+                        <span className="text-sm font-semibold">
+                          {row.accuracy == null
+                            ? "—"
+                            : `${Math.round(row.accuracy * 100)}%`}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {row.attempts} {t("attempts").toLocaleLowerCase()} ·{" "}
+                        {row.correct} {t("correct").toLocaleLowerCase()} ·{" "}
+                        {row.incorrect} {t("incorrect").toLocaleLowerCase()}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
