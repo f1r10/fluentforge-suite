@@ -376,6 +376,25 @@ function sanitizeAttemptSnapshot(snapshot: AttemptSnapshot) {
         if (block.kind === "question") {
           return { ...block, question: sanitizeQuestion(block.question) };
         }
+        if (block.kind === "listening") {
+          const listening = { ...block.listening };
+          const rules =
+            listening["playback_rules"] && typeof listening["playback_rules"] === "object"
+              ? (listening["playback_rules"] as Record<string, unknown>)
+              : {};
+          if (rules["show_transcript"] !== true) {
+            delete listening["transcript"];
+            delete listening["transcript_segments"];
+          }
+          return {
+            ...block,
+            listening,
+            question_sets: block.question_sets.map((set) => ({
+              ...set,
+              questions: set.questions.map(sanitizeQuestion),
+            })),
+          };
+        }
         return {
           ...block,
           question_sets: block.question_sets.map((set) => ({
