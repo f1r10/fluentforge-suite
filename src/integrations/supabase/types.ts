@@ -2303,6 +2303,53 @@ export type Database = {
         Args: { p_catalog_id: string; p_item_ids: string[] }
         Returns: undefined
       }
+      select_self_practice_question_ids: {
+        Args: {
+          p_student_id: string
+          p_count: number
+          p_language?: string | null
+          p_level?: string | null
+          p_types?: string[] | null
+          p_topic_ids?: string[] | null
+          p_catalog_id?: string | null
+          p_source_file_id?: string | null
+          p_history_mode?: string
+          p_exclude_answered?: boolean
+        }
+        Returns: { question_id: string }[]
+      }
+      student_practice_stats: {
+        Args: { p_student_id: string }
+        Returns: {
+          total_answers: number
+          correct_answers: number
+          wrong_answers: number
+          manual_answers: number
+          questions_seen: number
+          total_time_ms: number
+          today_answers: number
+          week_answers: number
+          current_mistakes: number
+        }[]
+      }
+      student_topic_practice_stats: {
+        Args: { p_student_id: string; p_limit?: number }
+        Returns: {
+          topic_id: string
+          topic_name: string
+          attempts: number
+          correct: number
+          accuracy: number | null
+        }[]
+      }
+      student_practice_daily_stats: {
+        Args: { p_student_id: string; p_days?: number }
+        Returns: {
+          day: string
+          attempts: number
+          correct: number
+        }[]
+      }
     }
     Enums: {
       app_role: "teacher" | "student"
