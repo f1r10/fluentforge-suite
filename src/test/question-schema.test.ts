@@ -115,6 +115,58 @@ describe("question schema", () => {
     ).toThrow();
   });
 
+  it("accepts a valid visual labelling question", () => {
+    const labelId = "11111111-1111-4111-8111-111111111111";
+    const mediaId = "22222222-2222-4222-8222-222222222222";
+    const q = validateQuestionInput({
+      ...base,
+      question_type: "image_labelling",
+      payload: {
+        media_id: mediaId,
+        labels: [{ id: labelId, x: 25.5, y: 61.25 }],
+      },
+      answer_key: {
+        pairs: [{ left: labelId, right: "heart" }],
+      },
+    });
+
+    expect((q.payload as { media_id: string }).media_id).toBe(mediaId);
+  });
+
+  it("requires media for visual labelling questions", () => {
+    const labelId = "11111111-1111-4111-8111-111111111111";
+    expect(() =>
+      validateQuestionInput({
+        ...base,
+        question_type: "diagram_labelling",
+        payload: {
+          labels: [{ id: labelId, x: 10, y: 20 }],
+        },
+        answer_key: {
+          pairs: [{ left: labelId, right: "A" }],
+        },
+      }),
+    ).toThrow(/require media/i);
+  });
+
+  it("requires every visual label to have one matching answer", () => {
+    const labelId = "11111111-1111-4111-8111-111111111111";
+    const otherId = "33333333-3333-4333-8333-333333333333";
+    expect(() =>
+      validateQuestionInput({
+        ...base,
+        question_type: "map_labelling",
+        payload: {
+          media_id: "22222222-2222-4222-8222-222222222222",
+          labels: [{ id: labelId, x: 50, y: 50 }],
+        },
+        answer_key: {
+          pairs: [{ left: otherId, right: "Station" }],
+        },
+      }),
+    ).toThrow(/exactly one matching answer/i);
+  });
+
   it("requires at least two ordering items", () => {
     expect(() =>
       validateQuestionInput({
