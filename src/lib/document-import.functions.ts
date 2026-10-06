@@ -377,6 +377,40 @@ export const getDocumentImport = createServerFn({ method: "GET" })
     return { job: jobResult.data, items: itemsResult.data ?? [] };
   });
 
+export const getSourcePreviewUrl = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ jobId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const { data: job, error } = await admin
+      .from("import_jobs")
+      .select("source_files(storage_path,mime_type,original_filename)")
+      .eq("id", data.jobId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const source = job?.source_files as unknown as {
+      storage_path: string | null;
+      mime_type: string | null;
+      original_filename: string;
+    } | null;
+    if (!source?.storage_path) throw new Error("Source file is not available.");
+
+    const { data: signed, error: signedError } = await admin.storage
+      .from(SOURCE_BUCKET)
+      .createSignedUrl(source.storage_path, 15 * 60);
+    if (signedError || !signed) {
+      throw new Error(signedError?.message ?? "Could not create source preview URL.");
+    }
+
+    return {
+      url: signed.signedUrl,
+      mimeType: source.mime_type,
+      filename: source.original_filename,
+      expiresIn: 15 * 60,
+    };
+  });
+
 export const updateImportItem = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
