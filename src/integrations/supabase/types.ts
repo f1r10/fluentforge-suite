@@ -1345,11 +1345,71 @@ export type Database = {
         }
         Relationships: []
       }
+      media_import_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          media_asset_id: string | null
+          processor_job_id: string | null
+          progress: number
+          result: Json
+          rights_confirmed_at: string
+          source_kind: string
+          source_url: string
+          status: string
+          storage_path: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          media_asset_id?: string | null
+          processor_job_id?: string | null
+          progress?: number
+          result?: Json
+          rights_confirmed_at: string
+          source_kind: string
+          source_url: string
+          status?: string
+          storage_path: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          media_asset_id?: string | null
+          processor_job_id?: string | null
+          progress?: number
+          result?: Json
+          rights_confirmed_at?: string
+          source_kind?: string
+          source_url?: string
+          status?: string
+          storage_path?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_import_jobs_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "media_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           body: string | null
           created_at: string
           data: Json
+          dedupe_key: string | null
           id: string
           kind: string
           link: string | null
@@ -1362,6 +1422,7 @@ export type Database = {
           body?: string | null
           created_at?: string
           data?: Json
+          dedupe_key?: string | null
           id?: string
           kind: string
           link?: string | null
@@ -1374,6 +1435,7 @@ export type Database = {
           body?: string | null
           created_at?: string
           data?: Json
+          dedupe_key?: string | null
           id?: string
           kind?: string
           link?: string | null
