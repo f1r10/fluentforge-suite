@@ -2358,6 +2358,22 @@ export type Database = {
         Args: { p_exam_id: string; p_section_id: string | null; p_item_ids: string[] }
         Returns: undefined
       }
+      save_attempt_answer: {
+        Args: {
+          p_attempt_id: string
+          p_item_key: string
+          p_question_id: string | null
+          p_question_version: number | null
+          p_response: Json | null
+          p_flagged: boolean
+          p_time_spent_ms: number
+        }
+        Returns: Database["public"]["Tables"]["attempt_answers"]["Row"]
+      }
+      append_exam_violation: {
+        Args: { p_attempt_id: string; p_event: Json }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "teacher" | "student"
