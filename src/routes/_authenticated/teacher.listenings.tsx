@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { FileAudio, Pencil, Plus, Search, WandSparkles, X } from "lucide-react";
+import { FileAudio, Pencil, Plus, Search, Trash2, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,6 +18,7 @@ import {
   saveListeningSection,
 } from "@/lib/context-content.functions";
 import { LEVELS } from "@/lib/question-types";
+import { trashContextContent } from "@/lib/trash.functions";
 import { topicOptions } from "@/components/app/topics";
 import { listMedia } from "@/lib/media.functions";
 import {
@@ -302,6 +303,20 @@ function ListeningsPage() {
     };
   }, [transcriptionJobId, editor?.id, qc, t]);
 
+  async function trashListening(id: string) {
+    if (!confirm(t("move_to_trash_confirm"))) return;
+    try {
+      await trashContextContent({ data: { type: "listening", id } });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["listenings"] }),
+        qc.invalidateQueries({ queryKey: ["trash-center"] }),
+      ]);
+      toast.success(t("moved_to_trash"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -359,9 +374,20 @@ function ListeningsPage() {
                 <td className="hidden px-3 py-2 lg:table-cell">{row.questionSets}</td>
                 <td className="px-3 py-2">{t(row.status)}</td>
                 <td className="px-2 py-1">
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => trashListening(row.id)}
+                      aria-label={t("trash")}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
