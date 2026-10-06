@@ -3,6 +3,9 @@ from __future__ import annotations
 import csv
 import io
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,8 @@ def extract_document(path: Path, filename: str, mime_type: str | None) -> Extrac
         return _extract_pdf(path)
     if suffix == ".docx":
         return _extract_docx(path)
+    if suffix in {".doc", ".rtf"}:
+        return _extract_legacy_word(path)
     if suffix == ".xlsx":
         return _extract_xlsx(path)
     if suffix == ".xls":
@@ -80,6 +85,51 @@ def _extract_pdf(path: Path) -> Extraction:
         "\n\n".join(chunks),
         {"pages": len(pages), "ocr_pages": sum(1 for p in pages if p["method"] == "ocr")},
     )
+
+
+def _extract_legacy_word(path: Path) -> Extraction:
+    executable = shutil.which("libreoffice") or shutil.which("soffice")
+    if not executable:
+        raise ValueError(
+            "Legacy DOC/RTF import requires LibreOffice in the processing container"
+        )
+
+    with tempfile.TemporaryDirectory() as directory:
+        result = subprocess.run(
+            [
+                executable,
+                "--headless",
+                "--convert-to",
+                "docx",
+                "--outdir",
+                directory,
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ValueError(
+                f"LibreOffice conversion failed: {(result.stderr or result.stdout).strip()[:1000]}"
+            )
+
+        converted = Path(directory) / (path.stem + ".docx")
+        if not converted.exists():
+            candidates = list(Path(directory).glob("*.docx"))
+            if not candidates:
+                raise ValueError("LibreOffice did not produce a DOCX file")
+            converted = candidates[0]
+
+        extracted = _extract_docx(converted)
+        return Extraction(
+            "legacy_word_via_libreoffice",
+            extracted.pages,
+            extracted.sheets,
+            extracted.full_text,
+            {**extracted.stats, "converted_from": path.suffix.lower()},
+        )
 
 
 def _extract_docx(path: Path) -> Extraction:
