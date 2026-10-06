@@ -635,7 +635,7 @@ async function collectStorage(
 ) {
   const refs = new Map<
     string,
-    { bucket: "media" | "sources"; path: string; mime_type: string | null }
+    { bucket: "media" | "sources" | "branding"; path: string; mime_type: string | null }
   >();
 
   for (const row of tables["media_assets"] ?? []) {
@@ -658,8 +658,28 @@ async function collectStorage(
     });
   }
 
+  const brandingRow = (tables["system_settings"] ?? []).find(
+    (row) => row["key"] === "branding",
+  );
+  const brandingValue =
+    brandingRow?.["value"] && typeof brandingRow["value"] === "object"
+      ? (brandingRow["value"] as Record<string, unknown>)
+      : null;
+  for (const key of ["logo_storage_path", "favicon_storage_path"] as const) {
+    const path =
+      brandingValue && typeof brandingValue[key] === "string"
+        ? (brandingValue[key] as string)
+        : null;
+    if (!path) continue;
+    refs.set(`branding:${path}`, {
+      bucket: "branding",
+      path,
+      mime_type: brandingMimeType(path),
+    });
+  }
+
   const objects: Array<{
-    bucket: "media" | "sources";
+    bucket: "media" | "sources" | "branding";
     path: string;
     mime_type: string | null;
     size_bytes: number;
@@ -673,7 +693,7 @@ async function collectStorage(
     totalBytes += bytes.byteLength;
     if (totalBytes > MAX_RAW_STORAGE_BYTES) {
       throw new Error(
-        "Private media/source files exceed the 256 MB in-process backup safety limit. Use infrastructure-level object-storage backup for larger installations.",
+        "Storage objects exceed the 256 MB in-process backup safety limit. Use infrastructure-level object-storage backup for larger installations.",
       );
     }
 
@@ -758,10 +778,33 @@ async function restoreTable(
   table: BackupTable,
   inputRows: Record<string, unknown>[],
 ) {
-  const rows = inputRows
+  let rows = inputRows
     .map((row) => sanitizeBackupRow(table, row))
     .filter((row): row is Record<string, unknown> => !!row);
   if (!rows.length) return;
+
+  if (table === "system_settings") {
+    rows = rows.map((row) => {
+      if (row["key"] !== "branding" || !row["value"] || typeof row["value"] !== "object") {
+        return row;
+      }
+
+      const value = { ...(row["value"] as Record<string, unknown>) };
+      for (const kind of ["logo", "favicon"] as const) {
+        const pathKey = `${kind}_storage_path`;
+        const urlKey = `${kind}_url`;
+        const path =
+          typeof value[pathKey] === "string"
+            ? (value[pathKey] as string)
+            : null;
+        if (!path) continue;
+        const { data } = admin.storage.from("branding").getPublicUrl(path);
+        value[urlKey] = data.publicUrl;
+      }
+
+      return { ...row, value };
+    });
+  }
 
   if (table === "topics" || table === "catalogs") {
     const withoutParents = rows.map((row) => ({ ...row, parent_id: null }));
@@ -916,6 +959,15 @@ async function verifyChecksum(bytes: Buffer, expected: string | null) {
 async function sha256Buffer(bytes: Buffer) {
   const { createHash } = await import("node:crypto");
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function brandingMimeType(path: string) {
+  const extension = path.toLowerCase().split(".").pop();
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "webp") return "image/webp";
+  if (extension === "ico") return "image/x-icon";
+  return "application/octet-stream";
 }
 
 function chunks<T>(values: T[], size: number) {
