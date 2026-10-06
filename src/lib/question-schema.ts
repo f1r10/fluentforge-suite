@@ -155,6 +155,12 @@ function parseOpen(input: QuestionInput) {
   return { payload, answer_key: answer };
 }
 
+const SPATIAL_LABELLING_TYPES = new Set([
+  "image_labelling",
+  "diagram_labelling",
+  "map_labelling",
+]);
+
 function parseMatching(input: QuestionInput) {
   const payload = z
     .object({
@@ -187,6 +193,38 @@ function parseMatching(input: QuestionInput) {
         .max(200),
     })
     .parse(input.answer_key);
+
+  if (SPATIAL_LABELLING_TYPES.has(input.question_type)) {
+    if (!payload.media_id) {
+      fail(["payload", "media_id"], "Image, diagram, and map labelling questions require media.");
+    }
+    const labels = payload.labels ?? [];
+    if (!labels.length) {
+      fail(["payload", "labels"], "Add at least one label position.");
+    }
+
+    const labelIds = labels.map((label) => label.id);
+    if (new Set(labelIds).size !== labelIds.length) {
+      fail(["payload", "labels"], "Label identifiers must be unique.");
+    }
+
+    const pairLeft = answer.pairs.map((pair) => pair.left);
+    if (new Set(pairLeft).size !== pairLeft.length) {
+      fail(["answer_key", "pairs"], "Each label can have only one correct answer.");
+    }
+
+    const labelSet = new Set(labelIds);
+    const pairSet = new Set(pairLeft);
+    if (
+      labelIds.some((id) => !pairSet.has(id)) ||
+      pairLeft.some((id) => !labelSet.has(id))
+    ) {
+      fail(
+        ["answer_key", "pairs"],
+        "Every visual label position must have exactly one matching answer.",
+      );
+    }
+  }
 
   return { payload, answer_key: answer };
 }
