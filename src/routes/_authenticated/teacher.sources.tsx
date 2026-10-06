@@ -177,8 +177,6 @@ function SourcesPage() {
             <option value="readings">{t("readings")}</option>
             <option value="listenings">{t("listenings")}</option>
             <option value="vocabulary">{t("vocabulary")}</option>
-            <option value="readings">{t("readings")}</option>
-            <option value="listenings">{t("listenings")}</option>
             <option value="mixed">{t("mixed")}</option>
           </select>
           <select
@@ -457,6 +455,8 @@ function ImportProfileDialog({
             <option value="auto">{t("auto")}</option>
             <option value="questions">{t("questions")}</option>
             <option value="vocabulary">{t("vocabulary")}</option>
+            <option value="readings">{t("readings")}</option>
+            <option value="listenings">{t("listenings")}</option>
             <option value="mixed">{t("mixed")}</option>
           </select>
 
