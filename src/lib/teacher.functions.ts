@@ -416,6 +416,10 @@ export const saveBranding = createServerFn({ method: "POST" })
       typeof current["favicon_url"] === "string"
         ? current["favicon_url"]
         : null;
+    const currentLoginImageUrl =
+      typeof current["login_image_url"] === "string"
+        ? current["login_image_url"]
+        : null;
     const currentLogoPath =
       typeof current["logo_storage_path"] === "string"
         ? current["logo_storage_path"]
@@ -424,12 +428,20 @@ export const saveBranding = createServerFn({ method: "POST" })
       typeof current["favicon_storage_path"] === "string"
         ? current["favicon_storage_path"]
         : null;
+    const currentLoginImagePath =
+      typeof current["login_image_storage_path"] === "string"
+        ? current["login_image_storage_path"]
+        : null;
 
     const logoStoragePath =
       logoUrl && logoUrl === currentLogoUrl ? currentLogoPath : null;
     const faviconStoragePath =
       faviconUrl && faviconUrl === currentFaviconUrl
         ? currentFaviconPath
+        : null;
+    const loginImageStoragePath =
+      loginImageUrl && loginImageUrl === currentLoginImageUrl
+        ? currentLoginImagePath
         : null;
 
     const { error: brandingError } = await context.supabase
@@ -442,6 +454,7 @@ export const saveBranding = createServerFn({ method: "POST" })
           login_image_url: loginImageUrl,
           logo_storage_path: logoStoragePath,
           favicon_storage_path: faviconStoragePath,
+          login_image_storage_path: loginImageStoragePath,
         } as never,
       })
       .eq("key", "branding");
@@ -478,6 +491,10 @@ export const saveBranding = createServerFn({ method: "POST" })
         : null,
       currentFaviconPath && currentFaviconPath !== faviconStoragePath
         ? currentFaviconPath
+        : null,
+      currentLoginImagePath &&
+      currentLoginImagePath !== loginImageStoragePath
+        ? currentLoginImagePath
         : null,
     ].filter((value): value is string => !!value);
     if (stalePaths.length) {
