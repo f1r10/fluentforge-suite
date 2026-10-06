@@ -19,6 +19,8 @@ const generatorSchema = z.object({
   count: z.number().int().min(0).max(100).default(20),
   readingCount: z.number().int().min(0).max(20).default(0),
   listeningCount: z.number().int().min(0).max(20).default(0),
+  sessionMode: z.enum(["practice", "mock_exam"]).default("practice"),
+  durationMinutes: z.number().int().min(5).max(240).default(30),
   language: z.string().max(10).nullable().default(null),
   level: z.string().max(20).nullable().default(null),
   types: z.array(z.string().max(60)).max(50).default([]),
