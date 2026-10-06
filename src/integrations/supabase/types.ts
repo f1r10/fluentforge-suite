@@ -2299,6 +2299,10 @@ export type Database = {
         Returns: boolean
       }
       is_teacher: { Args: never; Returns: boolean }
+      reorder_catalog_items: {
+        Args: { p_catalog_id: string; p_item_ids: string[] }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "teacher" | "student"
