@@ -413,6 +413,45 @@ function sanitizeAttemptSnapshot(snapshot: AttemptSnapshot) {
   };
 }
 
+async function hydrateAttemptMediaUrls(
+  admin: Admin,
+  snapshot: ReturnType<typeof sanitizeAttemptSnapshot>,
+  deadlineAt: string | null,
+) {
+  const { resolveMediaUrl } = await import("./media.server");
+  const remainingSeconds = deadlineAt
+    ? Math.max(0, Math.ceil((new Date(deadlineAt).getTime() - Date.now()) / 1000))
+    : 60 * 60;
+  const expiresIn = Math.max(15 * 60, Math.min(26 * 60 * 60, remainingSeconds + 10 * 60));
+
+  for (const section of snapshot.sections) {
+    for (const block of section.blocks) {
+      if (block.kind !== "listening") continue;
+      const media =
+        block.listening["media"] && typeof block.listening["media"] === "object"
+          ? (block.listening["media"] as Record<string, unknown>)
+          : null;
+      if (!media) continue;
+
+      const url = await resolveMediaUrl(
+        admin as never,
+        {
+          storage_path:
+            typeof media["storage_path"] === "string" ? media["storage_path"] : null,
+          external_url:
+            typeof media["external_url"] === "string" ? media["external_url"] : null,
+        },
+        expiresIn,
+      );
+
+      media["external_url"] = url;
+      delete media["storage_path"];
+    }
+  }
+
+  return snapshot;
+}
+
 function scoring(value: Record<string, unknown>): Scoring {
   return {
     points: typeof value["points"] === "number" ? value["points"] : 1,
@@ -741,6 +780,11 @@ export const getExamAttempt = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
 
     const snapshot = attempt.snapshot as unknown as AttemptSnapshot;
+    const publicSnapshot = await hydrateAttemptMediaUrls(
+      admin,
+      sanitizeAttemptSnapshot(snapshot),
+      attempt.deadline_at,
+    );
 
     return {
       attempt: {
@@ -757,7 +801,7 @@ export const getExamAttempt = createServerFn({ method: "GET" })
         result_released: attempt.result_released,
         violations: attempt.violations,
       },
-      snapshot: sanitizeAttemptSnapshot(snapshot),
+      snapshot: publicSnapshot,
       answers: answers ?? [],
       server_time: new Date().toISOString(),
     };
