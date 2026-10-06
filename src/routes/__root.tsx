@@ -145,7 +145,17 @@ function Branded({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.style.setProperty("--primary", b.accent_color);
     document.documentElement.style.setProperty("--ring", b.accent_color);
-  }, [b.accent_color]);
+
+    let favicon = document.querySelector<HTMLLinkElement>(
+      'link[rel~="icon"]',
+    );
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.rel = "icon";
+      document.head.appendChild(favicon);
+    }
+    favicon.href = b.favicon_url || "/favicon.ico";
+  }, [b.accent_color, b.favicon_url]);
   return (
     <I18nProvider defaultLang={b.default_language}>
       <div style={{ "--primary": b.accent_color } as CSSProperties} className="min-h-screen">{children}</div>
