@@ -115,6 +115,7 @@ export const listManualReviews = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false })
       .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
 
+    query = query.is("attempt_answers.exam_attempts.reset_at", null);
     if (data.status !== "all") query = query.eq("status", data.status);
     if (data.examId) query = query.eq("attempt_answers.exam_attempts.exam_id", data.examId);
 
@@ -245,6 +246,7 @@ export const listReleaseQueue = createServerFn({ method: "GET" })
         "id,status,score,max_score,passed,submitted_at,snapshot,result_released,students!inner(id,first_name,last_name,username),exams!inner(id,title)",
       )
       .neq("status", "in_progress")
+      .is("reset_at", null)
       .eq("result_released", false)
       .order("submitted_at", { ascending: false, nullsFirst: false })
       .limit(100);
@@ -743,6 +745,126 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const resetExamAttempt = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        attemptId: z.string().uuid(),
+        reason: z.string().trim().max(1_000).default(""),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: attempt, error: attemptError } = await admin
+      .from("exam_attempts")
+      .select(
+        "id,exam_id,student_id,attempt_number,status,score,max_score,result_released,reset_at,exams!inner(id,title),students!inner(id,first_name,last_name,username)",
+      )
+      .eq("id", data.attemptId)
+      .maybeSingle();
+    if (attemptError) throw new Error(attemptError.message);
+    if (!attempt) throw new Error("Attempt not found.");
+
+    if (attempt.reset_at) {
+      return {
+        ok: true,
+        alreadyReset: true,
+        resetAt: attempt.reset_at,
+      };
+    }
+
+    const resetAt = new Date().toISOString();
+    const { data: updated, error: updateError } = await admin
+      .from("exam_attempts")
+      .update({
+        status: "abandoned",
+        result_released: false,
+        reset_at: resetAt,
+        reset_by: context.userId,
+      })
+      .eq("id", attempt.id)
+      .is("reset_at", null)
+      .select("id")
+      .maybeSingle();
+    if (updateError) throw new Error(updateError.message);
+    if (!updated) {
+      throw new Error("Attempt was reset by another request.");
+    }
+
+    const { error: activityError } = await admin
+      .from("activity_events")
+      .insert({
+        student_id: attempt.student_id,
+        category: "exam",
+        event_type: "exam_attempt_reset",
+        entity_type: "exam",
+        entity_id: attempt.exam_id,
+        attempt_id: attempt.id,
+        details: {
+          attempt_number: attempt.attempt_number,
+          previous_status: attempt.status,
+          previous_score: attempt.score,
+          previous_max_score: attempt.max_score,
+          reason: data.reason || null,
+        } as never,
+      });
+    if (activityError) throw new Error(activityError.message);
+
+    const student = attempt.students as unknown as {
+      first_name: string;
+      last_name: string;
+      username: string;
+    };
+    const exam = attempt.exams as unknown as {
+      id: string;
+      title: string;
+    };
+
+    const { notifyStudent } = await import("./notifications.functions");
+    await notifyStudent(admin, attempt.student_id, {
+      kind: "exam_attempt_reset",
+      title: "Exam attempt reset",
+      body: `Your attempt for ${exam.title} was reset by the teacher. You may start a new attempt if the exam is still available.`,
+      link: "/student/exams",
+      data: {
+        exam_id: attempt.exam_id,
+        reset_attempt_id: attempt.id,
+      },
+      dedupeKey: `exam-attempt-reset:${attempt.id}`,
+    });
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "exam_attempt_reset",
+      entity_type: "exam_attempt",
+      entity_id: attempt.id,
+      summary: `Reset attempt #${attempt.attempt_number} for ${student.first_name} ${student.last_name} — ${exam.title}`,
+      details: {
+        student_id: attempt.student_id,
+        username: student.username,
+        exam_id: attempt.exam_id,
+        attempt_number: attempt.attempt_number,
+        previous_status: attempt.status,
+        previous_score: attempt.score,
+        previous_max_score: attempt.max_score,
+        result_was_released: attempt.result_released,
+        reason: data.reason || null,
+        reset_at: resetAt,
+      },
+    });
+
+    return {
+      ok: true,
+      alreadyReset: false,
+      resetAt,
+    };
+  });
+
 export const listExamAttemptsMonitoring = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
@@ -780,7 +902,7 @@ export const listExamAttemptsMonitoring = createServerFn({ method: "GET" })
     let query = context.supabase
       .from("exam_attempts")
       .select(
-        "id,exam_id,student_id,attempt_number,status,started_at,deadline_at,submitted_at,score,max_score,passed,result_released,violations,students!inner(id,first_name,last_name,username),exams!inner(id,title),attempt_answers(count)",
+        "id,exam_id,student_id,attempt_number,status,started_at,deadline_at,submitted_at,score,max_score,passed,result_released,violations,reset_at,reset_by,students!inner(id,first_name,last_name,username),exams!inner(id,title),attempt_answers(count)",
         { count: "exact" },
       )
       .order("started_at", { ascending: false })
@@ -807,6 +929,8 @@ export const listExamAttemptsMonitoring = createServerFn({ method: "GET" })
         return {
           id: attempt.id,
           exam_id: attempt.exam_id,
+          reset_at: attempt.reset_at,
+          reset_by: attempt.reset_by,
           student_id: attempt.student_id,
           attempt_number: attempt.attempt_number,
           status: attempt.status,
