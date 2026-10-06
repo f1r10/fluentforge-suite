@@ -646,12 +646,14 @@ function MappingGrid({
   mapping: Partial<Record<QuestionImportField, string>>;
   onChange: (field: QuestionImportField, header: string) => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {fields.map((field) => (
         <div key={field} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] items-center gap-2">
           <div className="truncate text-xs text-muted-foreground" title={field}>
-            {QUESTION_IMPORT_FIELD_LABELS[field]}
+            {localizedImportFieldLabel(field, t)}
           </div>
           <select
             value={mapping[field] ?? ""}
@@ -669,6 +671,45 @@ function MappingGrid({
       ))}
     </div>
   );
+}
+
+function localizedImportFieldLabel(
+  field: QuestionImportField,
+  t: (key: string) => string,
+) {
+  if (/^option_[a-h]$/.test(field)) {
+    return `${t("options")} ${field.slice(-1).toUpperCase()}`;
+  }
+
+  const keys: Partial<Record<QuestionImportField, string>> = {
+    question_type: "type",
+    prompt: "prompt",
+    instructions: "instructions",
+    correct: "correct_answer",
+    answers: "accepted_answers",
+    pairs: "pairs",
+    order: "order_items",
+    model_answer: "model_answer",
+    learning_language: "language",
+    level: "level",
+    difficulty: "difficulty",
+    points: "points",
+    partial: "partial_scoring",
+    negative: "negative_marking",
+    grading_mode: "grading",
+    status: "status",
+    tags: "tags",
+    topic_ids: "topics",
+    media_id: "media",
+    explanation: "explanation",
+    teacher_notes: "teacher_notes",
+    case_sensitive: "case_sensitive",
+    ignore_punctuation: "ignore_punctuation",
+    ignore_diacritics: "ignore_diacritics",
+  };
+
+  const key = keys[field];
+  return key ? t(key) : QUESTION_IMPORT_FIELD_LABELS[field];
 }
 
 function Field({
