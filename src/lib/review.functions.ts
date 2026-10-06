@@ -227,6 +227,74 @@ export const listReviewExams = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+export const listReleaseQueue = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { data: attempts, error } = await context.supabase
+      .from("exam_attempts")
+      .select(
+        "id,status,score,max_score,passed,submitted_at,snapshot,result_released,students!inner(id,first_name,last_name,username),exams!inner(id,title)",
+      )
+      .neq("status", "in_progress")
+      .eq("result_released", false)
+      .order("submitted_at", { ascending: false, nullsFirst: false })
+      .limit(100);
+    if (error) throw new Error(error.message);
+
+    const candidates = (attempts ?? []).filter((attempt) => {
+      const snapshot = attempt.snapshot as Record<string, unknown>;
+      const exam = (snapshot["exam"] ?? {}) as Record<string, unknown>;
+      const settings = examSettingsSchema.safeParse(exam["settings"] ?? {});
+      return settings.success && settings.data.result_release === "after_approval";
+    });
+
+    const attemptIds = candidates.map((attempt) => attempt.id);
+    const pendingByAttempt = new Map<string, number>();
+
+    if (attemptIds.length) {
+      const { data: pendingRows, error: pendingError } = await context.supabase
+        .from("manual_reviews")
+        .select("id,attempt_answers!inner(attempt_id)")
+        .eq("status", "pending")
+        .in("attempt_answers.attempt_id", attemptIds);
+      if (pendingError) throw new Error(pendingError.message);
+
+      for (const row of pendingRows ?? []) {
+        const answer = row.attempt_answers as unknown as { attempt_id: string };
+        pendingByAttempt.set(
+          answer.attempt_id,
+          (pendingByAttempt.get(answer.attempt_id) ?? 0) + 1,
+        );
+      }
+    }
+
+    return candidates.map((attempt) => {
+      const student = attempt.students as unknown as {
+        id: string;
+        first_name: string;
+        last_name: string;
+        username: string;
+      };
+      const exam = attempt.exams as unknown as { id: string; title: string };
+
+      return {
+        id: attempt.id,
+        status: attempt.status,
+        score: attempt.score,
+        max_score: attempt.max_score,
+        passed: attempt.passed,
+        submitted_at: attempt.submitted_at,
+        pending_reviews: pendingByAttempt.get(attempt.id) ?? 0,
+        student: {
+          id: student.id,
+          name: `${student.first_name} ${student.last_name}`,
+          username: student.username,
+        },
+        exam,
+      };
+    });
+  });
+
 async function recomputeAttempt(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: any,
