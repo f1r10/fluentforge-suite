@@ -73,8 +73,14 @@ begin
   limit 1;
 
   if found then
-    -- Idempotent retries use the already-created lease. The caller must keep
-    -- the original raw token for that request_id.
+    -- Refresh the capability hash for an idempotent request retry. This lets
+    -- the retried server call return a fresh raw token while preserving the
+    -- original play_number instead of consuming another play.
+    update public.exam_listening_plays
+    set stream_token_hash = p_stream_token_hash
+    where public.exam_listening_plays.id = existing.id
+    returning * into existing;
+
     return query
       select existing.id, existing.play_number, existing.expires_at;
     return;
