@@ -713,6 +713,202 @@ export const saveStudentDashboardSettings = createServerFn({
     return { ok: true };
   });
 
+export const saveMonitoringSettings = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        show_browser_device: z.boolean(),
+        show_ip: z.boolean(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      show_browser_device: data.show_browser_device,
+      show_ip: data.show_ip,
+    };
+
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "monitoring",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "monitoring_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "monitoring",
+      summary: "Monitoring privacy settings updated",
+      details: value,
+    });
+
+    return { ok: true };
+  });
+
+export const listLiveStudentSessions = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        search: z.string().max(120).default(""),
+        onlineMinutes: z.number().int().min(1).max(60).default(5),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const since = new Date(
+      Date.now() - data.onlineMinutes * 60_000,
+    ).toISOString();
+
+    const [{ data: settingsRow, error: settingsError }, sessionsResult] =
+      await Promise.all([
+        context.supabase
+          .from("system_settings")
+          .select("value")
+          .eq("key", "monitoring")
+          .maybeSingle(),
+        context.supabase
+          .from("student_sessions")
+          .select(
+            "id,student_id,started_at,last_seen_at,current_location,user_agent,ip,students!inner(id,first_name,last_name,username,status,deleted_at)",
+          )
+          .is("revoked_at", null)
+          .gte("last_seen_at", since)
+          .order("last_seen_at", { ascending: false })
+          .limit(200),
+      ]);
+
+    if (settingsError) throw new Error(settingsError.message);
+    if (sessionsResult.error) throw new Error(sessionsResult.error.message);
+
+    const settings =
+      settingsRow?.value && typeof settingsRow.value === "object"
+        ? (settingsRow.value as Record<string, unknown>)
+        : {};
+    const showBrowserDevice =
+      settings["show_browser_device"] !== false;
+    const showIp = settings["show_ip"] === true;
+    const needle = data.search.trim().toLocaleLowerCase();
+
+    return (sessionsResult.data ?? [])
+      .flatMap((session) => {
+        const student = session.students as unknown as {
+          id: string;
+          first_name: string;
+          last_name: string;
+          username: string;
+          status: string;
+          deleted_at: string | null;
+        };
+        if (
+          !student ||
+          student.deleted_at ||
+          student.status === "archived"
+        ) {
+          return [];
+        }
+
+        const studentName =
+          `${student.first_name} ${student.last_name}`.trim();
+        if (
+          needle &&
+          ![
+            studentName,
+            student.username,
+            session.current_location ?? "",
+          ].some((value) =>
+            value.toLocaleLowerCase().includes(needle),
+          )
+        ) {
+          return [];
+        }
+
+        const userAgent =
+          showBrowserDevice && session.user_agent
+            ? describeUserAgent(session.user_agent)
+            : null;
+
+        return [
+          {
+            id: session.id,
+            student_id: student.id,
+            student_name: studentName,
+            username: student.username,
+            started_at: session.started_at,
+            last_seen_at: session.last_seen_at,
+            current_location: session.current_location,
+            session_duration_ms: Math.max(
+              0,
+              Date.now() - new Date(session.started_at).getTime(),
+            ),
+            browser: userAgent?.browser ?? null,
+            device: userAgent?.device ?? null,
+            operating_system: userAgent?.operatingSystem ?? null,
+            ip: showIp ? session.ip : null,
+            privacy: {
+              show_browser_device: showBrowserDevice,
+              show_ip: showIp,
+            },
+          },
+        ];
+      });
+  });
+
+function describeUserAgent(value: string) {
+  const ua = value.toLocaleLowerCase();
+
+  let browser = "Other";
+  if (ua.includes("edg/")) browser = "Edge";
+  else if (ua.includes("firefox/")) browser = "Firefox";
+  else if (ua.includes("chrome/") || ua.includes("crios/")) {
+    browser = "Chrome";
+  } else if (
+    ua.includes("safari/") &&
+    !ua.includes("chrome/") &&
+    !ua.includes("crios/")
+  ) {
+    browser = "Safari";
+  }
+
+  let operatingSystem = "Other";
+  if (ua.includes("windows")) operatingSystem = "Windows";
+  else if (ua.includes("android")) operatingSystem = "Android";
+  else if (
+    ua.includes("iphone") ||
+    ua.includes("ipad") ||
+    ua.includes("ios")
+  ) {
+    operatingSystem = "iOS/iPadOS";
+  } else if (ua.includes("mac os") || ua.includes("macintosh")) {
+    operatingSystem = "macOS";
+  } else if (ua.includes("linux")) operatingSystem = "Linux";
+
+  let device = "Desktop";
+  if (ua.includes("ipad") || ua.includes("tablet")) {
+    device = "Tablet";
+  } else if (
+    ua.includes("mobile") ||
+    ua.includes("iphone") ||
+    ua.includes("android")
+  ) {
+    device = "Mobile";
+  }
+
+  return { browser, device, operatingSystem };
+}
+
 export const saveMediaSettings = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
