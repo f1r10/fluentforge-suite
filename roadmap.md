@@ -13,7 +13,8 @@
 ## Content
 - [x] Question Bank: filters, bulk actions, all planned question structures, versioning, duplicates, topics
 - [x] Server-side typed question validation and deterministic grading primitives
-- [ ] Question Bank: bulk paste, spreadsheet import, image/media picker
+- [x] Question Bank: Media Library picker + image/diagram/map coordinate labelling
+- [ ] Question Bank: bulk paste and spreadsheet import
 - [x] Vocabulary Bank: translations, definitions, IPA, POS, examples, topics/tags
 - [x] Reading library: passages, layouts, topics/tags, question sets
 - [x] Listening library: transcript, sections, playback rules, topics/tags, question sets
