@@ -53,7 +53,11 @@ export function QuestionMediaAttachment({
       </div>
 
       {mediaId && preview?.url && (
-        <audio src={preview.url} controls className="w-full" />
+        preview.kind === "video" ? (
+          <video src={preview.url} controls className="max-h-[55vh] w-full rounded-md bg-black" />
+        ) : (
+          <audio src={preview.url} controls className="w-full" />
+        )
       )}
 
       {open && (
