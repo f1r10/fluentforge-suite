@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   BookOpen,
+  BookType,
   ClipboardList,
   Dumbbell,
   FileQuestion,
@@ -38,6 +39,7 @@ export const Route = createFileRoute("/_authenticated/student")({
 const nav = [
   { to: "/student" as const, key: "dashboard", icon: Home },
   { to: "/student/questions" as const, key: "browse_questions", icon: FileQuestion },
+  { to: "/student/vocabulary" as const, key: "vocabulary", icon: BookType },
   { to: "/student/readings" as const, key: "reading_library", icon: BookOpen },
   { to: "/student/listenings" as const, key: "listening_library", icon: Headphones },
   { to: "/student/practice" as const, key: "self_practice", icon: Dumbbell },
