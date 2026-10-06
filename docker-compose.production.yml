@@ -14,9 +14,14 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3000
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?SUPABASE_PUBLISHABLE_KEY is required}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
+      SETUP_TOKEN: ${SETUP_TOKEN:?SETUP_TOKEN is required}
       PROCESSING_SERVICE_URL: http://processing-service:8001
+      PROCESSING_SHARED_SECRET: ${PROCESSING_SHARED_SECRET:?PROCESSING_SHARED_SECRET is required}
     ports:
-      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-3000}:3000"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
     depends_on:
       processing-service:
         condition: service_healthy
@@ -39,6 +44,8 @@ services:
       - .env.production
     environment:
       PROCESSING_DB_PATH: /data/processing.db
+      PROCESSING_SHARED_SECRET: ${PROCESSING_SHARED_SECRET:?PROCESSING_SHARED_SECRET is required}
+      PROCESSING_ALLOWED_SOURCE_HOSTS: ${PROCESSING_ALLOWED_SOURCE_HOSTS:?PROCESSING_ALLOWED_SOURCE_HOSTS is required}
       WHISPER_MODEL_CACHE: /models/whisper
     volumes:
       - processing-data:/data
@@ -72,6 +79,7 @@ services:
     env_file:
       - .env.production
     environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       MIGRATIONS_DIR: /app/drizzle/migrations
     read_only: true
     tmpfs:
