@@ -327,19 +327,104 @@ export const getSettings = createServerFn({ method: "GET" })
 export const saveBranding = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
-    z.object({
-      system_name: z.string().trim().min(1).max(100), short_name: z.string().max(40), login_title: z.string().max(120),
-      welcome_message: z.string().max(1000), login_instructions: z.string().max(1000), footer: z.string().max(300), support_text: z.string().max(500),
-      accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/), logo_url: z.string().url().nullable().or(z.literal("")), login_image_url: z.string().url().nullable().or(z.literal("")),
-      default_language: z.enum(["az", "en", "ru", "tr"]),
-    }).parse(d),
+    z
+      .object({
+        system_name: z.string().trim().min(1).max(100),
+        short_name: z.string().max(40),
+        login_title: z.string().max(120),
+        welcome_message: z.string().max(1000),
+        login_instructions: z.string().max(1000),
+        footer: z.string().max(300),
+        support_text: z.string().max(500),
+        accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        logo_url: z.string().url().nullable().or(z.literal("")),
+        favicon_url: z.string().url().nullable().or(z.literal("")),
+        login_image_url: z.string().url().nullable().or(z.literal("")),
+        default_language: z.enum(["az", "en", "ru", "tr"]),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { default_language, ...branding } = data;
     const { adminClient, audit } = await import("./security.server");
-    await context.supabase.from("system_settings").update({ value: { ...branding, logo_url: branding.logo_url || null, login_image_url: branding.login_image_url || null } }).eq("key", "branding");
-    await context.supabase.from("system_settings").update({ value: { default_language } }).eq("key", "interface");
-    await audit(await adminClient(), { actor_type: "teacher", actor_id: context.userId, action: "settings_changed", summary: "Branding settings updated" });
+    const admin = await adminClient();
+
+    const { data: currentRow, error: currentError } = await context.supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "branding")
+      .maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+
+    const current =
+      currentRow?.value && typeof currentRow.value === "object"
+        ? (currentRow.value as Record<string, unknown>)
+        : {};
+
+    const logoUrl = branding.logo_url || null;
+    const faviconUrl = branding.favicon_url || null;
+    const loginImageUrl = branding.login_image_url || null;
+    const currentLogoUrl =
+      typeof current["logo_url"] === "string" ? current["logo_url"] : null;
+    const currentFaviconUrl =
+      typeof current["favicon_url"] === "string"
+        ? current["favicon_url"]
+        : null;
+    const currentLogoPath =
+      typeof current["logo_storage_path"] === "string"
+        ? current["logo_storage_path"]
+        : null;
+    const currentFaviconPath =
+      typeof current["favicon_storage_path"] === "string"
+        ? current["favicon_storage_path"]
+        : null;
+
+    const logoStoragePath =
+      logoUrl && logoUrl === currentLogoUrl ? currentLogoPath : null;
+    const faviconStoragePath =
+      faviconUrl && faviconUrl === currentFaviconUrl
+        ? currentFaviconPath
+        : null;
+
+    const { error: brandingError } = await context.supabase
+      .from("system_settings")
+      .update({
+        value: {
+          ...branding,
+          logo_url: logoUrl,
+          favicon_url: faviconUrl,
+          login_image_url: loginImageUrl,
+          logo_storage_path: logoStoragePath,
+          favicon_storage_path: faviconStoragePath,
+        } as never,
+      })
+      .eq("key", "branding");
+    if (brandingError) throw new Error(brandingError.message);
+
+    const { error: interfaceError } = await context.supabase
+      .from("system_settings")
+      .update({ value: { default_language } })
+      .eq("key", "interface");
+    if (interfaceError) throw new Error(interfaceError.message);
+
+    const stalePaths = [
+      currentLogoPath && currentLogoPath !== logoStoragePath
+        ? currentLogoPath
+        : null,
+      currentFaviconPath && currentFaviconPath !== faviconStoragePath
+        ? currentFaviconPath
+        : null,
+    ].filter((value): value is string => !!value);
+    if (stalePaths.length) {
+      await admin.storage.from("branding").remove(stalePaths);
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "settings_changed",
+      summary: "Branding settings updated",
+    });
     return { ok: true };
   });
 
