@@ -217,11 +217,11 @@ function PracticeQuestionAnswer({
     return (
       <div className="space-y-3">
         {mediaUrl ? (
-          <div className="relative mx-auto w-full max-w-4xl overflow-hidden rounded-md border border-border bg-muted">
+          <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-md border border-border bg-muted">
             <img
               src={mediaUrl}
               alt=""
-              className="block h-auto max-h-[65vh] w-full object-contain"
+              className="block h-auto max-h-[65vh] w-auto max-w-full object-contain"
               draggable={false}
             />
             {labels.map((label, index) => (
