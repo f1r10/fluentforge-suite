@@ -650,34 +650,6 @@ function VocabularyPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="IPA">
-                  <Input value={editor.ipa} onChange={(e) => setEditor({ ...editor, ipa: e.target.value })} />
-                </Field>
-                <Field label={t("part_of_speech")}>
-                  <Input
-                    value={editor.part_of_speech}
-                    onChange={(e) => setEditor({ ...editor, part_of_speech: e.target.value })}
-                  />
-                </Field>
-                <Field label={t("level")}>
-                  <select
-                    className={selectClass}
-                    value={editor.level}
-                    onChange={(e) => setEditor({ ...editor, level: e.target.value })}
-                  >
-                    <option value="">—</option>
-                    {LEVELS.map((x) => <option key={x} value={x}>{x}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("status")}>
-                  <select
-                    className={selectClass}
-                    value={editor.status}
-                    onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}
-                  >
-                    {(["active", "draft", "archived"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
-                  </select>
-                </Field>
               </div>
 
               <Field label={t("definition")}>
@@ -687,23 +659,6 @@ function VocabularyPage() {
                   rows={3}
                 />
               </Field>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={t("synonyms")}>
-                  <Input
-                    value={editor.synonyms}
-                    onChange={(e) => setEditor({ ...editor, synonyms: e.target.value })}
-                    placeholder="quick, rapid"
-                  />
-                </Field>
-                <Field label={t("antonyms")}>
-                  <Input
-                    value={editor.antonyms}
-                    onChange={(e) => setEditor({ ...editor, antonyms: e.target.value })}
-                    placeholder="slow"
-                  />
-                </Field>
-              </div>
 
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -860,6 +815,59 @@ function VocabularyPage() {
                 ))}
               </section>
 
+              <details className="rounded-md border border-border bg-muted/20 p-3">
+                <summary className="cursor-pointer select-none text-sm font-medium">
+                  {t("advanced")}
+                </summary>
+                <div className="mt-4 space-y-5">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="IPA">
+                  <Input value={editor.ipa} onChange={(e) => setEditor({ ...editor, ipa: e.target.value })} />
+                </Field>
+                <Field label={t("part_of_speech")}>
+                  <Input
+                    value={editor.part_of_speech}
+                    onChange={(e) => setEditor({ ...editor, part_of_speech: e.target.value })}
+                  />
+                </Field>
+                <Field label={t("level")}>
+                  <select
+                    className={selectClass}
+                    value={editor.level}
+                    onChange={(e) => setEditor({ ...editor, level: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {LEVELS.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label={t("status")}>
+                  <select
+                    className={selectClass}
+                    value={editor.status}
+                    onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}
+                  >
+                    {(["active", "draft", "archived"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
+                  </select>
+                </Field>
+
+                  </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t("synonyms")}>
+                  <Input
+                    value={editor.synonyms}
+                    onChange={(e) => setEditor({ ...editor, synonyms: e.target.value })}
+                    placeholder="quick, rapid"
+                  />
+                </Field>
+                <Field label={t("antonyms")}>
+                  <Input
+                    value={editor.antonyms}
+                    onChange={(e) => setEditor({ ...editor, antonyms: e.target.value })}
+                    placeholder="slow"
+                  />
+                </Field>
+              </div>
+
               <Field label={t("topics")}>
                 <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-border p-2">
                   {topicOpts.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
@@ -901,6 +909,9 @@ function VocabularyPage() {
                   rows={3}
                 />
               </Field>
+
+                </div>
+              </details>
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setEditor(null)}>
