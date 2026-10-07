@@ -332,9 +332,23 @@ function ListeningsPage() {
       return {
         ...current,
         sections: current.sections.filter((_, rowIndex) => rowIndex !== index),
-        questionSets: current.questionSets.map((set) =>
-          set.section_id === removedId ? { ...set, section_id: "" } : set,
-        ),
+        questionSets: current.questionSets.map((set) => {
+          if (set.section_id === removedId) {
+            return { ...set, section_id: "" };
+          }
+
+          if (!section.id && set.section_id.startsWith("new:")) {
+            const previousIndex = Number(set.section_id.slice(4));
+            if (Number.isInteger(previousIndex) && previousIndex > index) {
+              return {
+                ...set,
+                section_id: `new:${previousIndex - 1}`,
+              };
+            }
+          }
+
+          return set;
+        }),
       };
     });
   }
