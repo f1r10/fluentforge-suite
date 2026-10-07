@@ -522,13 +522,13 @@ async function validateExamEntity(
   if (type === "question") {
     const { data, error } = await sb
       .from("questions")
-      .select("id,context_kind,reusable_independently,current_version,status")
+      .select("id,context_kind,current_version,status")
       .eq("id", id)
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data || data.status === "archived") throw new Error("Question not found.");
-    if (data.context_kind !== "none" && !data.reusable_independently) {
+    if (data.context_kind !== "none") {
       throw new Error("Context-bound questions must be added through their reading or listening.");
     }
     return { version: data.current_version as number };
@@ -710,10 +710,10 @@ export const searchExamContent = createServerFn({ method: "GET" })
     if (data.type === "all" || data.type === "question") {
       let query = context.supabase
         .from("questions")
-        .select("id,prompt,question_type,learning_language,level,context_kind,reusable_independently")
+        .select("id,prompt,question_type,learning_language,level,context_kind")
         .eq("status", "active")
         .is("deleted_at", null)
-        .or("context_kind.eq.none,reusable_independently.eq.true")
+        .eq("context_kind", "none")
         .order("updated_at", { ascending: false })
         .limit(data.type === "all" ? 12 : 50);
       if (safe) query = query.ilike("prompt", `%${safe}%`);
@@ -819,7 +819,7 @@ export const previewExamPool = createServerFn({ method: "POST" })
       .from("questions")
       .select("id,prompt,question_type,learning_language,level", { count: "exact" })
       .eq("status", "active")
-      .or("context_kind.eq.none,reusable_independently.eq.true")
+      .eq("context_kind", "none")
       .is("deleted_at", null)
       .limit(10);
 
@@ -1254,7 +1254,7 @@ async function poolCandidates(
     .from("questions")
     .select("id")
     .eq("status", "active")
-    .or("context_kind.eq.none,reusable_independently.eq.true")
+    .eq("context_kind", "none")
     .is("deleted_at", null)
     .limit(2_000);
 
