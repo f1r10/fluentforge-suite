@@ -81,6 +81,7 @@ function ReadingsPage() {
     Awaited<ReturnType<typeof getReadingStudentPreview>> | null
   >(null);
   const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
+  const [autoCreateSetId, setAutoCreateSetId] = useState<string | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["readings", search, language, level, status, page],
@@ -94,6 +95,7 @@ function ReadingsPage() {
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
   async function openEdit(id: string) {
+    setAutoCreateSetId(null);
     try {
       const row = await getReading({ data: { id } });
       setEditor({
@@ -215,6 +217,7 @@ function ReadingsPage() {
             }
           : current,
       );
+      setAutoCreateSetId(created.id);
       await qc.invalidateQueries({ queryKey: ["readings"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -470,7 +473,7 @@ function ReadingsPage() {
 
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>{t("question_sets")}</Label>
+                  <Label>{t("questions")}</Label>
                   <Button
                     type="button"
                     size="sm"
@@ -478,49 +481,56 @@ function ReadingsPage() {
                     disabled={busy}
                     onClick={() => void addQuestionSet()}
                   >
-                    <Plus className="h-4 w-4" />{t("add")}
+                    <Plus className="h-4 w-4" />{t("add_question")}
                   </Button>
                 </div>
-                {editor.questionSets.length === 0 && <p className="text-sm text-muted-foreground">{t("no_question_sets")}</p>}
+                {editor.questionSets.length === 0 && <p className="text-sm text-muted-foreground">{t("no_questions")}</p>}
                 {editor.questionSets.map((set, index) => (
                   <div
                     key={set.id ?? index}
-                    className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-[1fr_2fr_auto]"
+                    className="space-y-3 rounded-md border border-border p-3"
                   >
-                    <Input
-                      value={set.title}
-                      placeholder={t("title")}
-                      onChange={(e) => setEditor({
-                        ...editor,
-                        questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, title: e.target.value } : x),
-                      })}
-                    />
-                    <Input
-                      value={set.instructions}
-                      placeholder={t("instructions")}
-                      onChange={(e) => setEditor({
-                        ...editor,
-                        questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
-                      })}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => void removeQuestionSet(index)}
-                      aria-label={t("delete")}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                     {set.id ? (
-                      <div className="md:col-span-3">
-                        <ContextQuestionSetManager
-                          kind="reading"
-                          questionSetId={set.id}
-                          topics={topics}
-                        />
-                      </div>
+                      <ContextQuestionSetManager
+                        kind="reading"
+                        questionSetId={set.id}
+                        topics={topics}
+                        initialCreateOpen={autoCreateSetId === set.id}
+                      />
                     ) : null}
+
+                    <details className="rounded-md border border-border bg-muted/20 p-3">
+                      <summary className="cursor-pointer select-none text-sm font-medium">
+                        {t("advanced")}
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-[1fr_2fr_auto]">
+                        <Input
+                          value={set.title}
+                          placeholder={t("title")}
+                          onChange={(e) => setEditor({
+                            ...editor,
+                            questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, title: e.target.value } : x),
+                          })}
+                        />
+                        <Input
+                          value={set.instructions}
+                          placeholder={t("instructions")}
+                          onChange={(e) => setEditor({
+                            ...editor,
+                            questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
+                          })}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void removeQuestionSet(index)}
+                          aria-label={t("delete")}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </details>
                   </div>
                 ))}
               </section>
