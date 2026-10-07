@@ -588,9 +588,9 @@ async function gotoHydrated(page, path) {
       .getByRole("heading", { name: "Export Center", level: 1 })
       .waitFor({ timeout: 20000 });
     const exportFormat = page
-      .getByText("Format", { exact: true })
-      .locator("xpath=..")
-      .locator("select");
+      .locator("select")
+      .filter({ has: page.locator('option[value="pdf"]') })
+      .first();
     await exportFormat.selectOption("pdf");
     const pdfOptions = page
       .getByText("Correct answer", { exact: true })
