@@ -170,7 +170,6 @@ function ReadingsPage() {
     setBusy(true);
     try {
       let readingId = editor.id;
-      let initialDraft = false;
       if (!readingId) {
         const saved = await saveReading({
           data: {
@@ -188,7 +187,6 @@ function ReadingsPage() {
           },
         });
         readingId = saved.id;
-        initialDraft = true;
       }
 
       const created = await saveReadingQuestionSet({
@@ -205,7 +203,6 @@ function ReadingsPage() {
           ? {
               ...current,
               id: readingId,
-              status: initialDraft ? "draft" : current.status,
               questionSets: [
                 ...current.questionSets,
                 {
