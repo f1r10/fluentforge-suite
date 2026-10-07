@@ -536,7 +536,7 @@ function ListeningsPage() {
             <div className="space-y-5">
               <Field label={t("title")}><Input required autoFocus value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></Field>
 
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="max-w-sm">
                 <Field label={t("language")}>
                   <select className={selectClass} value={editor.learning_language} onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}>
                     {editor.learning_language &&
@@ -552,21 +552,6 @@ function ListeningsPage() {
                         {item.label}
                       </option>
                     ))}
-                  </select>
-                </Field>
-                <Field label={t("level")}>
-                  <select className={selectClass} value={editor.level} onChange={(e) => setEditor({ ...editor, level: e.target.value })}>
-                    <option value="">—</option>{LEVELS.map((x) => <option key={x}>{x}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("transcript_source")}>
-                  <select className={selectClass} value={editor.transcript_source} onChange={(e) => setEditor({ ...editor, transcript_source: e.target.value as EditorState["transcript_source"] })}>
-                    {(["none", "manual", "imported", "auto", "local_whisper"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("status")}>
-                  <select className={selectClass} value={editor.status} onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}>
-                    {(["active", "draft", "archived"] as const).map((x) => <option key={x}>{t(x)}</option>)}
                   </select>
                 </Field>
               </div>
@@ -597,6 +582,30 @@ function ListeningsPage() {
                   )}
                 </div>
               </Field>
+
+              <details className="rounded-md border border-border bg-muted/20 p-3">
+                <summary className="cursor-pointer select-none text-sm font-medium">
+                  {t("advanced")}
+                </summary>
+                <div className="mt-4 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-4">
+
+                <Field label={t("level")}>
+                  <select className={selectClass} value={editor.level} onChange={(e) => setEditor({ ...editor, level: e.target.value })}>
+                    <option value="">—</option>{LEVELS.map((x) => <option key={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label={t("transcript_source")}>
+                  <select className={selectClass} value={editor.transcript_source} onChange={(e) => setEditor({ ...editor, transcript_source: e.target.value as EditorState["transcript_source"] })}>
+                    {(["none", "manual", "imported", "auto", "local_whisper"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
+                  </select>
+                </Field>
+                <Field label={t("status")}>
+                  <select className={selectClass} value={editor.status} onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}>
+                    {(["active", "draft", "archived"] as const).map((x) => <option key={x}>{t(x)}</option>)}
+                  </select>
+                </Field>
+              </div>
 
               {editor.id && editor.media_id && (
                 <div className="flex flex-wrap items-center gap-3 rounded-md border border-border p-3">
@@ -693,6 +702,10 @@ function ListeningsPage() {
                   </div>
                 ))}
               </section>
+
+
+                </div>
+              </details>
 
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
