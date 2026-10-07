@@ -146,6 +146,46 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] real PDF upload, storage finalize, extraction and review pipeline");
 
+    await importDialog.getByRole("button", { name: "Approve" }).first().click();
+    await importDialog
+      .getByRole("button", { name: "Import approved" })
+      .click();
+    await page
+      .getByText(/Imported:\s*1/)
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] PDF review item committed into the Question Bank");
+
+    await page.keyboard.press("Escape");
+    await gotoHydrated(page, "/teacher/questions");
+    await page
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] imported PDF question visible in teacher Question Bank");
+
+    await gotoHydrated(page, "/teacher/catalogs");
+    await page.getByRole("button", { name: "Add catalog" }).click();
+    const catalogDialog = page.getByRole("dialog");
+    await catalogDialog.locator("input").first().fill("Release Catalog");
+    await catalogDialog.getByRole("button", { name: "Create" }).click();
+    await expectPath(page, "**/teacher/catalogs/**", "catalog workspace");
+    await page
+      .getByRole("heading", { name: "Release Catalog", level: 1 })
+      .waitFor({ timeout: 20000 });
+
+    await page.getByRole("button", { name: "Add content" }).click();
+    const contentDialog = page.getByRole("dialog");
+    const importedQuestionRow = contentDialog
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("..");
+    await importedQuestionRow.locator('button[role="checkbox"]').click();
+    await contentDialog
+      .getByRole("button", { name: /^Add \(1\)$/ })
+      .click();
+    await page
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] catalog workspace opened and accepted imported question content");
+
     await teacherContext.close();
 
     const reloginContext = await browser.newContext();
