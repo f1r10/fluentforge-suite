@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,17 +39,23 @@ export function ContextQuestionSetManager({
   questionSetId,
   topics,
   initialCreateOpen = false,
+  createRequest = 0,
 }: {
   kind: Kind;
   questionSetId: string;
   topics: TopicRow[];
   initialCreateOpen?: boolean;
+  createRequest?: number;
 }) {
   const { t } = useI18n();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [moving, setMoving] = useState(false);
+
+  useEffect(() => {
+    if (createRequest > 0) setCreateOpen(true);
+  }, [createRequest]);
 
   const queryKey = ["context-questions", kind, questionSetId] as const;
   const { data: rows = [], isFetching } = useQuery({
