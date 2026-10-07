@@ -215,6 +215,146 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog workspace opened and accepted imported question content");
 
+    await gotoHydrated(page, "/teacher/media");
+    const mediaInput = page.locator('input[type="file"]');
+    await mediaInput.setInputFiles({
+      name: "release-listening.wav",
+      mimeType: "audio/wav",
+      buffer: silentWavBuffer(),
+    });
+    await page
+      .getByText("release-listening.wav", { exact: true })
+      .first()
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher uploaded listening audio media");
+
+    await gotoHydrated(page, "/teacher/readings");
+    await page.getByRole("button", { name: "Add reading" }).click();
+    const readingDialog = page.getByRole("dialog").last();
+    await readingDialog.locator('input[required]').first().fill("Release Reading");
+    await readingDialog
+      .locator("textarea")
+      .first()
+      .fill(
+        "FluentForge lets students practise questions, readings and listenings in one learning workspace.",
+      );
+
+    const readingSetsPanel = readingDialog
+      .getByText("Question sets", { exact: true })
+      .locator("xpath=ancestor::section");
+    await readingSetsPanel.getByRole("button", { name: "Add", exact: true }).click();
+    await readingSetsPanel
+      .locator('input[placeholder="Title"]')
+      .fill("Release Reading Set");
+    await readingSetsPanel
+      .locator('input[placeholder="Instructions"]')
+      .fill("Answer the reading question.");
+    await readingDialog.getByRole("button", { name: "Save", exact: true }).last().click();
+
+    await readingDialog
+      .getByRole("button", { name: "Create question here" })
+      .waitFor({ timeout: 20000 });
+    await readingDialog
+      .getByRole("button", { name: "Create question here" })
+      .click();
+
+    const readingQuestionDialog = page.getByRole("dialog").last();
+    await readingQuestionDialog.locator("select").first().selectOption("open_text");
+    await readingQuestionDialog
+      .locator("#prompt")
+      .fill("Explain what students can practise in FluentForge.");
+    await readingQuestionDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await readingQuestionDialog.waitFor({ state: "hidden", timeout: 20000 });
+    await readingDialog
+      .getByText("Explain what students can practise in FluentForge.", {
+        exact: true,
+      })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    await page
+      .getByText("Release Reading", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] reading workspace saved a contextual open-response question");
+
+    await gotoHydrated(page, "/teacher/listenings");
+    await page.getByRole("button", { name: "Add listening" }).click();
+    const listeningDialog = page.getByRole("dialog").last();
+    await listeningDialog
+      .locator('input[required]')
+      .first()
+      .fill("Release Listening");
+
+    await listeningDialog
+      .getByRole("button", { name: "Choose media" })
+      .click();
+    const mediaPicker = page.getByRole("dialog").last();
+    const mediaRow = mediaPicker
+      .getByText("release-listening.wav", { exact: true })
+      .locator("xpath=ancestor::li");
+    await mediaRow.getByRole("button", { name: "Select" }).click();
+    await listeningDialog
+      .getByText("release-listening.wav", { exact: true })
+      .waitFor({ timeout: 20000 });
+
+    const sectionsPanel = listeningDialog
+      .getByText("Sections", { exact: true })
+      .locator("xpath=ancestor::section");
+    await sectionsPanel.getByRole("button", { name: "Add", exact: true }).click();
+    await sectionsPanel
+      .locator('input[placeholder="Title"]')
+      .fill("Part 1");
+
+    const listeningSetsPanel = listeningDialog
+      .getByText("Question sets", { exact: true })
+      .locator("xpath=ancestor::section");
+    await listeningSetsPanel
+      .getByRole("button", { name: "Add", exact: true })
+      .click();
+    await listeningSetsPanel
+      .locator('input[placeholder="Title"]')
+      .fill("Release Listening Set");
+    await listeningSetsPanel
+      .locator('input[placeholder="Instructions"]')
+      .fill("Listen and answer.");
+    await listeningSetsPanel.locator("select").selectOption({ label: "Part 1" });
+
+    await listeningDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .last()
+      .click();
+    await listeningDialog
+      .getByRole("button", { name: "Create question here" })
+      .waitFor({ timeout: 20000 });
+    await listeningDialog
+      .getByRole("button", { name: "Create question here" })
+      .click();
+
+    const listeningQuestionDialog = page.getByRole("dialog").last();
+    await listeningQuestionDialog
+      .locator("select")
+      .first()
+      .selectOption("true_false");
+    await listeningQuestionDialog
+      .locator("#prompt")
+      .fill("The listening activity is available.");
+    await listeningQuestionDialog
+      .getByRole("button", { name: "True", exact: true })
+      .click();
+    await listeningQuestionDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await listeningQuestionDialog.waitFor({ state: "hidden", timeout: 20000 });
+    await listeningDialog
+      .getByText("The listening activity is available.", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    await page
+      .getByText("Release Listening", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] listening workspace saved media, section and contextual question");
+
     await teacherContext.close();
 
     const reloginContext = await browser.newContext();
@@ -260,6 +400,56 @@ async function gotoHydrated(page, path) {
         .waitFor({ timeout: 20000 });
       console.log("[ok] student learning area: " + path);
     }
+
+    await gotoHydrated(studentPage, "/student/readings");
+    await studentPage
+      .getByText("Release Reading", { exact: true })
+      .click();
+    await studentPage
+      .getByRole("heading", { name: "Release Reading" })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByText("Explain what students can practise in FluentForge.", {
+        exact: true,
+      })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] student opened reading and its contextual question set");
+
+    await gotoHydrated(studentPage, "/student/listenings");
+    await studentPage
+      .getByText("Release Listening", { exact: true })
+      .click();
+    await studentPage
+      .getByRole("heading", { name: "Release Listening" })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByText("The listening activity is available.", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage.locator("audio").waitFor({ timeout: 20000 });
+    console.log("[ok] student opened listening media and contextual question set");
+
+    await gotoHydrated(studentPage, "/student/practice");
+    const practiceCountInputs = studentPage.locator('input[type="number"]');
+    await practiceCountInputs.nth(0).fill("0");
+    await practiceCountInputs.nth(1).fill("1");
+    await practiceCountInputs.nth(2).fill("1");
+    const sessionModeField = studentPage
+      .getByText("Session mode", { exact: true })
+      .locator("xpath=..");
+    await sessionModeField.locator("select").selectOption("mock_exam");
+    await studentPage
+      .getByRole("button", { name: "Generate practice" })
+      .click();
+    await studentPage
+      .getByText("Release Reading", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await studentPage
+      .getByText("Release Listening", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await studentPage
+      .getByText(/Time remaining:/)
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] student built a timed mixed mock exam from reading and listening");
 
     await studentContext.close();
     console.log("FluentForge release browser acceptance passed.");
