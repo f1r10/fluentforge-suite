@@ -69,6 +69,63 @@ def test_csv_question_detection(tmp_path: Path):
     assert items[0]["payload"]["answer_key"] == {"correct": ["a"]}
 
 
+def test_text_vocabulary_detection_preserves_unlabeled_meaning(tmp_path: Path):
+    source = tmp_path / "vocabulary.txt"
+    source.write_text(
+        "apple — a round fruit\n"
+        "reliable - able to be trusted\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/plain")
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "level": "A2",
+            "status": "draft",
+        },
+    )
+
+    assert [item["item_type"] for item in items] == ["vocabulary", "vocabulary"]
+    assert items[0]["payload"]["word"] == "apple"
+    assert items[0]["payload"]["definition"] == "a round fruit"
+    assert items[0]["payload"]["learning_language"] == "en"
+    assert items[0]["payload"]["level"] == "A2"
+    assert items[0]["payload"]["translations"] == []
+
+
+def test_csv_vocabulary_detection_maps_explicit_translation_language(tmp_path: Path):
+    source = tmp_path / "vocabulary.csv"
+    source.write_text(
+        "word,definition,part_of_speech,az,level,tags\n"
+        "apple,a round fruit,noun,alma,A1,food|basic\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/csv")
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["item_type"] == "vocabulary"
+    assert item["payload"]["word"] == "apple"
+    assert item["payload"]["definition"] == "a round fruit"
+    assert item["payload"]["part_of_speech"] == "noun"
+    assert item["payload"]["translations"] == [
+        {"language": "az", "value": "alma"}
+    ]
+    assert item["payload"]["level"] == "A1"
+    assert item["payload"]["tags"] == ["food", "basic"]
+
+
 def test_falls_back_to_raw_text_when_no_question_pattern(tmp_path: Path):
     source = tmp_path / "notes.txt"
     source.write_text("A paragraph without a numbered question.", encoding="utf-8")
