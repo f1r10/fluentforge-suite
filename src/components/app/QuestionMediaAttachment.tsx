@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileAudio, Search, X } from "lucide-react";
+import { FileAudio, ImageIcon, Search, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,13 +8,17 @@ import { Label } from "@/components/ui/label";
 import { getMediaPreviewUrl, listMedia } from "@/lib/media.functions";
 import { useI18n } from "@/lib/i18n";
 
+type MediaKind = "image" | "audio" | "video";
+
 export function QuestionMediaAttachment({
   mediaId,
   mediaLabel,
+  allowedKinds = ["image", "audio", "video"],
   onChange,
 }: {
   mediaId: string;
   mediaLabel: string;
+  allowedKinds?: MediaKind[];
   onChange: (media: { id: string; label: string } | null) => void;
 }) {
   const { t } = useI18n();
@@ -34,7 +38,11 @@ export function QuestionMediaAttachment({
         <div className="min-w-0 flex-1 rounded-md border border-border px-3 py-2 text-sm">
           {mediaId ? (
             <div className="flex items-center gap-2">
-              <FileAudio className="h-4 w-4 shrink-0 text-muted-foreground" />
+              {preview?.kind === "image" ? (
+                <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <FileAudio className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
               <span className="truncate">{mediaLabel || mediaId}</span>
             </div>
           ) : (
@@ -55,13 +63,20 @@ export function QuestionMediaAttachment({
       {mediaId && preview?.url && (
         preview.kind === "video" ? (
           <video src={preview.url} controls className="max-h-[55vh] w-full rounded-md bg-black" />
+        ) : preview.kind === "image" ? (
+          <img
+            src={preview.url}
+            alt=""
+            className="mx-auto max-h-[55vh] max-w-full rounded-md border border-border object-contain"
+          />
         ) : (
           <audio src={preview.url} controls className="w-full" />
         )
       )}
 
       {open && (
-        <AudioVideoPicker
+        <MediaPicker
+          allowedKinds={allowedKinds}
           onClose={() => setOpen(false)}
           onChoose={(media) => {
             onChange({
@@ -76,16 +91,19 @@ export function QuestionMediaAttachment({
   );
 }
 
-function AudioVideoPicker({
+function MediaPicker({
+  allowedKinds,
   onClose,
   onChoose,
 }: {
+  allowedKinds: MediaKind[];
   onClose: () => void;
   onChoose: (media: { id: string; original_filename: string | null }) => void;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<"audio" | "video">("audio");
+  const kinds = allowedKinds.length ? allowedKinds : ["image", "audio", "video"];
+  const [kind, setKind] = useState<MediaKind>(kinds[0]!);
   const [page, setPage] = useState(0);
 
   const { data, isFetching } = useQuery({
@@ -132,8 +150,11 @@ function AudioVideoPicker({
               setPage(0);
             }}
           >
-            <option value="audio">{t("audio")}</option>
-            <option value="video">{t("video")}</option>
+            {kinds.map((value) => (
+              <option key={value} value={value}>
+                {t(value)}
+              </option>
+            ))}
           </select>
         </div>
 
