@@ -47,6 +47,13 @@ function silentWavBuffer(durationMs = 400) {
   return buffer;
 }
 
+function minimalPngBuffer() {
+  return Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+}
+
 function minimalPdfBuffer() {
   return Buffer.from(
     "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggMTI3ID4+CnN0cmVhbQpCVAovRjEgMTIgVGYKNzIgNzIwIFRkCigxLiBSdW50aW1lIFBERiBpbXBvcnQgd29ya3M/KSBUagowIC0yMCBUZAooQS4gWWVzKSBUagowIC0yMCBUZAooQi4gTm8pIFRqCjAgLTIwIFRkCihBbnN3ZXI6IDEgQSkgVGoKRVQKCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMzggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo1MTYKJSVFT0YK",
@@ -219,6 +226,17 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 30000 });
     console.log("[ok] teacher uploaded listening audio media");
 
+    await mediaInput.setInputFiles({
+      name: "release-diagram.png",
+      mimeType: "image/png",
+      buffer: minimalPngBuffer(),
+    });
+    await page
+      .getByText("release-diagram.png", { exact: true })
+      .first()
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher uploaded visual question stimulus media");
+
     await gotoHydrated(page, "/teacher/readings");
     await page
       .getByRole("button", { name: /^(New reading|Add reading)$/ })
@@ -263,6 +281,25 @@ async function gotoHydrated(page, path) {
     await readingQuestionDialog
       .locator("#prompt")
       .fill("Explain what students can practise in FluentForge.");
+
+    await readingQuestionDialog
+      .getByRole("button", { name: "Choose media", exact: true })
+      .click();
+    const questionMediaPicker = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Choose media",
+          exact: true,
+        }),
+      });
+    const diagramRow = questionMediaPicker
+      .getByText("release-diagram.png", { exact: true })
+      .locator("xpath=ancestor::li");
+    await diagramRow.getByRole("button", { name: "Select", exact: true }).click();
+    await readingQuestionDialog
+      .getByText("release-diagram.png", { exact: true })
+      .waitFor({ timeout: 20000 });
     await readingQuestionDialog
       .getByRole("button", { name: "Save", exact: true })
       .click();
@@ -276,7 +313,7 @@ async function gotoHydrated(page, path) {
     await page
       .getByText("Release Reading", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] reading workspace saved a contextual open-response question");
+    console.log("[ok] reading workspace saved a contextual open-response question with visual stimulus");
 
     await gotoHydrated(page, "/teacher/listenings");
     await page
