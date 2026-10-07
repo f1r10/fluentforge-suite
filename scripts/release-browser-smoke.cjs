@@ -215,7 +215,7 @@ async function gotoHydrated(page, path) {
 
     await gotoHydrated(page, "/teacher/sources");
     await page
-      .getByRole("combobox", { name: "Import target", exact: true })
+      .getByRole("combobox", { name: "Import into", exact: true })
       .selectOption("vocabulary");
     const vocabularySourceInput = page.locator('input[type="file"]');
     await vocabularySourceInput.setInputFiles({
