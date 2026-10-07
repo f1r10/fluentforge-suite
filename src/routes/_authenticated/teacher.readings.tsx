@@ -82,6 +82,7 @@ function ReadingsPage() {
   >(null);
   const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
   const [autoCreateSetId, setAutoCreateSetId] = useState<string | null>(null);
+  const [questionCreateRequest, setQuestionCreateRequest] = useState(0);
 
   const { data, isFetching } = useQuery({
     queryKey: ["readings", search, language, level, status, page],
@@ -96,6 +97,7 @@ function ReadingsPage() {
 
   async function openEdit(id: string) {
     setAutoCreateSetId(null);
+    setQuestionCreateRequest(0);
     try {
       const row = await getReading({ data: { id } });
       setEditor({
@@ -169,6 +171,13 @@ function ReadingsPage() {
       return;
     }
 
+    const existingSet = editor.questionSets.find((set) => !!set.id);
+    if (existingSet?.id) {
+      setAutoCreateSetId(existingSet.id);
+      setQuestionCreateRequest((value) => value + 1);
+      return;
+    }
+
     setBusy(true);
     try {
       let readingId = editor.id;
@@ -218,6 +227,7 @@ function ReadingsPage() {
           : current,
       );
       setAutoCreateSetId(created.id);
+      setQuestionCreateRequest((value) => value + 1);
       await qc.invalidateQueries({ queryKey: ["readings"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -496,6 +506,9 @@ function ReadingsPage() {
                         questionSetId={set.id}
                         topics={topics}
                         initialCreateOpen={autoCreateSetId === set.id}
+                        createRequest={
+                          autoCreateSetId === set.id ? questionCreateRequest : 0
+                        }
                       />
                     ) : null}
 
