@@ -371,7 +371,6 @@ function ListeningsPage() {
     setBusy(true);
     try {
       let listeningId = editor.id;
-      let initialDraft = false;
       if (!listeningId) {
         const saved = await saveListening({
           data: {
@@ -397,7 +396,6 @@ function ListeningsPage() {
           },
         });
         listeningId = saved.id;
-        initialDraft = true;
       }
 
       const created = await saveListeningQuestionSet({
@@ -415,7 +413,6 @@ function ListeningsPage() {
           ? {
               ...current,
               id: listeningId,
-              status: initialDraft ? "draft" : current.status,
               questionSets: [
                 ...current.questionSets,
                 {
