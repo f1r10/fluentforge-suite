@@ -117,6 +117,7 @@ function ListeningsPage() {
     Awaited<ReturnType<typeof getListeningStudentPreview>> | null
   >(null);
   const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
+  const [autoCreateSetId, setAutoCreateSetId] = useState<string | null>(null);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
@@ -133,6 +134,7 @@ function ListeningsPage() {
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
   async function openEdit(id: string) {
+    setAutoCreateSetId(null);
     try {
       const [row, transcriptionJob] = await Promise.all([
         getListening({ data: { id } }),
@@ -426,6 +428,7 @@ function ListeningsPage() {
             }
           : current,
       );
+      setAutoCreateSetId(created.id);
       await qc.invalidateQueries({ queryKey: ["listenings"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -782,7 +785,7 @@ function ListeningsPage() {
 
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>{t("question_sets")}</Label>
+                  <Label>{t("questions")}</Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -790,51 +793,58 @@ function ListeningsPage() {
                     disabled={busy}
                     onClick={() => void addQuestionSet()}
                   >
-                    <Plus className="h-4 w-4" />{t("add")}
+                    <Plus className="h-4 w-4" />{t("add_question")}
                   </Button>
                 </div>
                 {editor.questionSets.map((set, index) => (
                   <div
                     key={set.id ?? index}
-                    className="grid gap-3 rounded-md border border-border p-3 lg:grid-cols-[180px_1fr_2fr_auto]"
+                    className="space-y-3 rounded-md border border-border p-3"
                   >
-                    <select className={selectClass} value={set.section_id} onChange={(e) => setEditor({
-                      ...editor,
-                      questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, section_id: e.target.value } : x),
-                    })}>
-                      <option value="">{t("no_section")}</option>
-                      {editor.sections.map((section, sectionIndex) => (
-                        <option key={section.id ?? sectionIndex} value={section.id ?? `new:${sectionIndex}`}>
-                          {section.title || `${t("section")} ${sectionIndex + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                    <Input value={set.title} placeholder={t("title")} onChange={(e) => setEditor({
-                      ...editor,
-                      questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, title: e.target.value } : x),
-                    })} />
-                    <Input value={set.instructions} placeholder={t("instructions")} onChange={(e) => setEditor({
-                      ...editor,
-                      questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
-                    })} />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => void removeQuestionSet(index)}
-                      aria-label={t("delete")}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                     {set.id ? (
-                      <div className="lg:col-span-4">
-                        <ContextQuestionSetManager
-                          kind="listening"
-                          questionSetId={set.id}
-                          topics={topics}
-                        />
-                      </div>
+                      <ContextQuestionSetManager
+                        kind="listening"
+                        questionSetId={set.id}
+                        topics={topics}
+                        initialCreateOpen={autoCreateSetId === set.id}
+                      />
                     ) : null}
+
+                    <details className="rounded-md border border-border bg-muted/20 p-3">
+                      <summary className="cursor-pointer select-none text-sm font-medium">
+                        {t("advanced")}
+                      </summary>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-[180px_1fr_2fr_auto]">
+                        <select className={selectClass} value={set.section_id} onChange={(e) => setEditor({
+                          ...editor,
+                          questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, section_id: e.target.value } : x),
+                        })}>
+                          <option value="">{t("no_section")}</option>
+                          {editor.sections.map((section, sectionIndex) => (
+                            <option key={section.id ?? sectionIndex} value={section.id ?? `new:${sectionIndex}`}>
+                              {section.title || `${t("section")} ${sectionIndex + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                        <Input value={set.title} placeholder={t("title")} onChange={(e) => setEditor({
+                          ...editor,
+                          questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, title: e.target.value } : x),
+                        })} />
+                        <Input value={set.instructions} placeholder={t("instructions")} onChange={(e) => setEditor({
+                          ...editor,
+                          questionSets: editor.questionSets.map((x, i) => i === index ? { ...x, instructions: e.target.value } : x),
+                        })} />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void removeQuestionSet(index)}
+                          aria-label={t("delete")}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </details>
                   </div>
                 ))}
               </section>
