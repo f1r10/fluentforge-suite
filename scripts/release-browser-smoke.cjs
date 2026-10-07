@@ -317,20 +317,22 @@ async function gotoHydrated(page, path) {
           exact: true,
         }),
       });
+    const vocabularyWordInput = vocabularyDialog.locator("input").first();
+    await vocabularyWordInput.fill("small");
     const suggestMetadata = vocabularyDialog.getByRole("button", {
       name: "Suggest metadata",
       exact: true,
     });
     await suggestMetadata.waitFor({ timeout: 20000 });
-    for (let attempt = 0; attempt < 40 && !(await suggestMetadata.isDisabled()); attempt += 1) {
-      await page.waitForTimeout(100);
-    }
     assert(
-      await suggestMetadata.isDisabled(),
-      "Vocabulary AI suggestion should be disabled when AI_PROVIDER=disabled.",
+      !(await suggestMetadata.isDisabled()),
+      "English dictionary metadata fallback should remain available when AI_PROVIDER=disabled.",
     );
+    await vocabularyDialog
+      .getByText(/English words can still use the dictionary fallback/i)
+      .waitFor({ timeout: 20000 });
     await page.keyboard.press("Escape");
-    console.log("[ok] disabled AI enrichment is explicit and does not trigger a server error");
+    console.log("[ok] English vocabulary enrichment remains available through dictionary fallback without AI");
 
     await gotoHydrated(page, "/teacher/media");
     const mediaInput = page.locator('input[type="file"]');
