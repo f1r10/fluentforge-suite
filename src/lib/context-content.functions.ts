@@ -518,6 +518,237 @@ export const saveListeningQuestionSet = createServerFn({ method: "POST" })
     return { id: row.id };
   });
 
+// -------------------- Teacher student-view previews --------------------
+
+export const getReadingStudentPreview = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: reading, error: readingError } = await admin
+      .from("readings")
+      .select(
+        "id,title,body,learning_language,level,word_count,display_layout",
+      )
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (readingError) throw new Error(readingError.message);
+    if (!reading) throw new Error("Reading not found.");
+
+    const { data: sets, error: setError } = await admin
+      .from("reading_question_sets")
+      .select("id,title,instructions,sort_order")
+      .eq("reading_id", reading.id)
+      .order("sort_order");
+    if (setError) throw new Error(setError.message);
+
+    const setIds = (sets ?? []).map((set) => set.id);
+    const questionResult = setIds.length
+      ? await admin
+          .from("questions")
+          .select(
+            "id,question_type,prompt,instructions,payload,answer_key,scoring,grading_mode,current_version,learning_language,level,reading_question_set_id,context_sort",
+          )
+          .in("reading_question_set_id", setIds)
+          .neq("status", "archived")
+          .is("deleted_at", null)
+          .order("context_sort")
+      : { data: [], error: null };
+    if (questionResult.error) throw new Error(questionResult.error.message);
+
+    const { hydrateQuestionMedia } = await import("./media.server");
+    const { publicPracticeQuestion } = await import(
+      "./student-library.functions"
+    );
+    const hydrated = await hydrateQuestionMedia(
+      admin,
+      questionResult.data ?? [],
+      60 * 60,
+    );
+    const questionsBySet = new Map<string, Array<Record<string, unknown>>>();
+    for (const question of hydrated) {
+      const setId =
+        typeof (question as Record<string, unknown>)[
+          "reading_question_set_id"
+        ] === "string"
+          ? String(
+              (question as Record<string, unknown>)[
+                "reading_question_set_id"
+              ],
+            )
+          : null;
+      if (!setId) continue;
+      const list = questionsBySet.get(setId) ?? [];
+      list.push(
+        publicPracticeQuestion(
+          question as Parameters<typeof publicPracticeQuestion>[0],
+        ) as unknown as Record<string, unknown>,
+      );
+      questionsBySet.set(setId, list);
+    }
+
+    return {
+      id: reading.id,
+      title: reading.title,
+      body: reading.body,
+      learning_language: reading.learning_language,
+      level: reading.level,
+      word_count: reading.word_count,
+      display_layout: reading.display_layout,
+      question_sets: (sets ?? []).map((set) => ({
+        id: set.id,
+        title: set.title,
+        instructions: set.instructions,
+        questions: questionsBySet.get(set.id) ?? [],
+      })),
+    };
+  });
+
+export const getListeningStudentPreview = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: listening, error: listeningError } = await admin
+      .from("listenings")
+      .select(
+        "id,title,media_id,transcript,learning_language,level,playback_rules",
+      )
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (listeningError) throw new Error(listeningError.message);
+    if (!listening) throw new Error("Listening not found.");
+
+    const [sectionsResult, setsResult, mediaResult] = await Promise.all([
+      admin
+        .from("listening_sections")
+        .select("id,title,start_seconds,end_seconds,sort_order")
+        .eq("listening_id", listening.id)
+        .order("sort_order"),
+      admin
+        .from("listening_question_sets")
+        .select("id,section_id,title,instructions,sort_order")
+        .eq("listening_id", listening.id)
+        .order("sort_order"),
+      listening.media_id
+        ? admin
+            .from("media_assets")
+            .select(
+              "id,kind,storage_path,external_url,mime_type,duration_seconds",
+            )
+            .eq("id", listening.media_id)
+            .is("deleted_at", null)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    for (const result of [sectionsResult, setsResult, mediaResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+
+    const setIds = (setsResult.data ?? []).map((set) => set.id);
+    const questionResult = setIds.length
+      ? await admin
+          .from("questions")
+          .select(
+            "id,question_type,prompt,instructions,payload,answer_key,scoring,grading_mode,current_version,learning_language,level,listening_question_set_id,context_sort",
+          )
+          .in("listening_question_set_id", setIds)
+          .neq("status", "archived")
+          .is("deleted_at", null)
+          .order("context_sort")
+      : { data: [], error: null };
+    if (questionResult.error) throw new Error(questionResult.error.message);
+
+    const { hydrateQuestionMedia, resolveMediaUrl } = await import(
+      "./media.server"
+    );
+    const { publicPracticeQuestion } = await import(
+      "./student-library.functions"
+    );
+    const hydrated = await hydrateQuestionMedia(
+      admin,
+      questionResult.data ?? [],
+      60 * 60,
+    );
+    const questionsBySet = new Map<string, Array<Record<string, unknown>>>();
+    for (const question of hydrated) {
+      const setId =
+        typeof (question as Record<string, unknown>)[
+          "listening_question_set_id"
+        ] === "string"
+          ? String(
+              (question as Record<string, unknown>)[
+                "listening_question_set_id"
+              ],
+            )
+          : null;
+      if (!setId) continue;
+      const list = questionsBySet.get(setId) ?? [];
+      list.push(
+        publicPracticeQuestion(
+          question as Parameters<typeof publicPracticeQuestion>[0],
+        ) as unknown as Record<string, unknown>,
+      );
+      questionsBySet.set(setId, list);
+    }
+
+    const rules =
+      listening.playback_rules &&
+      typeof listening.playback_rules === "object"
+        ? (listening.playback_rules as Record<string, unknown>)
+        : {};
+    const media = mediaResult.data;
+    const resolvedMedia = media
+      ? {
+          id: media.id,
+          kind: media.kind,
+          external_url: await resolveMediaUrl(admin, media, 60 * 60),
+          mime_type: media.mime_type,
+          duration_seconds: media.duration_seconds,
+        }
+      : null;
+
+    return {
+      id: listening.id,
+      title: listening.title,
+      learning_language: listening.learning_language,
+      level: listening.level,
+      transcript:
+        rules["show_transcript"] === true ? listening.transcript : null,
+      playback_rules: {
+        max_plays:
+          typeof rules["max_plays"] === "number" &&
+          rules["max_plays"] > 0
+            ? Math.floor(rules["max_plays"])
+            : null,
+        allow_pause: rules["allow_pause"] !== false,
+        allow_seek: rules["allow_seek"] !== false,
+        allow_rewind: rules["allow_rewind"] !== false,
+        show_transcript: rules["show_transcript"] === true,
+      },
+      media: resolvedMedia,
+      sections: (sectionsResult.data ?? []).map((section) => ({
+        id: section.id,
+        title: section.title,
+        start_seconds: section.start_seconds,
+        end_seconds: section.end_seconds,
+      })),
+      question_sets: (setsResult.data ?? []).map((set) => ({
+        id: set.id,
+        section_id: set.section_id,
+        title: set.title,
+        instructions: set.instructions,
+        questions: questionsBySet.get(set.id) ?? [],
+      })),
+    };
+  });
+
 // -------------------- Context question linking --------------------
 
 export const listContextQuestions = createServerFn({ method: "GET" })
