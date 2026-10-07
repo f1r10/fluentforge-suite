@@ -985,6 +985,18 @@ function ImportItemCard({
     }
   }
 
+  async function chooseCorrectAnswer(optionId: string) {
+    const nextPayload = {
+      ...payload,
+      answer_key: {
+        ...(answerKey ?? {}),
+        correct: [optionId],
+      },
+    };
+    setJson(JSON.stringify(nextPayload, null, 2));
+    await update("approved", nextPayload);
+  }
+
   async function saveJson() {
     try {
       const parsed = JSON.parse(json) as Record<string, unknown>;
@@ -1032,8 +1044,21 @@ function ImportItemCard({
             <div key={option.id} className="flex gap-2">
               <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
               <span className="flex-1">{option.text}</span>
-              {correct.includes(option.id) && (
+              {correct.includes(option.id) ? (
                 <span className="text-xs font-medium">{t("correct_answer")}</span>
+              ) : (
+                payload["question_type"] === "single_choice" &&
+                item.validation.state === "needs_fix" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => chooseCorrectAnswer(option.id)}
+                  >
+                    {t("correct")}
+                  </Button>
+                )
               )}
             </div>
           ))}
