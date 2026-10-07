@@ -39,7 +39,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
     { key: "question_versions", table: "question_versions" },
     { key: "question_topics", table: "question_topics" },
     { key: "question_tags", table: "question_tags" },
-    { key: "topics", table: "topics", softDelete: true },
+    { key: "topics", table: "topics" },
     { key: "tags", table: "tags" },
   ],
   vocabulary: [
@@ -48,7 +48,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
     { key: "vocabulary_examples", table: "vocabulary_examples" },
     { key: "vocabulary_topics", table: "vocabulary_topics" },
     { key: "vocabulary_tags", table: "vocabulary_tags" },
-    { key: "topics", table: "topics", softDelete: true },
+    { key: "topics", table: "topics" },
     { key: "tags", table: "tags" },
   ],
   readings: [
@@ -130,7 +130,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
     { key: "listening_question_sets", table: "listening_question_sets" },
     { key: "catalogs", table: "catalogs", softDelete: true },
     { key: "catalog_items", table: "catalog_items" },
-    { key: "topics", table: "topics", softDelete: true },
+    { key: "topics", table: "topics" },
     { key: "tags", table: "tags" },
     {
       key: "media_assets",
