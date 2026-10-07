@@ -176,8 +176,7 @@ function ListeningsPage() {
     }
   }
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  async function save() {
     if (!editor) return;
     setBusy(true);
     try {
@@ -503,7 +502,7 @@ function ListeningsPage() {
         <Dialog open onOpenChange={(open) => !open && setEditor(null)}>
           <DialogContent className="max-h-[94vh] max-w-6xl overflow-y-auto">
             <DialogHeader><DialogTitle>{editor.id ? t("edit_listening") : t("add_listening")}</DialogTitle></DialogHeader>
-            <form onSubmit={save} className="space-y-5">
+            <div className="space-y-5">
               <Field label={t("title")}><Input required autoFocus value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></Field>
 
               <div className="grid gap-4 sm:grid-cols-4">
@@ -724,9 +723,9 @@ function ListeningsPage() {
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
-                <Button type="submit" disabled={busy}>{t("save")}</Button>
+                <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
-            </form>
+            </div>
           </DialogContent>
         </Dialog>
       )}
