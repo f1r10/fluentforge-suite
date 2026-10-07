@@ -93,9 +93,6 @@ function toInput(f: Form, id?: string): QuestionInput {
       };
       payload = {
         blank_count: f.blanks.length,
-        ...(isAudioTextQuestion(f.question_type)
-          ? { media_id: f.media_id || null }
-          : {}),
       };
       break;
     case "open": answer_key = f.model_answer ? { model_answer: f.model_answer } : {}; break;
@@ -117,6 +114,9 @@ function toInput(f: Form, id?: string): QuestionInput {
       }
       break;
     case "ordering": answer_key = { order: f.order.filter((x) => x.trim()) }; break;
+  }
+  if (!isSpatialLabelling(f.question_type) && f.media_id) {
+    payload = { ...payload, media_id: f.media_id };
   }
   return {
     id, question_type: f.question_type, prompt: f.prompt, instructions: f.instructions || null, payload, answer_key,
@@ -283,10 +283,15 @@ export function QuestionEditor({
             ))}
           </div>
         )}
-        {def.editor === "text" && isAudioTextQuestion(f.question_type) && (
+        {!isSpatialLabelling(f.question_type) && (
           <QuestionMediaAttachment
             mediaId={f.media_id}
             mediaLabel={f.media_label}
+            allowedKinds={
+              isAudioTextQuestion(f.question_type)
+                ? ["audio", "video"]
+                : ["image", "audio", "video"]
+            }
             onChange={(media) =>
               set({
                 media_id: media?.id ?? "",
