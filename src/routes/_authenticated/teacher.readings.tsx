@@ -110,8 +110,7 @@ function ReadingsPage() {
     }
   }
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  async function save() {
     if (!editor) return;
     setBusy(true);
     try {
@@ -306,7 +305,7 @@ function ReadingsPage() {
         <Dialog open onOpenChange={(open) => !open && setEditor(null)}>
           <DialogContent className="max-h-[94vh] max-w-6xl overflow-y-auto">
             <DialogHeader><DialogTitle>{editor.id ? t("edit_reading") : t("add_reading")}</DialogTitle></DialogHeader>
-            <form onSubmit={save} className="space-y-5">
+            <div className="space-y-5">
               <Field label={t("title")}><Input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} required autoFocus /></Field>
               <Field label={t("passage")}><Textarea rows={14} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} /></Field>
 
@@ -424,9 +423,9 @@ function ReadingsPage() {
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
-                <Button type="submit" disabled={busy}>{t("save")}</Button>
+                <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
-            </form>
+            </div>
           </DialogContent>
         </Dialog>
       )}
