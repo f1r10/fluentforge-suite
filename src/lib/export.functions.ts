@@ -35,7 +35,13 @@ const formatSchema = z.enum(["json", "xlsx", "csv", "pdf"]);
 
 const TABLES: Record<ExportKind, TableSpec[]> = {
   questions: [
-    { key: "questions", table: "questions", softDelete: true },
+    {
+      key: "questions",
+      table: "questions",
+      softDelete: true,
+      filter: (query) =>
+        query.or("context_kind.eq.none,reusable_independently.eq.true"),
+    },
     { key: "question_versions", table: "question_versions" },
     { key: "question_topics", table: "question_topics" },
     { key: "question_tags", table: "question_tags" },
@@ -177,6 +183,8 @@ export const createExport = createServerFn({ method: "POST" })
         kind: kindSchema,
         format: formatSchema.default("xlsx"),
         includeTrash: z.boolean().default(false),
+        includeAnswers: z.boolean().default(false),
+        includeExplanations: z.boolean().default(false),
       })
       .parse(d),
   )
@@ -184,8 +192,14 @@ export const createExport = createServerFn({ method: "POST" })
     if (data.format === "csv" && !PRIMARY_CSV_TABLE[data.kind]) {
       throw new Error("CSV is not available for this export package.");
     }
-    if (data.format === "pdf" && data.kind !== "analytics") {
-      throw new Error("PDF reports are currently available for analytics only.");
+    if (
+      data.format === "pdf" &&
+      data.kind !== "analytics" &&
+      data.kind !== "questions"
+    ) {
+      throw new Error(
+        "PDF is currently available for Question Bank and Analytics exports.",
+      );
     }
 
     const { adminClient, audit } = await import("./security.server");
@@ -197,7 +211,11 @@ export const createExport = createServerFn({ method: "POST" })
       .insert({
         kind: data.kind,
         format: data.format,
-        params: { schema_version: 1 },
+        params: {
+          schema_version: 1,
+          include_answers: data.includeAnswers,
+          include_explanations: data.includeExplanations,
+        },
         status: "processing",
         include_trash: data.includeTrash,
         expires_at: expiresAt,
@@ -234,6 +252,8 @@ export const createExport = createServerFn({ method: "POST" })
         exportedAt,
         tables,
         rowCounts,
+        includeAnswers: data.includeAnswers,
+        includeExplanations: data.includeExplanations,
       });
 
       const stamp = exportedAt.replace(/[:.]/g, "-");
@@ -273,6 +293,8 @@ export const createExport = createServerFn({ method: "POST" })
           kind: data.kind,
           format: data.format,
           include_trash: data.includeTrash,
+          include_answers: data.includeAnswers,
+          include_explanations: data.includeExplanations,
           row_counts: rowCounts,
           size_bytes: sizeBytes,
         },
@@ -415,19 +437,37 @@ async function buildArtifact(input: {
   exportedAt: string;
   tables: Record<string, Record<string, unknown>[]>;
   rowCounts: Record<string, number>;
+  includeAnswers: boolean;
+  includeExplanations: boolean;
 }) {
   if (input.format === "pdf") {
-    if (input.kind !== "analytics") {
-      throw new Error("PDF reports are available for analytics only.");
+    const html =
+      input.kind === "analytics"
+        ? buildAnalyticsPdfHtml({
+            exportedAt: input.exportedAt,
+            tables: input.tables,
+          })
+        : input.kind === "questions"
+          ? buildQuestionBankPdfHtml({
+              exportedAt: input.exportedAt,
+              questions: input.tables["questions"] ?? [],
+              includeAnswers: input.includeAnswers,
+              includeExplanations: input.includeExplanations,
+            })
+          : null;
+
+    if (!html) {
+      throw new Error(
+        "PDF is currently available for Question Bank and Analytics exports.",
+      );
     }
 
-    const html = buildAnalyticsPdfHtml({
-      exportedAt: input.exportedAt,
-      tables: input.tables,
-    });
     const { getProcessingService } = await import("./processing.service");
     const pdf = await getProcessingService().renderPdfReport({ html });
-    if (pdf.byteLength < 5 || new TextDecoder().decode(pdf.slice(0, 5)) !== "%PDF-") {
+    if (
+      pdf.byteLength < 5 ||
+      new TextDecoder().decode(pdf.slice(0, 5)) !== "%PDF-"
+    ) {
       throw new Error("Processing service returned an invalid PDF.");
     }
 
@@ -495,6 +535,192 @@ async function buildArtifact(input: {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     extension: "xlsx",
   };
+}
+
+
+function buildQuestionBankPdfHtml(input: {
+  exportedAt: string;
+  questions: Record<string, unknown>[];
+  includeAnswers: boolean;
+  includeExplanations: boolean;
+}) {
+  const questionBlocks = input.questions
+    .map((question, index) => {
+      const prompt = String(question["prompt"] ?? "").trim();
+      const instructions =
+        typeof question["instructions"] === "string"
+          ? question["instructions"].trim()
+          : "";
+      const payload =
+        question["payload"] && typeof question["payload"] === "object"
+          ? (question["payload"] as Record<string, unknown>)
+          : {};
+      const answerKey =
+        question["answer_key"] && typeof question["answer_key"] === "object"
+          ? (question["answer_key"] as Record<string, unknown>)
+          : {};
+      const options = printableOptions(payload["options"]);
+      const meta = [
+        typeof question["question_type"] === "string"
+          ? humanizeColumn(question["question_type"])
+          : null,
+        typeof question["level"] === "string" && question["level"]
+          ? question["level"]
+          : null,
+        typeof question["learning_language"] === "string" &&
+        question["learning_language"]
+          ? String(question["learning_language"]).toUpperCase()
+          : null,
+      ].filter(Boolean);
+
+      const optionsHtml = options.length
+        ? `<ol class="options" type="A">${options
+            .map(
+              (option) =>
+                `<li>${escapeHtml(option.text || option.id)}</li>`,
+            )
+            .join("")}</ol>`
+        : "";
+
+      const answerHtml = input.includeAnswers
+        ? `<div class="answer"><strong>Answer:</strong> ${escapeHtml(
+            formatQuestionAnswer(answerKey, options),
+          )}</div>`
+        : "";
+
+      const explanation =
+        input.includeExplanations &&
+        typeof question["explanation"] === "string" &&
+        question["explanation"].trim()
+          ? `<div class="explanation"><strong>Explanation:</strong> ${escapeHtml(
+              question["explanation"].trim(),
+            ).replaceAll("\n", "<br>")}</div>`
+          : "";
+
+      return `
+        <article class="question">
+          <div class="q-head">
+            <span class="q-number">${index + 1}.</span>
+            <span class="meta">${escapeHtml(meta.join(" · "))}</span>
+          </div>
+          ${instructions ? `<div class="instructions">${escapeHtml(instructions).replaceAll("\n", "<br>")}</div>` : ""}
+          <div class="prompt">${escapeHtml(prompt || "Untitled question").replaceAll("\n", "<br>")}</div>
+          ${optionsHtml}
+          ${answerHtml}
+          ${explanation}
+        </article>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FluentForge Question Bank</title>
+<style>
+  @page { size: A4 portrait; margin: 15mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; color: #111; font-size: 10.5pt; line-height: 1.4; }
+  h1 { font-size: 19pt; margin: 0 0 2mm; }
+  .meta-top { color: #555; font-size: 9pt; margin: 0 0 8mm; }
+  .question { margin: 0 0 7mm; page-break-inside: avoid; }
+  .q-head { display: flex; align-items: baseline; gap: 3mm; margin-bottom: 1mm; }
+  .q-number { font-weight: 700; font-size: 11pt; }
+  .meta { color: #666; font-size: 8.5pt; }
+  .instructions { color: #555; font-size: 9pt; margin: 0 0 1mm 7mm; }
+  .prompt { margin-left: 7mm; white-space: normal; }
+  .options { margin: 2mm 0 0 13mm; padding-left: 6mm; }
+  .options li { margin: 1mm 0; padding-left: 1mm; }
+  .answer, .explanation { margin: 2mm 0 0 7mm; padding: 2mm 3mm; background: #f4f4f4; border-left: 2px solid #999; }
+  .explanation { background: #fafafa; color: #333; }
+  .empty { color: #666; }
+</style>
+</head>
+<body>
+  <h1>FluentForge Question Bank</h1>
+  <p class="meta-top">Generated: ${escapeHtml(input.exportedAt)} · ${input.questions.length} question(s)</p>
+  ${questionBlocks || '<p class="empty">No questions in this export.</p>'}
+</body>
+</html>`;
+}
+
+function printableOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((option, index) => {
+      if (typeof option === "string") {
+        return { id: String.fromCharCode(97 + index), text: option };
+      }
+      if (!option || typeof option !== "object") return null;
+      const row = option as Record<string, unknown>;
+      const id = String(row["id"] ?? String.fromCharCode(97 + index));
+      const text = String(row["text"] ?? row["label"] ?? row["value"] ?? "");
+      return { id, text };
+    })
+    .filter(
+      (option): option is { id: string; text: string } =>
+        !!option && (!!option.id || !!option.text),
+    );
+}
+
+function formatQuestionAnswer(
+  answerKey: Record<string, unknown>,
+  options: Array<{ id: string; text: string }>,
+) {
+  const correct = Array.isArray(answerKey["correct"])
+    ? answerKey["correct"].map(String).filter(Boolean)
+    : [];
+  if (correct.length) {
+    const optionMap = new Map(
+      options.map((option) => [option.id.toLowerCase(), option.text]),
+    );
+    return correct
+      .map((id) => {
+        const text = optionMap.get(id.toLowerCase());
+        return text ? `${id.toUpperCase()}) ${text}` : id;
+      })
+      .join("; ");
+  }
+
+  const blanks = Array.isArray(answerKey["blanks"])
+    ? answerKey["blanks"]
+    : null;
+  if (blanks) {
+    return blanks
+      .map((blank, index) => {
+        const accepted = Array.isArray(blank)
+          ? blank.map(String).filter(Boolean)
+          : [String(blank ?? "")].filter(Boolean);
+        return `${index + 1}: ${accepted.join(" / ")}`;
+      })
+      .join("; ");
+  }
+
+  const pairs = Array.isArray(answerKey["pairs"])
+    ? answerKey["pairs"]
+    : null;
+  if (pairs) {
+    return pairs
+      .map((pair) => {
+        if (!pair || typeof pair !== "object") return String(pair ?? "");
+        const row = pair as Record<string, unknown>;
+        return `${String(row["left"] ?? "")} → ${String(row["right"] ?? "")}`;
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+
+  const order = Array.isArray(answerKey["order"])
+    ? answerKey["order"].map(String).filter(Boolean)
+    : null;
+  if (order?.length) return order.join(" → ");
+
+  for (const key of ["model_answer", "answer", "text"]) {
+    const value = answerKey[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return "Not specified";
 }
 
 function buildAnalyticsPdfHtml(input: {
