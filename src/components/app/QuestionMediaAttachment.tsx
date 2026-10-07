@@ -102,7 +102,9 @@ function MediaPicker({
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
-  const kinds = allowedKinds.length ? allowedKinds : ["image", "audio", "video"];
+  const kinds: MediaKind[] = allowedKinds.length
+    ? allowedKinds
+    : ["image", "audio", "video"];
   const [kind, setKind] = useState<MediaKind>(kinds[0]!);
   const [page, setPage] = useState(0);
 
