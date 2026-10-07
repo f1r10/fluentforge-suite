@@ -94,13 +94,6 @@ function VocabularyPage() {
     queryFn: () => getVocabularyEnrichmentStatus(),
     staleTime: 60_000,
   });
-  const dictionaryFallbackForEditor =
-    !!editor &&
-    enrichmentStatus?.dictionaryFallback === true &&
-    (editor.learning_language.toLowerCase() === "en" ||
-      editor.learning_language.toLowerCase().startsWith("en-"));
-  const enrichmentAvailable =
-    enrichmentStatus?.available !== false || dictionaryFallbackForEditor;
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("");
   const [level, setLevel] = useState("");
@@ -114,6 +107,14 @@ function VocabularyPage() {
   const [enrichment, setEnrichment] = useState<
     Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
   >(null);
+
+  const dictionaryFallbackForEditor =
+    !!editor &&
+    enrichmentStatus?.dictionaryFallback === true &&
+    (editor.learning_language.toLowerCase() === "en" ||
+      editor.learning_language.toLowerCase().startsWith("en-"));
+  const enrichmentAvailable =
+    enrichmentStatus?.available !== false || dictionaryFallbackForEditor;
 
   const { data, isFetching } = useQuery({
     queryKey: ["vocabulary", search, language, level, status, topicId, page],
