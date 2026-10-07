@@ -115,6 +115,86 @@ function assertSourceType(filename: string) {
   }
 }
 
+
+type ImportItemValidation =
+  | { state: "ready"; message: null }
+  | { state: "needs_fix"; message: string }
+  | { state: "not_importable"; message: string };
+
+function normalizeImportedQuestion(raw: Record<string, unknown>) {
+  return validateQuestionInput({
+    ...raw,
+    instructions: raw["instructions"] ?? null,
+    scoring: raw["scoring"] ?? { points: 1, partial: false, negative: 0 },
+    normalization:
+      raw["normalization"] ?? {
+        case_sensitive: false,
+        trim_whitespace: true,
+        ignore_punctuation: false,
+        ignore_diacritics: false,
+      },
+    explanation: raw["explanation"] ?? null,
+    teacher_notes: raw["teacher_notes"] ?? null,
+    learning_language: raw["learning_language"] ?? "en",
+    level: raw["level"] ?? null,
+    difficulty: raw["difficulty"] ?? null,
+    grading_mode: raw["grading_mode"] ?? "automatic",
+    status: raw["status"] ?? "draft",
+    reusable_independently: false,
+    topicIds: [],
+    tags: Array.isArray(raw["tags"])
+      ? raw["tags"].filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+    force: true,
+  });
+}
+
+function validationMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return error.issues
+      .slice(0, 4)
+      .map((issue) => {
+        const path = issue.path.length ? issue.path.join(".") : "item";
+        return `${path}: ${issue.message}`;
+      })
+      .join(" · ");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function validateImportItemPayload(
+  itemType: string,
+  payload: unknown,
+): ImportItemValidation {
+  try {
+    if (itemType === "question") {
+      normalizeImportedQuestion(
+        payload && typeof payload === "object"
+          ? (payload as Record<string, unknown>)
+          : {},
+      );
+      return { state: "ready", message: null };
+    }
+    if (itemType === "reading") {
+      readingImportPayloadSchema.parse(payload);
+      return { state: "ready", message: null };
+    }
+    if (itemType === "listening") {
+      listeningImportPayloadSchema.parse(payload);
+      return { state: "ready", message: null };
+    }
+    return {
+      state: "not_importable",
+      message:
+        "This extracted layout/reference item is kept for review but is not imported as a standalone learning item.",
+    };
+  } catch (error) {
+    return { state: "needs_fix", message: validationMessage(error) };
+  }
+}
+
 export const listImportProfiles = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
@@ -570,7 +650,20 @@ export const getDocumentImport = createServerFn({ method: "GET" })
     if (jobResult.error) throw new Error(jobResult.error.message);
     if (itemsResult.error) throw new Error(itemsResult.error.message);
     if (!jobResult.data) throw new Error("Import job not found.");
-    return { job: jobResult.data, items: itemsResult.data ?? [] };
+    return {
+      job: jobResult.data,
+      items: (itemsResult.data ?? []).map((item) => ({
+        ...item,
+        validation: item.created_entity_id
+          ? { state: "imported" as const, message: null }
+          : item.duplicate_of
+            ? {
+                state: "duplicate" as const,
+                message: "This item matches content that already exists.",
+              }
+            : validateImportItemPayload(item.item_type, item.payload),
+      })),
+    };
   });
 
 export const getSourcePreviewUrl = createServerFn({ method: "GET" })
@@ -626,8 +719,34 @@ export const updateImportItem = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const update: Record<string, unknown> = { decision: data.decision };
-    if (data.payload) update.payload = data.payload;
+    const { data: current, error: currentError } = await context.supabase
+      .from("import_items")
+      .select("item_type,payload,duplicate_of,created_entity_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+    if (!current) throw new Error("Import item not found.");
+
+    const payload = data.payload ?? current.payload;
+    if (data.decision === "approved") {
+      if (current.duplicate_of) {
+        throw new Error("This item is a duplicate and cannot be approved.");
+      }
+      if (current.created_entity_id) {
+        throw new Error("This item has already been imported.");
+      }
+      const validation = validateImportItemPayload(current.item_type, payload);
+      if (validation.state !== "ready") {
+        throw new Error(
+          `Cannot approve this item yet: ${validation.message}`,
+        );
+      }
+    }
+
+    const update: Record<string, unknown> = {
+      decision: data.decision,
+      ...(data.payload ? { payload: data.payload } : {}),
+    };
     const { error } = await context.supabase
       .from("import_items")
       .update(update as never)
@@ -642,15 +761,36 @@ export const approveHighConfidenceItems = createServerFn({ method: "POST" })
     z.object({ jobId: z.string().uuid(), threshold: z.number().min(0.5).max(1).default(0.9) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    const { data: candidates, error: candidateError } = await context.supabase
       .from("import_items")
-      .update({ decision: "approved" })
+      .select("id,item_type,payload,duplicate_of,created_entity_id")
       .eq("job_id", data.jobId)
       .eq("decision", "pending")
       .gte("confidence", data.threshold)
       .is("duplicate_of", null);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    if (candidateError) throw new Error(candidateError.message);
+
+    const readyIds = (candidates ?? [])
+      .filter(
+        (item) =>
+          !item.created_entity_id &&
+          validateImportItemPayload(item.item_type, item.payload).state ===
+            "ready",
+      )
+      .map((item) => item.id);
+
+    if (readyIds.length) {
+      const { error } = await context.supabase
+        .from("import_items")
+        .update({ decision: "approved" })
+        .in("id", readyIds);
+      if (error) throw new Error(error.message);
+    }
+
+    return {
+      approved: readyIds.length,
+      needsReview: (candidates?.length ?? 0) - readyIds.length,
+    };
   });
 
 export const commitDocumentImport = createServerFn({ method: "POST" })
@@ -886,33 +1026,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
           ? (raw["import_context"] as Record<string, unknown>)
           : null;
 
-      const validated = validateQuestionInput({
-        ...raw,
-        instructions: raw["instructions"] ?? null,
-        scoring: raw["scoring"] ?? { points: 1, partial: false, negative: 0 },
-        normalization:
-          raw["normalization"] ?? {
-            case_sensitive: false,
-            trim_whitespace: true,
-            ignore_punctuation: false,
-            ignore_diacritics: false,
-          },
-        explanation: raw["explanation"] ?? null,
-        teacher_notes: raw["teacher_notes"] ?? null,
-        learning_language: raw["learning_language"] ?? "en",
-        level: raw["level"] ?? null,
-        difficulty: raw["difficulty"] ?? null,
-        grading_mode: raw["grading_mode"] ?? "automatic",
-        status: raw["status"] ?? "draft",
-        reusable_independently: false,
-        topicIds: [],
-        tags: Array.isArray(raw["tags"])
-          ? raw["tags"].filter(
-              (value): value is string => typeof value === "string",
-            )
-          : [],
-        force: true,
-      });
+      const validated = normalizeImportedQuestion(raw);
 
       const { topicIds: _topics, tags, force: _force, ...fields } =
         validated;
