@@ -819,7 +819,7 @@ export const previewExamPool = createServerFn({ method: "POST" })
       .from("questions")
       .select("id,prompt,question_type,learning_language,level", { count: "exact" })
       .eq("status", "active")
-      .eq("context_kind", "none")
+      .or("context_kind.eq.none,reusable_independently.eq.true")
       .is("deleted_at", null)
       .limit(10);
 
@@ -1254,7 +1254,7 @@ async function poolCandidates(
     .from("questions")
     .select("id")
     .eq("status", "active")
-    .eq("context_kind", "none")
+    .or("context_kind.eq.none,reusable_independently.eq.true")
     .is("deleted_at", null)
     .limit(2_000);
 
