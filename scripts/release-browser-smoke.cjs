@@ -155,10 +155,11 @@ async function gotoHydrated(page, path) {
 
     await page.keyboard.press("Escape");
     await gotoHydrated(page, "/teacher/questions");
+    await page.locator("select").last().selectOption("draft");
     await page
       .getByText("Runtime PDF import works?", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] imported PDF question visible in teacher Question Bank");
+    console.log("[ok] imported PDF question visible as a review-safe draft in teacher Question Bank");
 
     await gotoHydrated(page, "/teacher/catalogs");
     await page.getByRole("button", { name: "Add catalog" }).click();
