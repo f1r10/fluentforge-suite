@@ -182,10 +182,19 @@ async function gotoHydrated(page, path) {
     await page.keyboard.press("Escape");
     await gotoHydrated(page, "/teacher/questions");
     await page.locator("select").last().selectOption("draft");
+    const importedQuestion = page
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::li");
+    await importedQuestion.waitFor({ timeout: 20000 });
+    console.log("[ok] imported PDF question visible as a review-safe draft in teacher Question Bank");
+
+    await importedQuestion.getByRole("checkbox", { name: "select" }).click();
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await page.locator("select").last().selectOption("active");
     await page
       .getByText("Runtime PDF import works?", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] imported PDF question visible as a review-safe draft in teacher Question Bank");
+    console.log("[ok] teacher promoted imported draft question to active");
 
     await gotoHydrated(page, "/teacher/catalogs");
     await page
@@ -447,6 +456,12 @@ async function gotoHydrated(page, path) {
       console.log("[ok] student learning area: " + path);
     }
 
+    await gotoHydrated(studentPage, "/student/questions");
+    await studentPage
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] student can browse the active general Question Bank");
+
     await gotoHydrated(studentPage, "/student/readings");
     await studentPage
       .getByText("Release Reading", { exact: true })
@@ -476,7 +491,7 @@ async function gotoHydrated(page, path) {
 
     await gotoHydrated(studentPage, "/student/practice");
     const practiceCountInputs = studentPage.locator('input[type="number"]');
-    await practiceCountInputs.nth(0).fill("0");
+    await practiceCountInputs.nth(0).fill("1");
     await practiceCountInputs.nth(1).fill("1");
     await practiceCountInputs.nth(2).fill("1");
     const sessionModeField = studentPage
@@ -487,6 +502,9 @@ async function gotoHydrated(page, path) {
       .getByRole("button", { name: "Generate practice" })
       .click();
     await studentPage
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await studentPage
       .getByText("Release Reading", { exact: true })
       .waitFor({ timeout: 30000 });
     await studentPage
@@ -495,7 +513,7 @@ async function gotoHydrated(page, path) {
     await studentPage
       .getByText(/Time remaining:/)
       .waitFor({ timeout: 20000 });
-    console.log("[ok] student built a timed mixed mock exam from reading and listening");
+    console.log("[ok] student built a timed mixed mock exam from Question Bank, reading and listening");
 
     await studentContext.close();
     console.log("FluentForge release browser acceptance passed.");
