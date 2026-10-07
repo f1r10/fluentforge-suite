@@ -135,6 +135,25 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 30000 });
 
     const importDialog = page.getByRole("dialog");
+    const previewFrame = importDialog.locator("iframe");
+    await previewFrame.waitFor({ timeout: 20000 });
+    const previewSrc = await previewFrame.getAttribute("src");
+    assert(previewSrc, "PDF source preview URL was not created.");
+    const previewResponse = await page.request.get(
+      new URL(previewSrc, baseUrl).toString(),
+    );
+    assert(
+      previewResponse.ok(),
+      "PDF source preview could not be downloaded.",
+    );
+    const previewBytes = await previewResponse.body();
+    const expectedPdf = minimalPdfBuffer();
+    assert(
+      previewBytes.equals(expectedPdf),
+      `PDF source bytes changed during upload/storage: expected ${expectedPdf.length}, received ${previewBytes.length}.`,
+    );
+    console.log("[ok] PDF bytes round-trip unchanged through runtime storage");
+
     await importDialog
       .getByText(/^(needs_review|completed)$/)
       .waitFor({ timeout: 60000 });
