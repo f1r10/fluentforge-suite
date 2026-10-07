@@ -467,7 +467,7 @@ async function gotoHydrated(page, path) {
       .getByText("Release Reading", { exact: true })
       .click();
     await studentPage
-      .getByRole("heading", { name: "Release Reading" })
+      .getByRole("heading", { name: "Release Reading", exact: true })
       .waitFor({ timeout: 20000 });
     await studentPage
       .getByText("Explain what students can practise in FluentForge.", {
@@ -481,7 +481,7 @@ async function gotoHydrated(page, path) {
       .getByText("Release Listening", { exact: true })
       .click();
     await studentPage
-      .getByRole("heading", { name: "Release Listening" })
+      .getByRole("heading", { name: "Release Listening", exact: true })
       .waitFor({ timeout: 20000 });
     await studentPage
       .getByText("The listening activity is available.", { exact: true })
