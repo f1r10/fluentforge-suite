@@ -463,7 +463,13 @@ async function gotoHydrated(page, path) {
     await page
       .getByRole("button", { name: /^(New listening|Add listening)$/ })
       .click();
-    const listeningDialog = page.getByRole("dialog").last();
+    const listeningDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: /^(New listening|Add listening)$/,
+        }),
+      });
     await listeningDialog
       .locator('input[required]')
       .first()
