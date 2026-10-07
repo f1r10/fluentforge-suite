@@ -412,13 +412,15 @@ async function gotoHydrated(page, path) {
           exact: true,
         }),
       });
-    const diagramRow = questionMediaPicker
-      .getByText("release-diagram.png", { exact: true })
-      .locator("xpath=ancestor::li");
-    await diagramRow.getByRole("button", { name: "Select", exact: true }).click();
+    await questionMediaPicker.locator('input[type="file"]').setInputFiles({
+      name: "inline-diagram.png",
+      mimeType: "image/png",
+      buffer: minimalPngBuffer(),
+    });
     await readingQuestionDialog
-      .getByText("release-diagram.png", { exact: true })
-      .waitFor({ timeout: 20000 });
+      .getByText("inline-diagram.png", { exact: true })
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] question media uploaded and selected without leaving the editor");
     await readingQuestionDialog
       .getByRole("button", { name: "Save", exact: true })
       .click();
@@ -467,7 +469,7 @@ async function gotoHydrated(page, path) {
       .getByRole("dialog")
       .filter({
         has: page.getByRole("heading", {
-          name: /^(New listening|Add listening)$/,
+          name: /^(New listening|Add listening|Edit listening)$/,
         }),
       });
     await listeningDialog
@@ -478,14 +480,20 @@ async function gotoHydrated(page, path) {
     await listeningDialog
       .getByRole("button", { name: "Choose media" })
       .click();
-    const mediaPicker = page.getByRole("dialog").last();
-    const mediaRow = mediaPicker
-      .getByText("release-listening.wav", { exact: true })
-      .locator("xpath=ancestor::li");
-    await mediaRow.getByRole("button", { name: "Select" }).click();
+    const mediaPicker = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "Choose media", exact: true }),
+      });
+    await mediaPicker.locator('input[type="file"]').setInputFiles({
+      name: "inline-listening.wav",
+      mimeType: "audio/wav",
+      buffer: silentWavBuffer(),
+    });
     await listeningDialog
-      .getByText("release-listening.wav", { exact: true })
-      .waitFor({ timeout: 20000 });
+      .getByText("inline-listening.wav", { exact: true })
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] Listening media uploaded and selected without leaving the editor");
 
     const listeningAdvanced = listeningDialog.locator("details > summary").first();
     await listeningAdvanced.click();
