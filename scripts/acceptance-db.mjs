@@ -449,17 +449,16 @@ async function verifyPerformance() {
     const standaloneIds = new Set(
       selectedStandalone.map((row) => row.question_id),
     );
-    if (!standaloneIds.has(reusableContextQuestion.id)) {
+    if (
+      standaloneIds.has(reusableContextQuestion.id) ||
+      standaloneIds.has(boundContextQuestion.id)
+    ) {
       fail(
-        "Self-practice selector excluded a contextual question explicitly marked reusable.",
-      );
-    } else if (standaloneIds.has(boundContextQuestion.id)) {
-      fail(
-        "Self-practice selector included a contextual question that was not marked reusable.",
+        "Self-practice selector included a reading/listening contextual question outside its parent activity.",
       );
     } else {
       pass(
-        "Self-practice selector honors reusable_independently for contextual questions",
+        "Self-practice selector keeps all contextual questions bound to their parent activity",
       );
     }
 
