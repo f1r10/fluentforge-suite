@@ -245,6 +245,13 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
     return { id };
   });
 
+export const getVocabularyEnrichmentStatus = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async () => {
+    const { getAiProviderStatus } = await import("./ai.server");
+    return getAiProviderStatus();
+  });
+
 export const suggestVocabularyEnrichmentForEditor = createServerFn({
   method: "POST",
 })
@@ -309,18 +316,22 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
-      const { notifyTeacher } = await import("./notifications.functions");
-      await notifyTeacher(admin, {
-        kind: "ai_error",
-        title: "Vocabulary enrichment failed",
-        body: message,
-        link: "/teacher/vocabulary",
-        data: {
-          word: data.word,
-          learning_language: data.learningLanguage,
-        },
-        dedupeKey: `vocabulary-ai-error:${data.word.toLowerCase()}:${Date.now()}`,
-      });
+      try {
+        const { notifyTeacher } = await import("./notifications.functions");
+        await notifyTeacher(admin, {
+          kind: "ai_error",
+          title: "Vocabulary enrichment failed",
+          body: message,
+          link: "/teacher/vocabulary",
+          data: {
+            word: data.word,
+            learning_language: data.learningLanguage,
+          },
+          dedupeKey: `vocabulary-ai-error:${data.word.toLowerCase()}:${Date.now()}`,
+        });
+      } catch {
+        // Notification delivery must never replace the original AI/provider error.
+      }
       throw error;
     }
   });
