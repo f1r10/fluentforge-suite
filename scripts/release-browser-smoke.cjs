@@ -298,7 +298,10 @@ async function gotoHydrated(page, path) {
     await assignmentRow
       .getByRole("button", { name: "Assigned", exact: true })
       .waitFor({ timeout: 20000 });
-    await assignmentDialog.getByRole("button", { name: "Close", exact: true }).click();
+    await assignmentDialog
+      .getByRole("button", { name: "Close", exact: true })
+      .first()
+      .click();
     await studentAssignmentPanel
       .getByText(student.username, { exact: true })
       .waitFor({ timeout: 20000 });
