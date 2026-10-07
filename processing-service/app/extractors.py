@@ -344,6 +344,30 @@ def detect_candidates(
         page_number = page.get("page")
         question_crops = _question_crop_map(page)
 
+        if expected_content == "vocabulary":
+            table_items: list[dict[str, Any]] = []
+            for table in page.get("tables") or []:
+                table_items.extend(
+                    _vocabulary_from_rows(
+                        table.get("rows") or [],
+                        page=page_number,
+                        sheet=None,
+                        profile=profile,
+                        crop=table.get("crop"),
+                    )
+                )
+            if table_items:
+                candidates.extend(table_items)
+            else:
+                candidates.extend(
+                    _vocabulary_from_text(
+                        str(page.get("text") or ""),
+                        page=page_number,
+                        profile=profile,
+                    )
+                )
+            continue
+
         if expected_content == "listenings":
             listening_groups = _listening_task_groups(
                 page,
@@ -468,6 +492,17 @@ def detect_candidates(
             )
 
     for sheet in extraction.sheets:
+        if expected_content == "vocabulary":
+            candidates.extend(
+                _vocabulary_from_rows(
+                    sheet.get("rows") or [],
+                    page=None,
+                    sheet=str(sheet.get("sheet") or ""),
+                    profile=profile,
+                    crop=None,
+                )
+            )
+            continue
         if spreadsheet_mapping:
             include_sheets = spreadsheet_mapping.get("include_sheets") or []
             if include_sheets and str(sheet.get("sheet") or "") not in include_sheets:
@@ -490,6 +525,268 @@ def detect_candidates(
         )
 
     return candidates
+
+
+
+VOCAB_WORD_HEADERS = {
+    "word",
+    "term",
+    "vocabulary",
+    "vocab",
+    "soz",
+    "söz",
+    "kelime",
+    "слово",
+}
+VOCAB_DEFINITION_HEADERS = {
+    "definition",
+    "meaning",
+    "izah",
+    "açıqlama",
+    "aciklama",
+    "значение",
+}
+VOCAB_TRANSLATION_HEADERS = {
+    "translation",
+    "tercume",
+    "tərcümə",
+    "çeviri",
+    "перевод",
+}
+VOCAB_TRANSLATION_LANGUAGE_HEADERS = {
+    "translation_language",
+    "target_language",
+    "translation_lang",
+}
+VOCAB_POS_HEADERS = {"part_of_speech", "pos", "word_type"}
+VOCAB_IPA_HEADERS = {"ipa", "phonetic", "pronunciation"}
+VOCAB_EXAMPLE_HEADERS = {"example", "example_sentence", "sentence"}
+VOCAB_EXAMPLE_TRANSLATION_HEADERS = {
+    "example_translation",
+    "sentence_translation",
+}
+VOCAB_LEVEL_HEADERS = {"level", "cefr"}
+VOCAB_TAG_HEADERS = {"tags", "labels"}
+VOCAB_SYNONYM_HEADERS = {"synonyms", "synonym"}
+VOCAB_ANTONYM_HEADERS = {"antonyms", "antonym"}
+VOCAB_NOTES_HEADERS = {"notes", "note"}
+
+
+def _vocabulary_defaults(profile: dict[str, Any] | None) -> dict[str, Any]:
+    profile = profile or {}
+    learning_language = str(profile.get("learning_language") or "en").strip().lower()
+    if not re.fullmatch(r"[a-z]{2,10}", learning_language):
+        learning_language = "en"
+    level = str(profile.get("level") or "").strip() or None
+    status = str(profile.get("status") or "draft").strip().lower()
+    if status not in {"draft", "active"}:
+        status = "draft"
+    return {
+        "learning_language": learning_language,
+        "level": level,
+        "status": status,
+    }
+
+
+def _split_vocab_values(value: str) -> list[str]:
+    return [
+        part.strip()
+        for part in re.split(r"\s*[|;]\s*", value)
+        if part.strip()
+    ]
+
+
+def _vocabulary_from_text(
+    text: str,
+    *,
+    page: int | None,
+    profile: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    defaults = _vocabulary_defaults(profile)
+    out: list[dict[str, Any]] = []
+
+    for raw_line in text.splitlines():
+        line = re.sub(r"^\s*(?:[-•*]|\d{1,4}[\.)])\s*", "", raw_line).strip()
+        if not line or len(line) > 2_500:
+            continue
+
+        parts = re.split(r"\t+|\s+[—–-]\s+", line, maxsplit=1)
+        if len(parts) != 2:
+            continue
+
+        word = parts[0].strip()
+        meaning = parts[1].strip()
+        if (
+            not word
+            or not meaning
+            or len(word) > 500
+            or len(word.split()) > 8
+            or len(meaning) > 10_000
+        ):
+            continue
+
+        out.append(
+            {
+                "item_type": "vocabulary",
+                "page": page,
+                "sheet": None,
+                "crop": None,
+                "payload": {
+                    "word": word,
+                    "learning_language": defaults["learning_language"],
+                    "definition": meaning,
+                    "ipa": None,
+                    "part_of_speech": None,
+                    "synonyms": [],
+                    "antonyms": [],
+                    "level": defaults["level"],
+                    "notes": None,
+                    "status": defaults["status"],
+                    "translations": [],
+                    "examples": [],
+                    "tags": [],
+                },
+                "confidence": 0.72,
+            }
+        )
+
+    return out
+
+
+def _vocabulary_from_rows(
+    rows: list[list[Any]],
+    *,
+    page: int | None,
+    sheet: str | None,
+    profile: dict[str, Any] | None,
+    crop: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    clean_rows = [
+        [str(value or "").strip() for value in row]
+        for row in rows
+        if any(str(value or "").strip() for value in row)
+    ]
+    if not clean_rows:
+        return []
+
+    defaults = _vocabulary_defaults(profile)
+    headers = [_normalize_header(value) for value in clean_rows[0]]
+    header_set = set(headers)
+    has_named_header = bool(header_set & VOCAB_WORD_HEADERS)
+
+    def find(names: set[str]) -> int | None:
+        for index, header in enumerate(headers):
+            if header in names:
+                return index
+        return None
+
+    word_idx = find(VOCAB_WORD_HEADERS) if has_named_header else 0
+    if word_idx is None:
+        return []
+
+    definition_idx = find(VOCAB_DEFINITION_HEADERS)
+    translation_idx = find(VOCAB_TRANSLATION_HEADERS)
+    translation_language_idx = find(VOCAB_TRANSLATION_LANGUAGE_HEADERS)
+    ipa_idx = find(VOCAB_IPA_HEADERS)
+    pos_idx = find(VOCAB_POS_HEADERS)
+    example_idx = find(VOCAB_EXAMPLE_HEADERS)
+    example_translation_idx = find(VOCAB_EXAMPLE_TRANSLATION_HEADERS)
+    level_idx = find(VOCAB_LEVEL_HEADERS)
+    tags_idx = find(VOCAB_TAG_HEADERS)
+    synonyms_idx = find(VOCAB_SYNONYM_HEADERS)
+    antonyms_idx = find(VOCAB_ANTONYM_HEADERS)
+    notes_idx = find(VOCAB_NOTES_HEADERS)
+
+    explicit_translation_columns: list[tuple[int, str]] = []
+    if has_named_header:
+        for index, header in enumerate(headers):
+            match = re.fullmatch(r"(?:translation|tercume|tərcümə|çeviri)_([a-z]{2,10})", header)
+            if match:
+                explicit_translation_columns.append((index, match.group(1)))
+            elif re.fullmatch(r"[a-z]{2,3}", header) and index != word_idx:
+                explicit_translation_columns.append((index, header))
+
+    start_index = 1 if has_named_header else 0
+
+    def cell(row: list[str], index: int | None) -> str:
+        if index is None or index >= len(row):
+            return ""
+        return row[index].strip()
+
+    out: list[dict[str, Any]] = []
+    for row_number, row in enumerate(clean_rows[start_index:], start=start_index + 1):
+        word = cell(row, word_idx)
+        if not word or len(word) > 500:
+            continue
+
+        definition = cell(row, definition_idx)
+        translations: list[dict[str, str]] = []
+
+        translation_value = cell(row, translation_idx)
+        translation_language = cell(row, translation_language_idx).lower()
+        if translation_value and re.fullmatch(r"[a-z]{2,10}", translation_language):
+            translations.append(
+                {"language": translation_language, "value": translation_value}
+            )
+        elif translation_value and not definition:
+            # Preserve an unlabeled second-language value without inventing its language.
+            definition = translation_value
+
+        for index, language in explicit_translation_columns:
+            value = cell(row, index)
+            if value and language != defaults["learning_language"]:
+                translations.append({"language": language, "value": value})
+
+        if (
+            not has_named_header
+            and len(row) > 1
+            and not definition
+            and not translations
+        ):
+            definition = row[1].strip()
+
+        example = cell(row, example_idx)
+        examples = (
+            [
+                {
+                    "sentence": example,
+                    "translation": cell(row, example_translation_idx) or None,
+                }
+            ]
+            if example
+            else []
+        )
+
+        out.append(
+            {
+                "item_type": "vocabulary",
+                "page": page,
+                "sheet": sheet,
+                "crop": crop,
+                "payload": {
+                    "word": word,
+                    "learning_language": defaults["learning_language"],
+                    "definition": definition or None,
+                    "ipa": cell(row, ipa_idx) or None,
+                    "part_of_speech": cell(row, pos_idx) or None,
+                    "synonyms": _split_vocab_values(cell(row, synonyms_idx)),
+                    "antonyms": _split_vocab_values(cell(row, antonyms_idx)),
+                    "level": cell(row, level_idx) or defaults["level"],
+                    "notes": cell(row, notes_idx) or None,
+                    "status": defaults["status"],
+                    "translations": translations,
+                    "examples": examples,
+                    "tags": _split_vocab_values(cell(row, tags_idx)),
+                    "import_mapping": {
+                        "row": row_number,
+                        "sheet": sheet,
+                    },
+                },
+                "confidence": 0.95 if has_named_header else 0.78,
+            }
+        )
+
+    return out
 
 
 def _page_layout_elements(page: dict[str, Any]) -> list[dict[str, Any]]:
