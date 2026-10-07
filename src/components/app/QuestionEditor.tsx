@@ -21,8 +21,9 @@ type Pair = { left: string; right: string };
 type Form = {
   question_type: string; prompt: string; instructions: string; explanation: string; teacher_notes: string;
   level: string; learning_language: string; status: "active" | "draft" | "archived";
+  difficulty: number | null; reusable_independently: boolean;
   grading_mode: "automatic" | "manual" | "ai_assisted"; points: number; partial: boolean; negative: number;
-  case_sensitive: boolean; ignore_punctuation: boolean; ignore_diacritics: boolean;
+  case_sensitive: boolean; trim_whitespace: boolean; ignore_punctuation: boolean; ignore_diacritics: boolean;
   options: Opt[]; correct: string[]; blanks: string[]; pairs: Pair[]; order: string[]; model_answer: string;
   media_id: string; media_label: string; labels: SpatialLabel[];
   topicIds: string[]; tags: string;
@@ -34,8 +35,9 @@ const sel = "h-9 w-full rounded-md border border-input bg-background px-2 text-s
 function empty(type = "single_choice"): Form {
   return {
     question_type: type, prompt: "", instructions: "", explanation: "", teacher_notes: "", level: "", learning_language: "", status: "active",
+    difficulty: null, reusable_independently: false,
     grading_mode: TYPE_BY_ID[type]?.defaultGrading ?? "automatic", points: 1, partial: false, negative: 0,
-    case_sensitive: false, ignore_punctuation: false, ignore_diacritics: false,
+    case_sensitive: false, trim_whitespace: true, ignore_punctuation: false, ignore_diacritics: false,
     options: [{ id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }], correct: [], blanks: [""],
     pairs: [{ left: "", right: "" }, { left: "", right: "" }], order: ["", "", ""], model_answer: "",
     media_id: "", media_label: "", labels: [], topicIds: [], tags: "",
@@ -50,9 +52,14 @@ export function fromQuestion(q: QuestionInput & { topicIds?: string[]; tags?: st
   const n = (q.normalization ?? {}) as Record<string, boolean>;
   return {
     ...f, prompt: q.prompt ?? "", instructions: q.instructions ?? "", explanation: q.explanation ?? "", teacher_notes: q.teacher_notes ?? "",
-    level: q.level ?? "", learning_language: q.learning_language ?? "", status: q.status ?? "active", grading_mode: q.grading_mode ?? "automatic",
+    level: q.level ?? "", learning_language: q.learning_language ?? "", status: q.status ?? "active",
+    difficulty: q.difficulty ?? null,
+    reusable_independently: q.reusable_independently ?? false,
+    grading_mode: q.grading_mode ?? "automatic",
     points: Number(s["points"] ?? 1), partial: !!s["partial"], negative: Number(s["negative"] ?? 0),
-    case_sensitive: !!n["case_sensitive"], ignore_punctuation: !!n["ignore_punctuation"], ignore_diacritics: !!n["ignore_diacritics"],
+    case_sensitive: !!n["case_sensitive"],
+    trim_whitespace: n["trim_whitespace"] !== false,
+    ignore_punctuation: !!n["ignore_punctuation"], ignore_diacritics: !!n["ignore_diacritics"],
     options: (p["options"] as Opt[]) ?? f.options, correct: (k["correct"] as string[]) ?? [],
     blanks: ((k["blanks"] as string[][]) ?? [[]]).map((b) => b.join(" | ")),
     pairs: (k["pairs"] as Pair[]) ?? f.pairs, order: (k["order"] as string[]) ?? f.order, model_answer: String(k["model_answer"] ?? ""),
@@ -114,8 +121,10 @@ function toInput(f: Form, id?: string): QuestionInput {
   return {
     id, question_type: f.question_type, prompt: f.prompt, instructions: f.instructions || null, payload, answer_key,
     scoring: { points: f.points, partial: f.partial, negative: f.negative || 0 },
-    normalization: { case_sensitive: f.case_sensitive, ignore_punctuation: f.ignore_punctuation, ignore_diacritics: f.ignore_diacritics },
+    normalization: { case_sensitive: f.case_sensitive, trim_whitespace: f.trim_whitespace, ignore_punctuation: f.ignore_punctuation, ignore_diacritics: f.ignore_diacritics },
     explanation: f.explanation || null, teacher_notes: f.teacher_notes || null, level: f.level || null, learning_language: f.learning_language || null,
+    difficulty: f.difficulty,
+    reusable_independently: f.reusable_independently,
     grading_mode: def.editor === "open" ? f.grading_mode : "automatic", status: f.status,
     topicIds: f.topicIds, tags: f.tags.split(",").map((x) => x.trim()).filter(Boolean),
   };
@@ -299,6 +308,7 @@ export function QuestionEditor({
             <Button type="button" variant="outline" size="sm" onClick={() => set({ blanks: [...f.blanks, ""] })}><Plus className="h-4 w-4" />{t("add")}</Button>
             <div className="flex flex-wrap gap-4 pt-2 text-sm">
               <label className="flex items-center gap-2"><Checkbox checked={f.case_sensitive} onCheckedChange={(c) => set({ case_sensitive: !!c })} />{t("case_sensitive")}</label>
+              <label className="flex items-center gap-2"><Checkbox checked={f.trim_whitespace} onCheckedChange={(c) => set({ trim_whitespace: !!c })} />{t("trim_whitespace")}</label>
               <label className="flex items-center gap-2"><Checkbox checked={f.ignore_punctuation} onCheckedChange={(c) => set({ ignore_punctuation: !!c })} />{t("ignore_punctuation")}</label>
               <label className="flex items-center gap-2"><Checkbox checked={f.ignore_diacritics} onCheckedChange={(c) => set({ ignore_diacritics: !!c })} />{t("ignore_diacritics")}</label>
             </div>
@@ -363,9 +373,20 @@ export function QuestionEditor({
       </section>
 
       {/* Scoring & metadata */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-5">
         <div className="space-y-2"><Label>{t("points")}</Label><Input type="number" min={0} step={0.5} value={f.points} onChange={(e) => set({ points: Number(e.target.value) })} /></div>
         <div className="space-y-2"><Label>{t("negative_marking")}</Label><Input type="number" min={0} step={0.25} value={f.negative} onChange={(e) => set({ negative: Number(e.target.value) })} /></div>
+        <div className="space-y-2">
+          <Label>{t("difficulty")}</Label>
+          <select
+            value={f.difficulty ?? ""}
+            onChange={(e) => set({ difficulty: e.target.value ? Number(e.target.value) : null })}
+            className={sel}
+          >
+            <option value="">—</option>
+            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </div>
         <div className="space-y-2">
           <Label>{t("level")}</Label>
           <select value={f.level} onChange={(e) => set({ level: e.target.value })} className={sel}><option value="">—</option>{LEVELS.map((l) => <option key={l}>{l}</option>)}</select>
@@ -393,6 +414,18 @@ export function QuestionEditor({
       {(def.multiple || def.editor === "text" || def.editor === "matching" || def.editor === "ordering") && (
         <label className="flex items-center gap-2 text-sm"><Checkbox checked={f.partial} onCheckedChange={(c) => set({ partial: !!c })} />{t("partial_scoring")}</label>
       )}
+
+      <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+        <Checkbox
+          className="mt-0.5"
+          checked={f.reusable_independently}
+          onCheckedChange={(checked) => set({ reusable_independently: !!checked })}
+        />
+        <span>
+          <span className="block font-medium">{t("reusable_independently")}</span>
+          <span className="block text-xs text-muted-foreground">{t("independent_reuse_hint")}</span>
+        </span>
+      </label>
 
       <div className="space-y-2">
         <Label>{t("topics")}</Label>
