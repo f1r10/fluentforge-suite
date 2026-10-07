@@ -363,6 +363,7 @@ function ListeningsPage() {
         await deleteContextQuestionSet({
           data: { kind: "listening", id: set.id },
         });
+        await qc.invalidateQueries({ queryKey: ["questions"] });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : String(error));
         return;
