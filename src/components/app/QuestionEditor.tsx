@@ -426,18 +426,6 @@ export function QuestionEditor({
         <label className="flex items-center gap-2 text-sm"><Checkbox checked={f.partial} onCheckedChange={(c) => set({ partial: !!c })} />{t("partial_scoring")}</label>
       )}
 
-      <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
-        <Checkbox
-          className="mt-0.5"
-          checked={f.reusable_independently}
-          onCheckedChange={(checked) => set({ reusable_independently: !!checked })}
-        />
-        <span>
-          <span className="block font-medium">{t("reusable_independently")}</span>
-          <span className="block text-xs text-muted-foreground">{t("independent_reuse_hint")}</span>
-        </span>
-      </label>
-
       <div className="space-y-2">
         <Label>{t("topics")}</Label>
         <TopicPicker topics={topics} value={f.topicIds} onChange={(v) => set({ topicIds: v })} />
