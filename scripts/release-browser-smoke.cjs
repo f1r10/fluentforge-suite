@@ -18,6 +18,35 @@ function assert(value, message) {
   if (!value) throw new Error(message);
 }
 
+function silentWavBuffer(durationMs = 400) {
+  const sampleRate = 8_000;
+  const channels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const sampleCount = Math.max(
+    1,
+    Math.floor((sampleRate * durationMs) / 1_000),
+  );
+  const dataSize = sampleCount * channels * bytesPerSample;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+  buffer.writeUInt16LE(channels * bytesPerSample, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataSize, 40);
+
+  return buffer;
+}
+
 function minimalPdfBuffer() {
   const stream =
     "BT /F1 12 Tf 72 720 Td (1. Runtime PDF import works?) Tj " +
@@ -176,8 +205,8 @@ async function gotoHydrated(page, path) {
     const contentDialog = page.getByRole("dialog");
     const importedQuestionRow = contentDialog
       .getByText("Runtime PDF import works?", { exact: true })
-      .locator("..");
-    await importedQuestionRow.locator('button[role="checkbox"]').click();
+      .locator("xpath=ancestor::li");
+    await importedQuestionRow.getByRole("checkbox").click();
     await contentDialog
       .getByRole("button", { name: /^Add \(1\)$/ })
       .click();
