@@ -846,7 +846,7 @@ export const unlinkQuestionFromContext = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: question, error: questionError } = await context.supabase
       .from("questions")
-      .select("id,status,reusable_independently")
+      .select("id,status")
       .eq("id", data.questionId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -860,7 +860,7 @@ export const unlinkQuestionFromContext = createServerFn({ method: "POST" })
         reading_question_set_id: null,
         listening_question_set_id: null,
         context_sort: 0,
-        ...(!question.reusable_independently && question.status === "active"
+        ...(question.status === "active"
           ? { status: "draft" as const }
           : {}),
       })
@@ -892,6 +892,7 @@ export const searchContextQuestionCandidates = createServerFn({ method: "GET" })
       )
       .is("deleted_at", null)
       .neq("status", "archived")
+      .eq("context_kind", "none")
       .order("updated_at", { ascending: false })
       .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
 
@@ -977,7 +978,7 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
     const { data: linkedQuestions, error: linkedQuestionsError } =
       await context.supabase
         .from("questions")
-        .select("id,status,reusable_independently")
+        .select("id,status")
         .eq(column, data.id)
         .is("deleted_at", null);
     if (linkedQuestionsError) {
@@ -985,10 +986,7 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
     }
 
     const idsToDraft = (linkedQuestions ?? [])
-      .filter(
-        (question) =>
-          !question.reusable_independently && question.status === "active",
-      )
+      .filter((question) => question.status === "active")
       .map((question) => question.id);
     if (idsToDraft.length) {
       const { error: draftError } = await context.supabase
