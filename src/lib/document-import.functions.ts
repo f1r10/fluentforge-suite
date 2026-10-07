@@ -459,7 +459,31 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
     const mappedStatus =
       state.status === "not_implemented" ? "failed" : state.status;
 
-    await admin
+    if (
+      (mappedStatus === "needs_review" || mappedStatus === "completed") &&
+      state.items
+    ) {
+      const { count, error: countError } = await admin
+        .from("import_items")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", job.id);
+      if (countError) throw new Error(countError.message);
+
+      if (!count) {
+        const prepared = await prepareItems(admin, job.id, state.items, sha256);
+        if (prepared.length) {
+          const { error } = await admin
+            .from("import_items")
+            .insert(prepared as never);
+          if (error) throw new Error(error.message);
+        }
+      }
+    }
+
+    // Persist the terminal job state only after extracted review items are
+    // durable. Otherwise a transient item-write failure would leave a
+    // needs_review/completed job that future syncs refuse to retry.
+    const { error: updateError } = await admin
       .from("import_jobs")
       .update({
         status: mappedStatus,
@@ -470,6 +494,7 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
         updated_at: new Date().toISOString(),
       })
       .eq("id", job.id);
+    if (updateError) throw new Error(updateError.message);
 
     if (
       mappedStatus === "needs_review" ||
@@ -504,24 +529,6 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
         },
         dedupeKey: `import-job:${job.id}:${mappedStatus}`,
       });
-    }
-
-    if (
-      (mappedStatus === "needs_review" || mappedStatus === "completed") &&
-      state.items
-    ) {
-      const { count } = await admin
-        .from("import_items")
-        .select("id", { count: "exact", head: true })
-        .eq("job_id", job.id);
-
-      if (!count) {
-        const prepared = await prepareItems(admin, job.id, state.items, sha256);
-        if (prepared.length) {
-          const { error } = await admin.from("import_items").insert(prepared as never);
-          if (error) throw new Error(error.message);
-        }
-      }
     }
 
     return { status: mappedStatus };
