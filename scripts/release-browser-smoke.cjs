@@ -167,8 +167,8 @@ async function gotoHydrated(page, path) {
     await importDialog
       .getByRole("button", { name: "Import approved" })
       .click();
-    await page
-      .getByText(/Imported:\s*1/)
+    await importDialog
+      .getByText("completed", { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] PDF review item committed into the Question Bank");
 
