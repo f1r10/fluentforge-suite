@@ -800,7 +800,13 @@ function ReviewWorkspace({
   const { t } = useI18n();
   const [filter, setFilter] = useState<
     "all" | "pending" | "needs_fix" | "ready" | "rejected"
-  >("all");
+  >(() => {
+    if (data.items.some((item) => item.decision === "pending")) return "pending";
+    if (data.items.some((item) => item.validation.state === "needs_fix")) {
+      return "needs_fix";
+    }
+    return "all";
+  });
   const pending = data.items.filter((item) => item.decision === "pending").length;
   const approved = data.items.filter((item) => item.decision === "approved").length;
   const duplicates = data.items.filter((item) => item.duplicate_of).length;
