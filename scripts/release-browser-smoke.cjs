@@ -213,6 +213,46 @@ async function gotoHydrated(page, path) {
     await page.keyboard.press("Escape");
     console.log("[ok] teacher previewed Question Bank item with student renderer");
 
+    await gotoHydrated(page, "/teacher/sources");
+    await page
+      .getByRole("combobox", { name: "Import target", exact: true })
+      .selectOption("vocabulary");
+    const vocabularySourceInput = page.locator('input[type="file"]');
+    await vocabularySourceInput.setInputFiles({
+      name: "release-vocabulary.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(
+        "word,definition,part_of_speech,az,level,tags\n" +
+          "releaseword,a word imported during release testing,noun,sınaq sözü,A1,release|import\n",
+        "utf8",
+      ),
+    });
+
+    const vocabularyImportDialog = page.getByRole("dialog");
+    await vocabularyImportDialog
+      .getByText(/^(needs_review|completed)$/)
+      .waitFor({ timeout: 60000 });
+    await vocabularyImportDialog
+      .getByText("releaseword", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await vocabularyImportDialog
+      .getByRole("button", { name: "Approve", exact: true })
+      .click();
+    await vocabularyImportDialog
+      .getByRole("button", { name: /Import approved/ })
+      .click();
+    await vocabularyImportDialog
+      .getByText("completed", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+
+    await gotoHydrated(page, "/teacher/vocabulary");
+    await page.locator("select").last().selectOption("draft");
+    await page
+      .getByText("releaseword", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] CSV vocabulary import reached Vocabulary Bank as review-safe draft");
+
     await gotoHydrated(page, "/teacher/catalogs");
     await page
       .getByRole("button", { name: /^(New catalog|Add catalog)$/ })
