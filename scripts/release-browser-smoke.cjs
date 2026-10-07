@@ -18,6 +18,44 @@ function assert(value, message) {
   if (!value) throw new Error(message);
 }
 
+function minimalPdfBuffer() {
+  const stream =
+    "BT /F1 12 Tf 72 720 Td (1. Runtime PDF import works?) Tj " +
+    "0 -18 Td (A. Yes   B. No) Tj 0 -18 Td (Answer: 1 A) Tj ET";
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
+      "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+    "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    "5 0 obj\n<< /Length " +
+      Buffer.byteLength(stream, "utf8") +
+      " >>\nstream\n" +
+      stream +
+      "\nendstream\nendobj\n",
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += object;
+  }
+
+  const xrefOffset = Buffer.byteLength(pdf, "utf8");
+  pdf += "xref\n0 6\n";
+  pdf += "0000000000 65535 f \n";
+  for (let index = 1; index <= 5; index += 1) {
+    pdf += String(offsets[index]).padStart(10, "0") + " 00000 n \n";
+  }
+  pdf +=
+    "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" +
+    xrefOffset +
+    "\n%%EOF\n";
+
+  return Buffer.from(pdf, "utf8");
+}
+
 async function useEnglish(page) {
   await page.addInitScript(() => {
     localStorage.setItem("ui_lang", "en");
@@ -89,18 +127,24 @@ async function gotoHydrated(page, path) {
     await gotoHydrated(page, "/teacher/sources");
     const sourceInput = page.locator('input[type="file"]');
     await sourceInput.setInputFiles({
-      name: "release-import-smoke.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from(
-        "1. Runtime source import works?\nA. Yes\nB. No\nAnswer: 1 A\n",
-        "utf8",
-      ),
+      name: "release-import-smoke.pdf",
+      mimeType: "application/pdf",
+      buffer: minimalPdfBuffer(),
     });
     await page
-      .getByText("release-import-smoke.txt", { exact: true })
+      .getByText("release-import-smoke.pdf", { exact: true })
       .first()
       .waitFor({ timeout: 30000 });
-    console.log("[ok] teacher source upload/import pipeline accepted a document");
+
+    const importDialog = page.getByRole("dialog");
+    await importDialog
+      .getByText(/^(needs_review|completed)$/)
+      .waitFor({ timeout: 60000 });
+    await importDialog
+      .getByText("question", { exact: true })
+      .first()
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] real PDF upload, storage finalize, extraction and review pipeline");
 
     await teacherContext.close();
 
