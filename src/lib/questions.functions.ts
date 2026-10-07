@@ -66,6 +66,32 @@ export const getQuestion = createServerFn({ method: "GET" })
     };
   });
 
+export const getQuestionStudentPreview = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const { data: row, error } = await admin
+      .from("questions")
+      .select(
+        "id,question_type,prompt,instructions,payload,answer_key,scoring,grading_mode,current_version,learning_language,level",
+      )
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Question not found.");
+
+    const { hydrateQuestionMedia } = await import("./media.server");
+    const { publicPracticeQuestion } = await import(
+      "./student-library.functions"
+    );
+    const [hydrated] = await hydrateQuestionMedia(admin, [row], 60 * 60);
+    if (!hydrated) throw new Error("Question not found.");
+    return publicPracticeQuestion(hydrated as never);
+  });
+
 const VERSIONED = ["question_type", "prompt", "instructions", "payload", "answer_key", "scoring", "normalization", "explanation", "grading_mode"] as const;
 
 export const saveQuestion = createServerFn({ method: "POST" })
