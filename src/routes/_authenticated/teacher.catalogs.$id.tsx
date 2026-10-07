@@ -117,6 +117,10 @@ function CatalogWorkspace() {
       qc.invalidateQueries({ queryKey: ["catalog", id] }),
       qc.invalidateQueries({ queryKey: ["catalogs-detailed"] }),
     ]);
+    await qc.refetchQueries({
+      queryKey: ["catalog", id],
+      type: "active",
+    });
   }
 
   async function saveMetadata(e: React.FormEvent) {
@@ -597,6 +601,7 @@ function AssignmentPicker({
   onChanged: () => Promise<void>;
 }) {
   const { t } = useI18n();
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -615,7 +620,12 @@ function AssignmentPicker({
     setBusyId(targetId);
     try {
       await addCatalogAssignment({ data: { catalogId, kind, targetId } });
-      await onChanged();
+      await Promise.all([
+        onChanged(),
+        qc.invalidateQueries({
+          queryKey: ["catalog-assignment-targets", catalogId, kind],
+        }),
+      ]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
