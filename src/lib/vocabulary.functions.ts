@@ -249,7 +249,12 @@ export const getVocabularyEnrichmentStatus = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async () => {
     const { getAiProviderStatus } = await import("./ai.server");
-    return getAiProviderStatus();
+    const ai = getAiProviderStatus();
+    return {
+      ...ai,
+      dictionaryFallback: true,
+      dictionaryLanguages: ["en"],
+    };
   });
 
 export const suggestVocabularyEnrichmentForEditor = createServerFn({
@@ -284,19 +289,37 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
     const admin = await adminClient();
 
     try {
-      const { suggestVocabularyEnrichment } = await import("./ai.server");
-      const suggestion = await suggestVocabularyEnrichment({
-        word: data.word,
-        learningLanguage: data.learningLanguage,
-        targetLanguages: [
-          ...new Set(
-            data.targetLanguages
-              .map((value) => value.toLowerCase())
-              .filter((value) => value !== data.learningLanguage.toLowerCase()),
-          ),
-        ],
-        existing: data.existing,
-      });
+      const { getAiProviderStatus, suggestVocabularyEnrichment } = await import(
+        "./ai.server"
+      );
+      const aiStatus = getAiProviderStatus();
+      const normalizedLanguage = data.learningLanguage.toLowerCase();
+      const suggestion =
+        aiStatus.available
+          ? await suggestVocabularyEnrichment({
+              word: data.word,
+              learningLanguage: data.learningLanguage,
+              targetLanguages: [
+                ...new Set(
+                  data.targetLanguages
+                    .map((value) => value.toLowerCase())
+                    .filter(
+                      (value) => value !== normalizedLanguage,
+                    ),
+                ),
+              ],
+              existing: data.existing,
+            })
+          : normalizedLanguage === "en" ||
+              normalizedLanguage.startsWith("en-")
+            ? await (
+                await import("./dictionary-vocabulary")
+              ).fetchDictionaryVocabularySuggestion(data.word)
+            : (() => {
+                throw new Error(
+                  "Metadata suggestions require an AI provider for this language. English words can use the built-in dictionary fallback.",
+                );
+              })();
 
       await audit(admin, {
         actor_type: "teacher",
@@ -309,6 +332,7 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
           model: suggestion.model,
           confidence: suggestion.confidence,
           target_languages: data.targetLanguages,
+          fallback: suggestion.provider === "dictionary",
         },
       });
 
