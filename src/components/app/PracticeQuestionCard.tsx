@@ -50,6 +50,7 @@ export function PracticeQuestionCard({
   revealed,
   busy,
   showCheck = true,
+  showStudentTools = true,
   onChange,
   onCheck,
   onReveal,
@@ -60,6 +61,7 @@ export function PracticeQuestionCard({
   revealed: boolean;
   busy: boolean;
   showCheck?: boolean;
+  showStudentTools?: boolean;
   onChange: (response: PracticeResponse) => void;
   onCheck: () => void;
   onReveal: () => void;
@@ -136,31 +138,35 @@ export function PracticeQuestionCard({
             {t("check_answer")}
           </Button>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={favoriteBusy}
-          onClick={toggleSaved}
-          className="ml-auto text-muted-foreground"
-          aria-pressed={favorited === true}
-        >
-          <Heart
-            className={`h-4 w-4 ${favorited ? "fill-current" : ""}`}
-          />
-          {t("favorite")}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={reporting}
-          onClick={report}
-          className="text-muted-foreground"
-        >
-          <FlagTriangleRight className="h-4 w-4" />
-          {t("report_question")}
-        </Button>
+        {showStudentTools && (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={favoriteBusy}
+              onClick={toggleSaved}
+              className="ml-auto text-muted-foreground"
+              aria-pressed={favorited === true}
+            >
+              <Heart
+                className={`h-4 w-4 ${favorited ? "fill-current" : ""}`}
+              />
+              {t("favorite")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={reporting}
+              onClick={report}
+              className="text-muted-foreground"
+            >
+              <FlagTriangleRight className="h-4 w-4" />
+              {t("report_question")}
+            </Button>
+          </>
+        )}
         {feedback && (
           <>
             <span className={feedback.is_correct ? "text-sm font-medium text-success" : "text-sm font-medium text-destructive"}>
@@ -452,6 +458,30 @@ function PracticeQuestionAnswer({
       rows={6}
       value={response.text ?? ""}
       onChange={(e) => onChange({ text: e.target.value })}
+    />
+  );
+}
+
+export function QuestionStudentPreview({
+  question,
+}: {
+  question: PracticeQuestion;
+}) {
+  const [response, setResponse] = useState<PracticeResponse>(() =>
+    defaultPracticeResponse(question),
+  );
+
+  return (
+    <PracticeQuestionCard
+      question={question}
+      response={response}
+      revealed={false}
+      busy={false}
+      showCheck={false}
+      showStudentTools={false}
+      onChange={setResponse}
+      onCheck={() => {}}
+      onReveal={() => {}}
     />
   );
 }
