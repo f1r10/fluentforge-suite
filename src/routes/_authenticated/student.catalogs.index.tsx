@@ -25,9 +25,6 @@ function StudentCatalogsPage() {
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-5">
         <h1 className="text-2xl font-bold">{t("my_catalogs")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("catalog_assignment_hint")}
-        </p>
       </div>
 
       <div className="overflow-hidden rounded-md border border-border">
