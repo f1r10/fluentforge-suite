@@ -603,13 +603,17 @@ async function gotoHydrated(page, path) {
       pdfDownload.suggestedFilename().toLowerCase().endsWith(".pdf"),
       "Question Bank export did not produce a PDF filename.",
     );
-    const pdfHistoryRow = page
-      .getByText("Question Bank", { exact: true })
-      .last()
-      .locator("xpath=ancestor::tr");
-    await pdfHistoryRow.getByText("PDF", { exact: true }).waitFor({ timeout: 20000 });
+    const exportHistory = page
+      .getByRole("heading", { name: "Export history", exact: true })
+      .locator("xpath=ancestor::section");
+    const pdfHistoryRow = exportHistory
+      .locator("tbody tr")
+      .filter({ hasText: "Question Bank" })
+      .filter({ hasText: "PDF" })
+      .first();
+    await pdfHistoryRow.waitFor({ timeout: 20000 });
     await pdfHistoryRow
-      .getByText("Completed", { exact: true })
+      .getByText("completed", { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] Question Bank exported as printable PDF with answer option");
 
