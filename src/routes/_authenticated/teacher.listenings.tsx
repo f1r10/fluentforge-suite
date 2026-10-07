@@ -36,6 +36,7 @@ import {
   ContextActivityStudentPreview,
   type StudentListeningPractice,
 } from "@/components/app/StudentContextPractice";
+import { MediaUploadButton } from "@/components/app/MediaUploadButton";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -912,7 +913,18 @@ function ListeningMediaPicker({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden">
-        <DialogHeader><DialogTitle>{t("choose_media")}</DialogTitle></DialogHeader>
+        <div className="flex items-center justify-between gap-3">
+          <DialogHeader><DialogTitle>{t("choose_media")}</DialogTitle></DialogHeader>
+          <MediaUploadButton
+            allowedKinds={["audio", "video"]}
+            onUploaded={(media) =>
+              onChoose({
+                id: media.id,
+                original_filename: media.label,
+              })
+            }
+          />
+        </div>
         <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
