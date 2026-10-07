@@ -38,14 +38,16 @@ export function ContextQuestionSetManager({
   kind,
   questionSetId,
   topics,
+  initialCreateOpen = false,
 }: {
   kind: Kind;
   questionSetId: string;
   topics: TopicRow[];
+  initialCreateOpen?: boolean;
 }) {
   const { t } = useI18n();
   const qc = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(initialCreateOpen);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [moving, setMoving] = useState(false);
 
