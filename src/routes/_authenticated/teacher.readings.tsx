@@ -160,6 +160,72 @@ function ReadingsPage() {
     }
   }
 
+  async function addQuestionSet() {
+    if (!editor) return;
+    if (!editor.title.trim()) {
+      toast.error(t("title") + " is required.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      let readingId = editor.id;
+      let initialDraft = false;
+      if (!readingId) {
+        const saved = await saveReading({
+          data: {
+            title: editor.title,
+            body: editor.body,
+            learning_language: editor.learning_language || null,
+            level: editor.level || null,
+            status: "draft",
+            display_layout: editor.display_layout,
+            topicIds: editor.topicIds,
+            tags: editor.tags
+              .split(",")
+              .map((x) => x.trim())
+              .filter(Boolean),
+          },
+        });
+        readingId = saved.id;
+        initialDraft = true;
+      }
+
+      const created = await saveReadingQuestionSet({
+        data: {
+          readingId,
+          title: null,
+          instructions: null,
+          sort_order: editor.questionSets.length,
+        },
+      });
+
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              id: readingId,
+              status: initialDraft ? "draft" : current.status,
+              questionSets: [
+                ...current.questionSets,
+                {
+                  id: created.id,
+                  title: "",
+                  instructions: "",
+                  sort_order: current.questionSets.length,
+                },
+              ],
+            }
+          : current,
+      );
+      await qc.invalidateQueries({ queryKey: ["readings"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removeQuestionSet(index: number) {
     if (!editor) return;
     const set = editor.questionSets[index];
@@ -408,10 +474,13 @@ function ReadingsPage() {
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>{t("question_sets")}</Label>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setEditor({
-                    ...editor,
-                    questionSets: [...editor.questionSets, { title: "", instructions: "", sort_order: editor.questionSets.length }],
-                  })}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void addQuestionSet()}
+                  >
                     <Plus className="h-4 w-4" />{t("add")}
                   </Button>
                 </div>
@@ -454,11 +523,7 @@ function ReadingsPage() {
                           topics={topics}
                         />
                       </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground md:col-span-3">
-                        {t("save_context_before_questions")}
-                      </div>
-                    )}
+                    ) : null}
                   </div>
                 ))}
               </section>
