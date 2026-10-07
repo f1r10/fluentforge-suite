@@ -14,6 +14,7 @@ const readingImportPayloadSchema = z.object({
   display_layout: z.enum(["stacked", "split", "tabbed"]).default("split"),
   learning_language: z.string().max(10).nullable().optional(),
   level: z.string().max(20).nullable().optional(),
+  status: z.enum(["draft", "active"]).default("draft"),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -23,6 +24,7 @@ const listeningImportPayloadSchema = z.object({
   transcript: z.string().max(500_000).default(""),
   learning_language: z.string().max(10).nullable().optional(),
   level: z.string().max(20).nullable().optional(),
+  status: z.enum(["draft", "active"]).default("draft"),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -703,7 +705,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
             level: raw.level ?? null,
             word_count: wordCount,
             display_layout: raw.display_layout,
-            status: "draft",
+            status: raw.status,
             source_file_id: job.source_file_id,
             metadata: {
               ...raw.metadata,
@@ -795,7 +797,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
               allow_rewind: true,
               show_transcript: false,
             },
-            status: "draft",
+            status: raw.status,
             source_file_id: job.source_file_id,
             metadata: {
               ...raw.metadata,
@@ -942,7 +944,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         .from("questions")
         .insert({
           ...fields,
-          status: "draft",
+          status: fields.status,
           current_version: 1,
           context_kind: readingContext
             ? "reading"
