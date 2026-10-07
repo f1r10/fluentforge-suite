@@ -94,6 +94,13 @@ function VocabularyPage() {
     queryFn: () => getVocabularyEnrichmentStatus(),
     staleTime: 60_000,
   });
+  const dictionaryFallbackForEditor =
+    !!editor &&
+    enrichmentStatus?.dictionaryFallback === true &&
+    (editor.learning_language.toLowerCase() === "en" ||
+      editor.learning_language.toLowerCase().startsWith("en-"));
+  const enrichmentAvailable =
+    enrichmentStatus?.available !== false || dictionaryFallbackForEditor;
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("");
   const [level, setLevel] = useState("");
@@ -532,7 +539,9 @@ function VocabularyPage() {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {enrichmentStatus?.available === false
-                    ? "AI suggestions are not configured for this installation."
+                    ? dictionaryFallbackForEditor
+                      ? t("vocabulary_dictionary_fallback_hint")
+                      : t("vocabulary_ai_required_hint")
                     : t("vocabulary_enrichment_hint")}
                 </div>
               </div>
@@ -543,7 +552,7 @@ function VocabularyPage() {
                 disabled={
                   enriching ||
                   !editor.word.trim() ||
-                  enrichmentStatus?.available === false
+                  !enrichmentAvailable
                 }
               >
                 <Sparkles className="h-4 w-4" />
