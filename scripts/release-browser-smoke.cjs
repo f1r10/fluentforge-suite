@@ -222,6 +222,53 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog workspace opened and accepted imported question content");
 
+    const studentAssignmentPanel = page
+      .getByRole("heading", { name: "Students", level: 3 })
+      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+    await studentAssignmentPanel.getByRole("button", { name: "Add", exact: true }).click();
+    const assignmentDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Assign student",
+          exact: true,
+        }),
+      });
+    const assignmentRow = assignmentDialog
+      .getByText(student.username, { exact: true })
+      .locator("xpath=ancestor::li");
+    await assignmentRow.getByRole("button", { name: "Add", exact: true }).click();
+    await studentAssignmentPanel
+      .getByText(student.username, { exact: true })
+      .waitFor({ timeout: 20000 });
+    await assignmentDialog.getByRole("button", { name: "Close", exact: true }).click();
+    console.log("[ok] catalog can be assigned directly to a student");
+
+    await gotoHydrated(page, "/teacher/vocabulary");
+    await page.getByRole("button", { name: "New word", exact: true }).click();
+    const vocabularyDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "New word",
+          exact: true,
+        }),
+      });
+    const suggestMetadata = vocabularyDialog.getByRole("button", {
+      name: "Suggest metadata",
+      exact: true,
+    });
+    await suggestMetadata.waitFor({ timeout: 20000 });
+    for (let attempt = 0; attempt < 40 && !(await suggestMetadata.isDisabled()); attempt += 1) {
+      await page.waitForTimeout(100);
+    }
+    assert(
+      await suggestMetadata.isDisabled(),
+      "Vocabulary AI suggestion should be disabled when AI_PROVIDER=disabled.",
+    );
+    await page.keyboard.press("Escape");
+    console.log("[ok] disabled AI enrichment is explicit and does not trigger a server error");
+
     await gotoHydrated(page, "/teacher/media");
     const mediaInput = page.locator('input[type="file"]');
     await mediaInput.setInputFiles({
@@ -440,6 +487,12 @@ async function gotoHydrated(page, path) {
       })
       .waitFor({ timeout: 20000 });
     console.log("[ok] student dashboard rendered for the created student");
+
+    await gotoHydrated(studentPage, "/student/catalogs");
+    await studentPage
+      .getByText("Release Catalog", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] directly assigned catalog is visible to the student");
 
     const studentLibraryChecks = [
       ["/student/questions", "Question Bank"],
