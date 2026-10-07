@@ -255,11 +255,14 @@ async function gotoHydrated(page, path) {
       .getByText(student.username, { exact: true })
       .locator("xpath=ancestor::li");
     await assignmentRow.getByRole("button", { name: "Add", exact: true }).click();
+    await assignmentRow
+      .getByRole("button", { name: "Assigned", exact: true })
+      .waitFor({ timeout: 20000 });
+    await assignmentDialog.getByRole("button", { name: "Close", exact: true }).click();
     await studentAssignmentPanel
       .getByText(student.username, { exact: true })
       .waitFor({ timeout: 20000 });
-    await assignmentDialog.getByRole("button", { name: "Close", exact: true }).click();
-    console.log("[ok] catalog can be assigned directly to a student");
+    console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
 
     await gotoHydrated(page, "/teacher/vocabulary");
     await page.getByRole("button", { name: "New word", exact: true }).click();
