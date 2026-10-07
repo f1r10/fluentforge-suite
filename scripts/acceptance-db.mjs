@@ -35,8 +35,8 @@ async function verifySchemaSecurity() {
     select count(*)::int as count
     from public.fluentforge_schema_migrations
   `;
-  if (migrationCount < 33) {
-    fail(`Expected at least 33 applied migrations, found ${migrationCount}.`);
+  if (migrationCount < 34) {
+    fail(`Expected at least 34 applied migrations, found ${migrationCount}.`);
   } else {
     pass(`Applied migrations: ${migrationCount}`);
   }
@@ -228,6 +228,11 @@ async function verifySchemaSecurity() {
     "exam_listening_plays_attempt_idx",
     "attempt_answers_attempt_updated_idx",
     "exam_attempts_student_exam_active_idx",
+    "catalog_assignments_group_conflict_uidx",
+    "catalog_assignments_student_conflict_uidx",
+    "exam_assignments_group_conflict_uidx",
+    "exam_assignments_student_conflict_uidx",
+    "notifications_dedupe_key_conflict_uidx",
   ];
   const indexRows = await sql`
     select indexname
