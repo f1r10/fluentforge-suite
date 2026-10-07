@@ -43,6 +43,8 @@ function ExportCenter() {
   const [kind, setKind] = useState<ExportKind>("questions");
   const [format, setFormat] = useState<ExportFormat>("xlsx");
   const [includeTrash, setIncludeTrash] = useState(false);
+  const [includeAnswers, setIncludeAnswers] = useState(false);
+  const [includeExplanations, setIncludeExplanations] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -55,7 +57,13 @@ function ExportCenter() {
     setBusy(true);
     try {
       const result = await createExport({
-        data: { kind, format, includeTrash },
+        data: {
+          kind,
+          format,
+          includeTrash,
+          includeAnswers,
+          includeExplanations,
+        },
       });
       await qc.invalidateQueries({ queryKey: ["exports"] });
       openDownload(result.url, result.filename);
@@ -96,7 +104,11 @@ function ExportCenter() {
                 type="button"
                 onClick={() => {
                   setKind(option.kind);
-                  if (format === "pdf" && option.kind !== "analytics") {
+                  if (
+                    format === "pdf" &&
+                    option.kind !== "analytics" &&
+                    option.kind !== "questions"
+                  ) {
                     setFormat("xlsx");
                   }
                 }}
@@ -127,13 +139,19 @@ function ExportCenter() {
               <option value="xlsx">Excel (.xlsx)</option>
               <option value="json">Portable JSON</option>
               {kind !== "content_package" && <option value="csv">CSV</option>}
-              {kind === "analytics" && <option value="pdf">PDF report</option>}
+              {(kind === "analytics" || kind === "questions") && (
+                <option value="pdf">
+                  {kind === "questions" ? "PDF" : "PDF report"}
+                </option>
+              )}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
               {format === "csv"
                 ? t("csv_primary_table_hint")
                 : format === "pdf"
-                  ? t("pdf_report_hint")
+                  ? kind === "questions"
+                    ? t("export_questions_hint")
+                    : t("pdf_report_hint")
                   : t("full_export_format_hint")}
             </p>
           </div>
@@ -149,6 +167,25 @@ function ExportCenter() {
               <span className="text-xs text-muted-foreground">{t("include_trash_hint")}</span>
             </span>
           </label>
+
+          {kind === "questions" && format === "pdf" && (
+            <div className="space-y-2 rounded-md border border-border bg-background p-3 text-sm">
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={includeAnswers}
+                  onCheckedChange={(value) => setIncludeAnswers(!!value)}
+                />
+                <span>{t("correct_answer")}</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={includeExplanations}
+                  onCheckedChange={(value) => setIncludeExplanations(!!value)}
+                />
+                <span>{t("explanation")}</span>
+              </label>
+            </div>
+          )}
 
           <div className="rounded-md border border-border bg-background p-3 text-xs leading-5 text-muted-foreground">
             {t("export_security_hint")}
