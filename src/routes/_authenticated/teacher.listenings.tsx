@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { FileAudio, FileUp, Pencil, Plus, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { Eye, FileAudio, FileUp, Pencil, Plus, Search, Trash2, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,6 +14,7 @@ import {
   deleteContextQuestionSet,
   deleteListeningSection,
   getListening,
+  getListeningStudentPreview,
   listListenings,
   saveListening,
   saveListeningQuestionSet,
@@ -31,6 +32,10 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
 import { ContextQuestionSetManager } from "@/components/app/ContextQuestionSetManager";
+import {
+  ContextActivityStudentPreview,
+  type StudentListeningPractice,
+} from "@/components/app/StudentContextPractice";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -107,6 +112,10 @@ function ListeningsPage() {
   const [page, setPage] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<
+    Awaited<ReturnType<typeof getListeningStudentPreview>> | null
+  >(null);
+  const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
@@ -382,6 +391,17 @@ function ListeningsPage() {
     );
   }
 
+  async function openPreview(id: string) {
+    setPreviewBusyId(id);
+    try {
+      setPreview(await getListeningStudentPreview({ data: { id } }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPreviewBusyId(null);
+    }
+  }
+
   async function trashListening(id: string) {
     if (!confirm(t("move_to_trash_confirm"))) return;
     try {
@@ -471,6 +491,16 @@ function ListeningsPage() {
                 <td className="px-3 py-2">{t(row.status)}</td>
                 <td className="px-2 py-1">
                   <div className="flex justify-end">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={previewBusyId === row.id}
+                      onClick={() => void openPreview(row.id)}
+                      aria-label={t("preview")}
+                      title={t("preview")}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -723,6 +753,17 @@ function ListeningsPage() {
               </section>
 
               <DialogFooter>
+                {editor.id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={previewBusyId === editor.id}
+                    onClick={() => void openPreview(editor.id!)}
+                  >
+                    <Eye className="h-4 w-4" />
+                    {t("preview")}
+                  </Button>
+                )}
                 <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
                 <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
@@ -730,6 +771,20 @@ function ListeningsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent className="max-h-[94vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("preview")}</DialogTitle>
+          </DialogHeader>
+          {preview && (
+            <ContextActivityStudentPreview
+              kind="listening"
+              data={preview as unknown as StudentListeningPractice}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {editor && mediaPickerOpen && (
         <ListeningMediaPicker
