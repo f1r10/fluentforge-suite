@@ -28,6 +28,39 @@ const listeningImportPayloadSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
+const vocabularyImportPayloadSchema = z.object({
+  word: z.string().trim().min(1).max(500),
+  learning_language: z.string().trim().min(2).max(10).default("en"),
+  definition: z.string().max(10_000).nullable().default(null),
+  ipa: z.string().max(500).nullable().default(null),
+  part_of_speech: z.string().max(100).nullable().default(null),
+  synonyms: z.array(z.string().trim().min(1).max(500)).max(100).default([]),
+  antonyms: z.array(z.string().trim().min(1).max(500)).max(100).default([]),
+  level: z.string().max(20).nullable().default(null),
+  notes: z.string().max(10_000).nullable().default(null),
+  status: z.enum(["draft", "active"]).default("draft"),
+  translations: z
+    .array(
+      z.object({
+        language: z.string().trim().min(2).max(10),
+        value: z.string().trim().min(1).max(2_000),
+      }),
+    )
+    .max(50)
+    .default([]),
+  examples: z
+    .array(
+      z.object({
+        sentence: z.string().trim().min(1).max(5_000),
+        translation: z.string().max(5_000).nullable().default(null),
+      }),
+    )
+    .max(100)
+    .default([]),
+  tags: z.array(z.string().trim().min(1).max(60)).max(100).default([]),
+  import_mapping: z.record(z.string(), z.unknown()).optional(),
+});
+
 const spreadsheetMappingSchema = z
   .object({
     include_sheets: z
@@ -175,6 +208,10 @@ function validateImportItemPayload(
           ? (payload as Record<string, unknown>)
           : {},
       );
+      return { state: "ready", message: null };
+    }
+    if (itemType === "vocabulary") {
+      vocabularyImportPayloadSchema.parse(payload);
       return { state: "ready", message: null };
     }
     if (itemType === "reading") {
@@ -851,6 +888,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     >();
 
     let importedQuestions = 0;
+    let importedVocabulary = 0;
     let importedReadings = 0;
     let importedListenings = 0;
     let skipped = 0;
@@ -1035,8 +1073,117 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     }
 
     for (const item of approvedItems) {
+      if (item.item_type !== "vocabulary" || item.created_entity_id) continue;
+
+      const raw = vocabularyImportPayloadSchema.parse(item.payload);
+      const synonyms = [
+        ...new Set(raw.synonyms.map((value) => value.trim()).filter(Boolean)),
+      ];
+      const antonyms = [
+        ...new Set(raw.antonyms.map((value) => value.trim()).filter(Boolean)),
+      ];
+      const translations = Array.from(
+        new Map(
+          raw.translations.map((translation) => [
+            translation.language.toLowerCase(),
+            {
+              language: translation.language.toLowerCase(),
+              value: translation.value,
+            },
+          ]),
+        ).values(),
+      );
+      const tagNames = [
+        ...new Set(
+          raw.tags.map((value) => value.trim().toLowerCase()).filter(Boolean),
+        ),
+      ];
+
+      const { data: created, error: createError } = await admin
+        .from("vocabulary_entries")
+        .insert({
+          word: raw.word,
+          learning_language: raw.learning_language.toLowerCase(),
+          definition: raw.definition || null,
+          ipa: raw.ipa || null,
+          part_of_speech: raw.part_of_speech || null,
+          synonyms,
+          antonyms,
+          level: raw.level || null,
+          notes: raw.notes || null,
+          status: raw.status,
+        })
+        .select("id")
+        .single();
+      if (createError || !created) {
+        throw new Error(
+          createError?.message ?? "Could not create imported vocabulary.",
+        );
+      }
+
+      if (translations.length) {
+        const { error } = await admin.from("vocabulary_translations").insert(
+          translations.map((translation) => ({
+            entry_id: created.id,
+            language: translation.language,
+            value: translation.value,
+          })),
+        );
+        if (error) throw new Error(error.message);
+      }
+
+      if (raw.examples.length) {
+        const { error } = await admin.from("vocabulary_examples").insert(
+          raw.examples.map((example, index) => ({
+            entry_id: created.id,
+            sentence: example.sentence,
+            translation: example.translation || null,
+            sort_order: index,
+          })),
+        );
+        if (error) throw new Error(error.message);
+      }
+
+      if (tagNames.length) {
+        const { error: tagUpsertError } = await admin.from("tags").upsert(
+          tagNames.map((name) => ({ name })),
+          { onConflict: "name", ignoreDuplicates: true },
+        );
+        if (tagUpsertError) throw new Error(tagUpsertError.message);
+
+        const { data: tagRows, error: tagSelectError } = await admin
+          .from("tags")
+          .select("id,name")
+          .in("name", tagNames);
+        if (tagSelectError) throw new Error(tagSelectError.message);
+        if (tagRows?.length) {
+          const { error } = await admin.from("vocabulary_tags").insert(
+            tagRows.map((tag) => ({
+              entry_id: created.id,
+              tag_id: tag.id,
+            })),
+          );
+          if (error) throw new Error(error.message);
+        }
+      }
+
+      await admin
+        .from("import_items")
+        .update({ created_entity_id: created.id })
+        .eq("id", item.id);
+
+      importedVocabulary += 1;
+    }
+
+    for (const item of approvedItems) {
       if (item.item_type !== "question") {
-        if (item.item_type !== "reading" && item.item_type !== "listening") skipped += 1;
+        if (
+          item.item_type !== "vocabulary" &&
+          item.item_type !== "reading" &&
+          item.item_type !== "listening"
+        ) {
+          skipped += 1;
+        }
         continue;
       }
       if (item.created_entity_id) continue;
@@ -1187,7 +1334,11 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       importedQuestions += 1;
     }
 
-    const imported = importedQuestions + importedReadings + importedListenings;
+    const imported =
+      importedQuestions +
+      importedVocabulary +
+      importedReadings +
+      importedListenings;
 
     const { count: remainingPending, error: remainingError } = await admin
       .from("import_items")
@@ -1235,10 +1386,11 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       action: "document_import_committed",
       entity_type: "import_job",
       entity_id: job.id,
-      summary: `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s) from document review`,
+      summary: `Imported ${importedQuestions} question(s), ${importedVocabulary} vocabulary item(s), ${importedReadings} reading(s), and ${importedListenings} listening(s) from document review`,
       details: {
         imported,
         imported_questions: importedQuestions,
+        imported_vocabulary: importedVocabulary,
         imported_readings: importedReadings,
         imported_listenings: importedListenings,
         skipped,
@@ -1254,12 +1406,13 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       kind: "import_committed",
       title: "Document import completed",
       body: completed
-        ? `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s). ${skipped} item(s) skipped.`
+        ? `Imported ${importedQuestions} question(s), ${importedVocabulary} vocabulary item(s), ${importedReadings} reading(s), and ${importedListenings} listening(s). ${skipped} item(s) skipped.`
         : `Imported ${imported} ready item(s). ${remainingPending ?? 0} item(s) still need review.`,
       link: "/teacher/sources",
       data: {
         import_job_id: job.id,
         imported_questions: importedQuestions,
+        imported_vocabulary: importedVocabulary,
         imported_readings: importedReadings,
         imported_listenings: importedListenings,
         skipped,
@@ -1270,6 +1423,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     return {
       imported,
       importedQuestions,
+      importedVocabulary,
       importedReadings,
       importedListenings,
       skipped,
@@ -1314,6 +1468,31 @@ async function prepareItems(
           .is("deleted_at", null)
           .limit(1)
           .maybeSingle();
+        if (duplicate) {
+          duplicateOf = duplicate.id;
+          duplicateKind = "exact";
+        }
+      }
+    }
+
+    if (item.item_type === "vocabulary") {
+      const raw = item.payload ?? {};
+      const word =
+        typeof raw["word"] === "string" ? raw["word"].trim() : "";
+      const learningLanguage =
+        typeof raw["learning_language"] === "string"
+          ? raw["learning_language"].trim().toLowerCase()
+          : "en";
+      if (word) {
+        const { data: duplicate, error: duplicateError } = await admin
+          .from("vocabulary_entries")
+          .select("id")
+          .ilike("word", word)
+          .eq("learning_language", learningLanguage)
+          .is("deleted_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (duplicateError) throw new Error(duplicateError.message);
         if (duplicate) {
           duplicateOf = duplicate.id;
           duplicateKind = "exact";
