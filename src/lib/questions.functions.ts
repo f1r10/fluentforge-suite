@@ -28,6 +28,7 @@ export const listQuestions = createServerFn({ method: "GET" })
       .from("questions")
       .select("id, question_type, prompt, level, learning_language, status, current_version, updated_at, context_kind" + (data.topicId ? ", qt:question_topics!inner(topic_id)" : ""), { count: "exact" })
       .is("deleted_at", null)
+      .or("context_kind.eq.none,reusable_independently.eq.true")
       .order("created_at", { ascending: false })
       .range(data.page * PAGE, data.page * PAGE + PAGE - 1);
     if (data.status !== "all") q = q.eq("status", data.status);
