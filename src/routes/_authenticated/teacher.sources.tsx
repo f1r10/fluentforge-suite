@@ -739,7 +739,11 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
     setBusy(true);
     try {
       const result = await commitDocumentImport({ data: { jobId: job.id } });
-      toast.success(t("imported") + ": " + result.imported);
+      toast.success(
+        result.completed
+          ? `${t("imported")}: ${result.imported}`
+          : `${t("imported")}: ${result.imported} · ${t("needs_review")}: ${result.remainingPending}`,
+      );
       await Promise.all([
         refetch(),
         qc.invalidateQueries({ queryKey: ["document-imports"] }),
@@ -794,9 +798,35 @@ function ReviewWorkspace({
   onChanged: () => Promise<unknown>;
 }) {
   const { t } = useI18n();
+  const [filter, setFilter] = useState<
+    "all" | "pending" | "needs_fix" | "ready" | "rejected"
+  >("all");
   const pending = data.items.filter((item) => item.decision === "pending").length;
   const approved = data.items.filter((item) => item.decision === "approved").length;
   const duplicates = data.items.filter((item) => item.duplicate_of).length;
+  const needsFix = data.items.filter(
+    (item) => item.validation.state === "needs_fix",
+  ).length;
+  const ready = data.items.filter(
+    (item) =>
+      item.decision === "approved" &&
+      item.validation.state === "ready" &&
+      !item.created_entity_id,
+  ).length;
+  const rejected = data.items.filter((item) => item.decision === "rejected").length;
+  const visibleItems = data.items.filter((item) => {
+    if (filter === "all") return true;
+    if (filter === "pending") return item.decision === "pending";
+    if (filter === "needs_fix") return item.validation.state === "needs_fix";
+    if (filter === "ready") {
+      return (
+        item.decision === "approved" &&
+        item.validation.state === "ready" &&
+        !item.created_entity_id
+      );
+    }
+    return item.decision === "rejected";
+  });
 
   return (
     <div className="grid min-h-[70vh] gap-4 overflow-hidden lg:grid-cols-[1fr_1.2fr]">
@@ -816,6 +846,7 @@ function ReviewWorkspace({
             <span>{t("status")}: <strong>{data.job.status}</strong></span>
             <span>{t("progress")}: <strong>{data.job.progress}%</strong></span>
             <span>{t("pending")}: <strong>{pending}</strong></span>
+            <span>{t("needs_review")}: <strong>{needsFix}</strong></span>
             <span>{t("approved")}: <strong>{approved}</strong></span>
             <span>{t("duplicates")}: <strong>{duplicates}</strong></span>
           </div>
@@ -829,10 +860,39 @@ function ReviewWorkspace({
             <Button size="sm" variant="outline" disabled={busy || data.items.length === 0} onClick={onApproveHigh}>
               {t("approve_high_confidence")}
             </Button>
-            <Button size="sm" disabled={busy || approved === 0} onClick={onCommit}>
-              {t("import_approved")}
+            <Button size="sm" disabled={busy || ready === 0} onClick={onCommit}>
+              {t("import_approved")} ({ready})
             </Button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-b border-border px-3 py-2">
+          {[
+            ["all", t("all"), data.items.length],
+            ["pending", t("pending"), pending],
+            ["needs_fix", t("needs_review"), needsFix],
+            ["ready", t("approved"), ready],
+            ["rejected", t("rejected"), rejected],
+          ].map(([value, label, count]) => (
+            <Button
+              key={String(value)}
+              type="button"
+              size="sm"
+              variant={filter === value ? "default" : "outline"}
+              onClick={() =>
+                setFilter(
+                  value as
+                    | "all"
+                    | "pending"
+                    | "needs_fix"
+                    | "ready"
+                    | "rejected",
+                )
+              }
+            >
+              {String(label)} ({String(count)})
+            </Button>
+          ))}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -844,9 +904,15 @@ function ReviewWorkspace({
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {data.items.map((item) => (
-                <ImportItemCard key={item.id} item={item} onChanged={onChanged} />
-              ))}
+              {visibleItems.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  {t("no_results")}
+                </div>
+              ) : (
+                visibleItems.map((item) => (
+                  <ImportItemCard key={item.id} item={item} onChanged={onChanged} />
+                ))
+              )}
             </div>
           )}
         </div>
@@ -868,6 +934,32 @@ function ImportItemCard({
   const [busy, setBusy] = useState(false);
 
   const payload = item.payload as Record<string, unknown>;
+  const questionPayload =
+    payload["payload"] && typeof payload["payload"] === "object"
+      ? (payload["payload"] as Record<string, unknown>)
+      : null;
+  const answerKey =
+    payload["answer_key"] && typeof payload["answer_key"] === "object"
+      ? (payload["answer_key"] as Record<string, unknown>)
+      : null;
+  const options = Array.isArray(questionPayload?.["options"])
+    ? (questionPayload["options"] as Array<unknown>)
+        .map((option) =>
+          option && typeof option === "object"
+            ? {
+                id: String((option as Record<string, unknown>)["id"] ?? ""),
+                text: String((option as Record<string, unknown>)["text"] ?? ""),
+              }
+            : null,
+        )
+        .filter(
+          (option): option is { id: string; text: string } =>
+            !!option?.id && !!option.text,
+        )
+    : [];
+  const correct = Array.isArray(answerKey?.["correct"])
+    ? (answerKey["correct"] as unknown[]).map(String).filter(Boolean)
+    : [];
   const title =
     item.item_type === "question" && typeof payload["prompt"] === "string"
       ? payload["prompt"]
@@ -920,10 +1012,38 @@ function ImportItemCard({
               </span>
             )}
           </div>
-          <div className="mt-1 line-clamp-3 text-sm">{String(title ?? "—")}</div>
+          <div className="mt-1 whitespace-pre-wrap text-sm">{String(title ?? "—")}</div>
         </div>
-        <Status value={item.decision} />
+        <div className="flex flex-col items-end gap-1">
+          <Status value={item.decision} />
+          <Status value={item.validation.state} />
+        </div>
       </div>
+
+      {item.validation.message && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          {item.validation.message}
+        </div>
+      )}
+
+      {item.item_type === "question" && options.length > 0 && !editing && (
+        <div className="space-y-1 rounded-md border border-border bg-muted/20 p-3 text-sm">
+          {options.map((option) => (
+            <div key={option.id} className="flex gap-2">
+              <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
+              <span className="flex-1">{option.text}</span>
+              {correct.includes(option.id) && (
+                <span className="text-xs font-medium">{t("correct_answer")}</span>
+              )}
+            </div>
+          ))}
+          {correct.length === 0 && (
+            <div className="pt-1 text-xs text-muted-foreground">
+              {t("correct_answer")}: —
+            </div>
+          )}
+        </div>
+      )}
 
       {editing ? (
         <div className="space-y-2">
@@ -938,7 +1058,12 @@ function ImportItemCard({
           <Button
             size="sm"
             variant={item.decision === "approved" ? "default" : "outline"}
-            disabled={busy || !!item.duplicate_of}
+            disabled={
+              busy ||
+              !!item.duplicate_of ||
+              !!item.created_entity_id ||
+              item.validation.state !== "ready"
+            }
             onClick={() => update("approved")}
           >
             {t("approve")}
