@@ -819,7 +819,28 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       .order("created_at");
     if (itemsError) throw new Error(itemsError.message);
 
-    const approvedItems = items ?? [];
+    const approvedRows = items ?? [];
+    const invalidApproved = approvedRows.filter(
+      (item) =>
+        !!item.duplicate_of ||
+        validateImportItemPayload(item.item_type, item.payload).state !== "ready",
+    );
+    if (invalidApproved.length) {
+      const { error: resetError } = await admin
+        .from("import_items")
+        .update({ decision: "pending" })
+        .in(
+          "id",
+          invalidApproved.map((item) => item.id),
+        );
+      if (resetError) throw new Error(resetError.message);
+    }
+
+    const approvedItems = approvedRows.filter(
+      (item) =>
+        !item.duplicate_of &&
+        validateImportItemPayload(item.item_type, item.payload).state === "ready",
+    );
     const readingContexts = new Map<
       string,
       { readingId: string; questionSetId: string }
@@ -1168,10 +1189,18 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
 
     const imported = importedQuestions + importedReadings + importedListenings;
 
+    const { count: remainingPending, error: remainingError } = await admin
+      .from("import_items")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", job.id)
+      .eq("decision", "pending");
+    if (remainingError) throw new Error(remainingError.message);
+
+    const completed = (remainingPending ?? 0) === 0;
     await admin
       .from("import_jobs")
       .update({
-        status: "completed",
+        status: completed ? "completed" : "needs_review",
         progress: 100,
         updated_at: new Date().toISOString(),
       })
@@ -1183,7 +1212,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     } | null;
 
     let originalDeleted = false;
-    if (source?.storage_path && !source.keep_original) {
+    if (completed && source?.storage_path && !source.keep_original) {
       const { error: removeError } = await admin.storage
         .from(SOURCE_BUCKET)
         .remove([source.storage_path]);
@@ -1213,6 +1242,9 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         imported_readings: importedReadings,
         imported_listenings: importedListenings,
         skipped,
+        needs_fix: invalidApproved.length,
+        remaining_pending: remainingPending ?? 0,
+        completed,
         original_deleted: originalDeleted,
       },
     });
@@ -1221,7 +1253,9 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     await notifyTeacher(admin, {
       kind: "import_committed",
       title: "Document import completed",
-      body: `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s). ${skipped} item(s) skipped.`,
+      body: completed
+        ? `Imported ${importedQuestions} question(s), ${importedReadings} reading(s), and ${importedListenings} listening(s). ${skipped} item(s) skipped.`
+        : `Imported ${imported} ready item(s). ${remainingPending ?? 0} item(s) still need review.`,
       link: "/teacher/sources",
       data: {
         import_job_id: job.id,
@@ -1239,6 +1273,9 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       importedReadings,
       importedListenings,
       skipped,
+      needsFix: invalidApproved.length,
+      remainingPending: remainingPending ?? 0,
+      completed,
       originalDeleted,
     };
   });
