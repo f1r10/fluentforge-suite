@@ -181,7 +181,9 @@ async function gotoHydrated(page, path) {
     console.log("[ok] imported PDF question visible as a review-safe draft in teacher Question Bank");
 
     await gotoHydrated(page, "/teacher/catalogs");
-    await page.getByRole("button", { name: "Add catalog" }).click();
+    await page
+      .getByRole("button", { name: /^(New catalog|Add catalog)$/ })
+      .click();
     const catalogDialog = page.getByRole("dialog");
     await catalogDialog.locator("input").first().fill("Release Catalog");
     await catalogDialog.getByRole("button", { name: "Create" }).click();
