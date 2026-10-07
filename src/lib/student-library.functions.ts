@@ -391,7 +391,7 @@ export const listStudentQuestions = createServerFn({ method: "GET" })
         { count: "exact" },
       )
       .eq("status", "active")
-      .or("context_kind.eq.none,reusable_independently.eq.true")
+      .eq("context_kind", "none")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .range(data.page * pageSize, data.page * pageSize + pageSize - 1);
@@ -430,7 +430,7 @@ export const getStudentQuestionPractice = createServerFn({
       )
       .eq("id", data.id)
       .eq("status", "active")
-      .or("context_kind.eq.none,reusable_independently.eq.true")
+      .eq("context_kind", "none")
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
