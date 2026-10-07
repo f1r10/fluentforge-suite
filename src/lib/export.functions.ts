@@ -39,8 +39,7 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
       key: "questions",
       table: "questions",
       softDelete: true,
-      filter: (query) =>
-        query.or("context_kind.eq.none,reusable_independently.eq.true"),
+      filter: (query) => query.eq("context_kind", "none"),
     },
     { key: "question_versions", table: "question_versions" },
     { key: "question_topics", table: "question_topics" },
