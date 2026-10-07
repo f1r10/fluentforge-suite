@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getMediaPreviewUrl, listMedia } from "@/lib/media.functions";
 import { useI18n } from "@/lib/i18n";
+import { MediaUploadButton } from "@/components/app/MediaUploadButton";
 
 type MediaKind = "image" | "audio" | "video";
 
@@ -127,9 +128,20 @@ function MediaPicker({
   return (
     <Dialog open onOpenChange={(value) => !value && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>{t("choose_media")}</DialogTitle>
-        </DialogHeader>
+        <div className="flex items-center justify-between gap-3">
+          <DialogHeader>
+            <DialogTitle>{t("choose_media")}</DialogTitle>
+          </DialogHeader>
+          <MediaUploadButton
+            allowedKinds={kinds}
+            onUploaded={(media) =>
+              onChoose({
+                id: media.id,
+                original_filename: media.label,
+              })
+            }
+          />
+        </div>
 
         <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
           <div className="relative">
