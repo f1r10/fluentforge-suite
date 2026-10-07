@@ -196,6 +196,23 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] teacher promoted imported draft question to active");
 
+    const activeQuestionRow = page
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::li");
+    await activeQuestionRow
+      .getByRole("button", { name: "Preview", exact: true })
+      .click();
+    const questionPreviewDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "Preview", exact: true }),
+      });
+    await questionPreviewDialog
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    console.log("[ok] teacher previewed Question Bank item with student renderer");
+
     await gotoHydrated(page, "/teacher/catalogs");
     await page
       .getByRole("button", { name: /^(New catalog|Add catalog)$/ })
@@ -371,6 +388,31 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] reading workspace saved a contextual open-response question with visual stimulus");
 
+    const readingRow = page
+      .getByText("Release Reading", { exact: true })
+      .locator("xpath=ancestor::tr");
+    await readingRow
+      .getByRole("button", { name: "Preview", exact: true })
+      .click();
+    const readingPreviewDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "Preview", exact: true }),
+      });
+    await readingPreviewDialog
+      .getByText(
+        "FluentForge lets students practise questions, readings and listenings in one learning workspace.",
+        { exact: true },
+      )
+      .waitFor({ timeout: 20000 });
+    await readingPreviewDialog
+      .getByText("Explain what students can practise in FluentForge.", {
+        exact: true,
+      })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    console.log("[ok] teacher previewed Reading activity and contextual questions as a whole");
+
     await gotoHydrated(page, "/teacher/listenings");
     await page
       .getByRole("button", { name: /^(New listening|Add listening)$/ })
@@ -392,6 +434,8 @@ async function gotoHydrated(page, path) {
     await listeningDialog
       .getByText("release-listening.wav", { exact: true })
       .waitFor({ timeout: 20000 });
+
+    await listeningDialog.getByText("Advanced", { exact: true }).click();
 
     const sectionsPanel = listeningDialog
       .getByText("Sections", { exact: true })
@@ -456,6 +500,54 @@ async function gotoHydrated(page, path) {
       .getByText("Release Listening", { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] listening workspace saved media, section and contextual question");
+
+    const listeningRow = page
+      .getByText("Release Listening", { exact: true })
+      .locator("xpath=ancestor::tr");
+    await listeningRow
+      .getByRole("button", { name: "Preview", exact: true })
+      .click();
+    const listeningPreviewDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "Preview", exact: true }),
+      });
+    await listeningPreviewDialog
+      .getByText("The listening activity is available.", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await listeningPreviewDialog.locator("audio").waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    console.log("[ok] teacher previewed Listening activity, media and questions as a whole");
+
+    await gotoHydrated(page, "/teacher/exports");
+    await page
+      .getByRole("heading", { name: "Export Center", level: 1 })
+      .waitFor({ timeout: 20000 });
+    const exportFormat = page
+      .getByText("Format", { exact: true })
+      .locator("xpath=..")
+      .locator("select");
+    await exportFormat.selectOption("pdf");
+    const pdfOptions = page
+      .getByText("Correct answer", { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'space-y-2')][1]");
+    await pdfOptions.getByRole("checkbox").first().click();
+    const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
+    await page.getByRole("button", { name: "Create export", exact: true }).click();
+    const pdfDownload = await downloadPromise;
+    assert(
+      pdfDownload.suggestedFilename().toLowerCase().endsWith(".pdf"),
+      "Question Bank export did not produce a PDF filename.",
+    );
+    const pdfHistoryRow = page
+      .getByText("Question Bank", { exact: true })
+      .last()
+      .locator("xpath=ancestor::tr");
+    await pdfHistoryRow.getByText("PDF", { exact: true }).waitFor({ timeout: 20000 });
+    await pdfHistoryRow
+      .getByText("Completed", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] Question Bank exported as printable PDF with answer option");
 
     await teacherContext.close();
 
