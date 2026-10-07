@@ -338,13 +338,13 @@ async function validateEntities(
   if (grouped.question.length) {
     const { data, error } = await sb
       .from("questions")
-      .select("id,context_kind,reusable_independently")
+      .select("id,context_kind")
       .in("id", [...new Set(grouped.question)])
       .is("deleted_at", null);
     if (error) throw new Error(error.message);
     if ((data?.length ?? 0) !== new Set(grouped.question).size) throw new Error("One or more questions no longer exist.");
-    if ((data ?? []).some((q: { context_kind: string; reusable_independently: boolean }) => q.context_kind !== "none" && !q.reusable_independently)) {
-      throw new Error("Context-bound questions must be added through their reading or listening unless explicitly reusable.");
+    if ((data ?? []).some((q: { context_kind: string }) => q.context_kind !== "none")) {
+      throw new Error("Context-bound questions must be added through their reading or listening.");
     }
   }
 
@@ -481,10 +481,10 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
     if (data.type === "all" || data.type === "question") {
       let q = context.supabase
         .from("questions")
-        .select("id,prompt,question_type,learning_language,level,status,context_kind,reusable_independently")
+        .select("id,prompt,question_type,learning_language,level,status,context_kind")
         .is("deleted_at", null)
         .neq("status", "archived")
-        .or("context_kind.eq.none,reusable_independently.eq.true")
+        .eq("context_kind", "none")
         .order("updated_at", { ascending: false })
         .limit(data.type === "all" ? 12 : 40);
       if (safe) q = q.ilike("prompt", `%${safe}%`);
