@@ -263,6 +263,7 @@ function VocabularyPage() {
         },
       });
       setEnrichment(suggestion);
+      applyEnrichmentSuggestion(suggestion);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -270,57 +271,75 @@ function VocabularyPage() {
     }
   }
 
-  function applyEnrichment() {
-    if (!editor || !enrichment) return;
+  function applyEnrichmentSuggestion(
+    suggestion: Awaited<
+      ReturnType<typeof suggestVocabularyEnrichmentForEditor>
+    >,
+  ) {
+    setEditor((current) => {
+      if (!current) return current;
 
-    const translationMap = new Map(
-      editor.translations
-        .filter((item) => item.language.trim())
-        .map((item) => [item.language.toLowerCase(), item]),
-    );
-    for (const item of enrichment.translations) {
-      const key = item.language.toLowerCase();
-      const existing = translationMap.get(key);
-      if (!existing?.value.trim()) {
-        translationMap.set(key, item);
+      const translationMap = new Map(
+        current.translations
+          .filter((item) => item.language.trim())
+          .map((item) => [item.language.toLowerCase(), item]),
+      );
+      for (const item of suggestion.translations) {
+        const key = item.language.toLowerCase();
+        const existing = translationMap.get(key);
+        if (!existing?.value.trim()) {
+          translationMap.set(key, item);
+        }
       }
-    }
 
-    const exampleKeys = new Set(
-      editor.examples.map((item) => item.sentence.trim().toLowerCase()),
-    );
-    const examples = [...editor.examples];
-    for (const item of enrichment.examples) {
-      const key = item.sentence.trim().toLowerCase();
-      if (!exampleKeys.has(key)) {
-        exampleKeys.add(key);
-        examples.push(item);
+      const exampleKeys = new Set(
+        current.examples.map((item) =>
+          item.sentence.trim().toLowerCase(),
+        ),
+      );
+      const examples = [...current.examples];
+      for (const item of suggestion.examples) {
+        const key = item.sentence.trim().toLowerCase();
+        if (!exampleKeys.has(key)) {
+          exampleKeys.add(key);
+          examples.push(item);
+        }
       }
-    }
 
-    const mergeWords = (current: string, incoming: string[]) =>
-      [
-        ...new Set([
-          ...current
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          ...incoming.map((value) => value.trim()).filter(Boolean),
-        ]),
-      ].join(", ");
+      const mergeWords = (value: string, incoming: string[]) =>
+        [
+          ...new Set([
+            ...value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+            ...incoming
+              .map((item) => item.trim())
+              .filter(Boolean),
+          ]),
+        ].join(", ");
 
-    setEditor({
-      ...editor,
-      definition: editor.definition || enrichment.definition || "",
-      ipa: editor.ipa || enrichment.ipa || "",
-      part_of_speech:
-        editor.part_of_speech || enrichment.part_of_speech || "",
-      synonyms: mergeWords(editor.synonyms, enrichment.synonyms),
-      antonyms: mergeWords(editor.antonyms, enrichment.antonyms),
-      translations: [...translationMap.values()],
-      examples,
+      return {
+        ...current,
+        definition:
+          current.definition || suggestion.definition || "",
+        ipa: current.ipa || suggestion.ipa || "",
+        part_of_speech:
+          current.part_of_speech ||
+          suggestion.part_of_speech ||
+          "",
+        synonyms: mergeWords(
+          current.synonyms,
+          suggestion.synonyms,
+        ),
+        antonyms: mergeWords(
+          current.antonyms,
+          suggestion.antonyms,
+        ),
+        translations: [...translationMap.values()],
+        examples,
+      };
     });
-    setEnrichment(null);
     toast.success(t("enrichment_applied"));
   }
 
@@ -580,9 +599,6 @@ function VocabularyPage() {
                       onClick={() => setEnrichment(null)}
                     >
                       {t("dismiss")}
-                    </Button>
-                    <Button type="button" size="sm" onClick={applyEnrichment}>
-                      {t("apply_suggestion")}
                     </Button>
                   </div>
                 </div>
