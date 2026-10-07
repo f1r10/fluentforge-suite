@@ -753,18 +753,6 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
       throw new Error(linkedQuestionsError.message);
     }
 
-    const { error: unlinkError } = await context.supabase
-      .from("questions")
-      .update({
-        context_kind: "none",
-        reading_question_set_id: null,
-        listening_question_set_id: null,
-        context_sort: 0,
-      })
-      .eq(column, data.id)
-      .is("deleted_at", null);
-    if (unlinkError) throw new Error(unlinkError.message);
-
     const idsToDraft = (linkedQuestions ?? [])
       .filter(
         (question) =>
@@ -778,6 +766,18 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
         .in("id", idsToDraft);
       if (draftError) throw new Error(draftError.message);
     }
+
+    const { error: unlinkError } = await context.supabase
+      .from("questions")
+      .update({
+        context_kind: "none",
+        reading_question_set_id: null,
+        listening_question_set_id: null,
+        context_sort: 0,
+      })
+      .eq(column, data.id)
+      .is("deleted_at", null);
+    if (unlinkError) throw new Error(unlinkError.message);
 
     const { error } = await context.supabase
       .from(table)
