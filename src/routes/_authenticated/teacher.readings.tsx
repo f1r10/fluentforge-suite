@@ -162,6 +162,7 @@ function ReadingsPage() {
         await deleteContextQuestionSet({
           data: { kind: "reading", id: set.id },
         });
+        await qc.invalidateQueries({ queryKey: ["questions"] });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : String(error));
         return;
