@@ -541,6 +541,54 @@ def test_number_on_own_line_and_nested_numbered_statements_stay_one_question():
     assert questions[1]["payload"]["prompt"].startswith("Choose the correct variant.")
 
 
+def test_numbered_variant_question_keeps_choices_and_global_answer_key():
+    from app.extractors import Extraction
+
+    question_text = (
+        "1.\n"
+        "Choose the correct variant.\n"
+        "How … to get to the airport?\n"
+        "1. long it is\n"
+        "2. did you\n"
+        "3. are you going\n"
+        "4. long does it take you\n"
+        "5. much does it\n"
+        "A) 1, 2\n"
+        "B) 2, 3\n"
+        "C) 3, 4\n"
+        "D) 4, 5\n"
+        "E) 1, 5\n"
+    )
+    answer_text = "Answer Key:\n1. C\n"
+    extraction = Extraction(
+        "native_text",
+        [
+            {"page": 1, "text": question_text},
+            {"page": 3, "text": answer_text},
+        ],
+        [],
+        question_text + answer_text,
+        {},
+    )
+
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 1
+    question = questions[0]["payload"]
+    assert question["question_type"] == "single_choice"
+    assert "1. long it is" in question["prompt"]
+    assert "5. much does it" in question["prompt"]
+    assert question["payload"]["options"] == [
+        {"id": "a", "text": "1, 2"},
+        {"id": "b", "text": "2, 3"},
+        {"id": "c", "text": "3, 4"},
+        {"id": "d", "text": "4, 5"},
+        {"id": "e", "text": "1, 5"},
+    ]
+    assert question["answer_key"] == {"correct": ["c"]}
+
+
 def test_answer_section_numbered_rows_are_not_imported_as_questions():
     from app.extractors import Extraction
 
