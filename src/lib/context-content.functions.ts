@@ -363,7 +363,7 @@ export const saveListening = createServerFn({ method: "POST" })
       .extend({
         media_id: z.string().uuid().nullable().default(null),
         transcript: z.string().max(500_000).nullable().default(null),
-        transcript_source: z.enum(["none", "manual", "imported", "auto"]).nullable().default("none"),
+        transcript_source: z.enum(["none", "manual", "imported", "auto", "local_whisper"]).nullable().default("none"),
         playback_rules: z
           .object({
             max_plays: z.number().int().min(1).max(100).nullable().default(null),
