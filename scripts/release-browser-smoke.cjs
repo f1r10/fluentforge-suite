@@ -481,7 +481,11 @@ async function gotoHydrated(page, path) {
       .getByText("release-listening.wav", { exact: true })
       .waitFor({ timeout: 20000 });
 
-    await listeningDialog.getByText("Advanced", { exact: true }).click();
+    const listeningAdvanced = listeningDialog.locator("details > summary").first();
+    await listeningAdvanced.click();
+    await listeningDialog
+      .getByText("Sections", { exact: true })
+      .waitFor({ timeout: 20000 });
 
     const sectionsPanel = listeningDialog
       .getByText("Sections", { exact: true })
