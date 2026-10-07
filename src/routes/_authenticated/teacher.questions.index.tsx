@@ -153,7 +153,21 @@ function QuestionBank() {
             </select>
             <Button size="sm" variant="outline" disabled={!bulkTopic} onClick={() => bulk("add_topic")}>{t("add_topic")}</Button>
             <Button size="sm" variant="outline" onClick={() => bulk("duplicate")}>{t("duplicate")}</Button>
-            <Button size="sm" variant="outline" onClick={() => bulk(f.status === "archived" ? "activate" : "archive")}>{f.status === "archived" ? t("enable") : t("archive")}</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                bulk(
+                  f.status === "draft" || f.status === "archived"
+                    ? "activate"
+                    : "archive",
+                )
+              }
+            >
+              {f.status === "draft" || f.status === "archived"
+                ? t("enable")
+                : t("archive")}
+            </Button>
             <Button size="sm" variant="outline" className="text-destructive" onClick={() => bulk("trash")}>{t("move_to_trash")}</Button>
           </div>
         </div>
