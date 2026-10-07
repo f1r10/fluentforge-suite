@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import fitz
+from docx import Document
 
 from app.extractors import detect_candidates, extract_document
 
@@ -23,6 +24,32 @@ def test_plain_text_question_detection(tmp_path: Path):
     assert items[0]["item_type"] == "question"
     assert items[0]["payload"]["prompt"] == "Capital of France?"
     assert items[0]["payload"]["answer_key"] == {"correct": ["a"]}
+
+
+def test_docx_question_detection(tmp_path: Path):
+    source = tmp_path / "questions.docx"
+    document = Document()
+    document.add_paragraph("1. Which option is correct?")
+    document.add_paragraph("A. First")
+    document.add_paragraph("B. Second")
+    document.add_paragraph("Answer: 1 B")
+    document.save(source)
+
+    extraction = extract_document(
+        source,
+        source.name,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    items = detect_candidates(
+        extraction,
+        profile={"expected_content": "questions"},
+    )
+
+    assert extraction.method == "docx_native"
+    assert len(items) == 1
+    assert items[0]["item_type"] == "question"
+    assert items[0]["payload"]["prompt"] == "Which option is correct?"
+    assert items[0]["payload"]["answer_key"] == {"correct": ["b"]}
 
 
 def test_csv_question_detection(tmp_path: Path):
