@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { FileUp, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Eye, FileUp, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +13,7 @@ import { listTopics } from "@/lib/questions.functions";
 import {
   deleteContextQuestionSet,
   getReading,
+  getReadingStudentPreview,
   listReadings,
   saveReading,
   saveReadingQuestionSet,
@@ -23,6 +24,10 @@ import { topicOptions } from "@/components/app/topics";
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
 import { ContextQuestionSetManager } from "@/components/app/ContextQuestionSetManager";
+import {
+  ContextActivityStudentPreview,
+  type StudentReadingPractice,
+} from "@/components/app/StudentContextPractice";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -72,6 +77,10 @@ function ReadingsPage() {
   const [page, setPage] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<
+    Awaited<ReturnType<typeof getReadingStudentPreview>> | null
+  >(null);
+  const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["readings", search, language, level, status, page],
@@ -181,6 +190,17 @@ function ReadingsPage() {
     );
   }
 
+  async function openPreview(id: string) {
+    setPreviewBusyId(id);
+    try {
+      setPreview(await getReadingStudentPreview({ data: { id } }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPreviewBusyId(null);
+    }
+  }
+
   async function trashReading(id: string) {
     if (!confirm(t("move_to_trash_confirm"))) return;
     try {
@@ -274,6 +294,16 @@ function ReadingsPage() {
                 <td className="px-3 py-2">{t(row.status)}</td>
                 <td className="px-2 py-1">
                   <div className="flex justify-end">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={previewBusyId === row.id}
+                      onClick={() => void openPreview(row.id)}
+                      aria-label={t("preview")}
+                      title={t("preview")}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -423,6 +453,17 @@ function ReadingsPage() {
               </section>
 
               <DialogFooter>
+                {editor.id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={previewBusyId === editor.id}
+                    onClick={() => void openPreview(editor.id!)}
+                  >
+                    <Eye className="h-4 w-4" />
+                    {t("preview")}
+                  </Button>
+                )}
                 <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
                 <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
@@ -430,6 +471,20 @@ function ReadingsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent className="max-h-[94vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("preview")}</DialogTitle>
+          </DialogHeader>
+          {preview && (
+            <ContextActivityStudentPreview
+              kind="reading"
+              data={preview as unknown as StudentReadingPractice}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
