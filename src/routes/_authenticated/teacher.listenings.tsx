@@ -361,6 +361,81 @@ function ListeningsPage() {
     });
   }
 
+  async function addQuestionSet() {
+    if (!editor) return;
+    if (!editor.title.trim()) {
+      toast.error(t("title") + " is required.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      let listeningId = editor.id;
+      let initialDraft = false;
+      if (!listeningId) {
+        const saved = await saveListening({
+          data: {
+            title: editor.title,
+            media_id: editor.media_id || null,
+            transcript: editor.transcript || null,
+            transcript_source: editor.transcript_source,
+            learning_language: editor.learning_language || null,
+            level: editor.level || null,
+            status: "draft",
+            playback_rules: {
+              max_plays: editor.max_plays ? Number(editor.max_plays) : null,
+              allow_pause: editor.allow_pause,
+              allow_seek: editor.allow_seek,
+              allow_rewind: editor.allow_rewind,
+              show_transcript: editor.show_transcript,
+            },
+            topicIds: editor.topicIds,
+            tags: editor.tags
+              .split(",")
+              .map((x) => x.trim())
+              .filter(Boolean),
+          },
+        });
+        listeningId = saved.id;
+        initialDraft = true;
+      }
+
+      const created = await saveListeningQuestionSet({
+        data: {
+          listeningId,
+          section_id: null,
+          title: null,
+          instructions: null,
+          sort_order: editor.questionSets.length,
+        },
+      });
+
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              id: listeningId,
+              status: initialDraft ? "draft" : current.status,
+              questionSets: [
+                ...current.questionSets,
+                {
+                  id: created.id,
+                  section_id: "",
+                  title: "",
+                  instructions: "",
+                },
+              ],
+            }
+          : current,
+      );
+      await qc.invalidateQueries({ queryKey: ["listenings"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removeQuestionSet(index: number) {
     if (!editor) return;
     const set = editor.questionSets[index];
@@ -710,10 +785,15 @@ function ListeningsPage() {
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>{t("question_sets")}</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setEditor({
-                    ...editor,
-                    questionSets: [...editor.questionSets, { section_id: "", title: "", instructions: "" }],
-                  })}><Plus className="h-4 w-4" />{t("add")}</Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void addQuestionSet()}
+                  >
+                    <Plus className="h-4 w-4" />{t("add")}
+                  </Button>
                 </div>
                 {editor.questionSets.map((set, index) => (
                   <div
@@ -756,11 +836,7 @@ function ListeningsPage() {
                           topics={topics}
                         />
                       </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground lg:col-span-4">
-                        {t("save_context_before_questions")}
-                      </div>
-                    )}
+                    ) : null}
                   </div>
                 ))}
               </section>
