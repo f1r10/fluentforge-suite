@@ -118,6 +118,7 @@ function ListeningsPage() {
   >(null);
   const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
   const [autoCreateSetId, setAutoCreateSetId] = useState<string | null>(null);
+  const [questionCreateRequest, setQuestionCreateRequest] = useState(0);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
@@ -135,6 +136,7 @@ function ListeningsPage() {
 
   async function openEdit(id: string) {
     setAutoCreateSetId(null);
+    setQuestionCreateRequest(0);
     try {
       const [row, transcriptionJob] = await Promise.all([
         getListening({ data: { id } }),
@@ -371,6 +373,13 @@ function ListeningsPage() {
       return;
     }
 
+    const existingSet = editor.questionSets.find((set) => !!set.id);
+    if (existingSet?.id) {
+      setAutoCreateSetId(existingSet.id);
+      setQuestionCreateRequest((value) => value + 1);
+      return;
+    }
+
     setBusy(true);
     try {
       let listeningId = editor.id;
@@ -429,6 +438,7 @@ function ListeningsPage() {
           : current,
       );
       setAutoCreateSetId(created.id);
+      setQuestionCreateRequest((value) => value + 1);
       await qc.invalidateQueries({ queryKey: ["listenings"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -807,6 +817,9 @@ function ListeningsPage() {
                         questionSetId={set.id}
                         topics={topics}
                         initialCreateOpen={autoCreateSetId === set.id}
+                        createRequest={
+                          autoCreateSetId === set.id ? questionCreateRequest : 0
+                        }
                       />
                     ) : null}
 
