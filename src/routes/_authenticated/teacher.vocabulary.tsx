@@ -114,7 +114,8 @@ function VocabularyPage() {
     (editor.learning_language.toLowerCase() === "en" ||
       editor.learning_language.toLowerCase().startsWith("en-"));
   const enrichmentAvailable =
-    enrichmentStatus?.available !== false || dictionaryFallbackForEditor;
+    !!enrichmentStatus &&
+    (enrichmentStatus.available || dictionaryFallbackForEditor);
 
   const { data, isFetching } = useQuery({
     queryKey: ["vocabulary", search, language, level, status, topicId, page],
