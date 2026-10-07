@@ -62,6 +62,7 @@ type CommonProps = {
   feedback: Record<string, PracticeFeedback>;
   revealed: Record<string, boolean>;
   showCheck: boolean;
+  showStudentTools?: boolean;
   busyQuestion: string | null;
   onResponse: (id: string, response: PracticeResponse) => void;
   onCheck: (question: PracticeQuestion) => void;
@@ -100,6 +101,7 @@ function QuestionSets({
               feedback={props.feedback[question.id]}
               revealed={!!props.revealed[question.id]}
               showCheck={props.showCheck}
+              showStudentTools={props.showStudentTools}
               busy={props.busyQuestion === question.id}
               onChange={(response) =>
                 props.onResponse(question.id, response)
@@ -359,6 +361,35 @@ export function StudentListeningBlock({
 
       <QuestionSets sets={listening.question_sets} {...props} />
     </section>
+  );
+}
+
+export function ContextActivityStudentPreview(
+  props:
+    | { kind: "reading"; data: StudentReadingPractice }
+    | { kind: "listening"; data: StudentListeningPractice },
+) {
+  const [responses, setResponses] = useState<Record<string, PracticeResponse>>(
+    {},
+  );
+
+  const common: CommonProps = {
+    responses,
+    feedback: {},
+    revealed: {},
+    showCheck: false,
+    showStudentTools: false,
+    busyQuestion: null,
+    onResponse: (id, response) =>
+      setResponses((current) => ({ ...current, [id]: response })),
+    onCheck: () => {},
+    onReveal: () => {},
+  };
+
+  return props.kind === "reading" ? (
+    <StudentReadingBlock reading={props.data} {...common} />
+  ) : (
+    <StudentListeningBlock listening={props.data} {...common} />
   );
 }
 
