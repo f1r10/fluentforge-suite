@@ -340,7 +340,7 @@ function ReadingsPage() {
               <Field label={t("title")}><Input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} required autoFocus /></Field>
               <Field label={t("passage")}><Textarea rows={14} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} /></Field>
 
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="max-w-sm">
                 <Field label={t("language")}>
                   <select className={selectClass} value={editor.learning_language} onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}>
                     {editor.learning_language &&
@@ -358,6 +358,15 @@ function ReadingsPage() {
                     ))}
                   </select>
                 </Field>
+              </div>
+
+              <details className="rounded-md border border-border bg-muted/20 p-3">
+                <summary className="cursor-pointer select-none text-sm font-medium">
+                  {t("advanced")}
+                </summary>
+                <div className="mt-4 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-4">
+
                 <Field label={t("level")}>
                   <select className={selectClass} value={editor.level} onChange={(e) => setEditor({ ...editor, level: e.target.value })}>
                     <option value="">—</option>{LEVELS.map((x) => <option key={x}>{x}</option>)}
@@ -393,6 +402,8 @@ function ReadingsPage() {
               </Field>
 
               <Field label="Tags"><Input value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} placeholder="ielts, academic" /></Field>
+                </div>
+              </details>
 
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
