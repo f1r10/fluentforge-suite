@@ -683,11 +683,23 @@ export const addCatalogAssignment = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       if (!target) throw new Error("Group not found.");
 
-      const { error: insertError } = await context.supabase.from("catalog_assignments").upsert(
-        { catalog_id: data.catalogId, group_id: data.targetId, student_id: null },
-        { onConflict: "catalog_id,group_id", ignoreDuplicates: true },
-      );
-      if (insertError) throw new Error(insertError.message);
+      const { data: existing, error: existingError } = await context.supabase
+        .from("catalog_assignments")
+        .select("id")
+        .eq("catalog_id", data.catalogId)
+        .eq("group_id", data.targetId)
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (!existing) {
+        const { error: insertError } = await context.supabase
+          .from("catalog_assignments")
+          .insert({
+            catalog_id: data.catalogId,
+            group_id: data.targetId,
+            student_id: null,
+          });
+        if (insertError) throw new Error(insertError.message);
+      }
     } else {
       const { data: target, error } = await context.supabase
         .from("students")
@@ -698,11 +710,23 @@ export const addCatalogAssignment = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       if (!target || target.status === "archived") throw new Error("Student not found.");
 
-      const { error: insertError } = await context.supabase.from("catalog_assignments").upsert(
-        { catalog_id: data.catalogId, group_id: null, student_id: data.targetId },
-        { onConflict: "catalog_id,student_id", ignoreDuplicates: true },
-      );
-      if (insertError) throw new Error(insertError.message);
+      const { data: existing, error: existingError } = await context.supabase
+        .from("catalog_assignments")
+        .select("id")
+        .eq("catalog_id", data.catalogId)
+        .eq("student_id", data.targetId)
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (!existing) {
+        const { error: insertError } = await context.supabase
+          .from("catalog_assignments")
+          .insert({
+            catalog_id: data.catalogId,
+            group_id: null,
+            student_id: data.targetId,
+          });
+        if (insertError) throw new Error(insertError.message);
+      }
     }
 
     return { ok: true };
