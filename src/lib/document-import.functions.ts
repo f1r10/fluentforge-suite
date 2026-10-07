@@ -1172,6 +1172,12 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         .update({ created_entity_id: created.id })
         .eq("id", item.id);
 
+      await admin.from("source_collection_items").upsert({
+        source_file_id: job.source_file_id,
+        entity_type: "vocabulary",
+        entity_id: created.id,
+      });
+
       importedVocabulary += 1;
     }
 
