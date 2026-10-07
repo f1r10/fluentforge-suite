@@ -35,8 +35,8 @@ async function verifySchemaSecurity() {
     select count(*)::int as count
     from public.fluentforge_schema_migrations
   `;
-  if (migrationCount < 32) {
-    fail(`Expected at least 32 applied migrations, found ${migrationCount}.`);
+  if (migrationCount < 33) {
+    fail(`Expected at least 33 applied migrations, found ${migrationCount}.`);
   } else {
     pass(`Applied migrations: ${migrationCount}`);
   }
@@ -381,6 +381,82 @@ async function verifyPerformance() {
       values (${`acceptance-vocab-${suffix}`}, 'active')
       returning id
     `;
+
+    const [reusableContextQuestion] = await sql`
+      insert into public.questions(
+        question_type,
+        prompt,
+        context_kind,
+        reusable_independently,
+        learning_language,
+        level,
+        status
+      )
+      values (
+        'single_choice',
+        ${`Acceptance reusable context ${suffix}`},
+        'reading',
+        true,
+        'en',
+        'C2',
+        'active'
+      )
+      returning id
+    `;
+
+    const [boundContextQuestion] = await sql`
+      insert into public.questions(
+        question_type,
+        prompt,
+        context_kind,
+        reusable_independently,
+        learning_language,
+        level,
+        status
+      )
+      values (
+        'single_choice',
+        ${`Acceptance bound context ${suffix}`},
+        'reading',
+        false,
+        'en',
+        'C2',
+        'active'
+      )
+      returning id
+    `;
+
+    const selectedStandalone = await sql`
+      select question_id
+      from public.select_self_practice_question_ids(
+        ${student.id},
+        100,
+        'en',
+        'C2',
+        null,
+        null,
+        null,
+        null,
+        'all',
+        false
+      )
+    `;
+    const standaloneIds = new Set(
+      selectedStandalone.map((row) => row.question_id),
+    );
+    if (!standaloneIds.has(reusableContextQuestion.id)) {
+      fail(
+        "Self-practice selector excluded a contextual question explicitly marked reusable.",
+      );
+    } else if (standaloneIds.has(boundContextQuestion.id)) {
+      fail(
+        "Self-practice selector included a contextual question that was not marked reusable.",
+      );
+    } else {
+      pass(
+        "Self-practice selector honors reusable_independently for contextual questions",
+      );
+    }
 
     await sql`
       insert into public.activity_events(
