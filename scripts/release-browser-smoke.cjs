@@ -220,7 +220,9 @@ async function gotoHydrated(page, path) {
     console.log("[ok] teacher uploaded listening audio media");
 
     await gotoHydrated(page, "/teacher/readings");
-    await page.getByRole("button", { name: "Add reading" }).click();
+    await page
+      .getByRole("button", { name: /^(New reading|Add reading)$/ })
+      .click();
     const readingDialog = page.getByRole("dialog").last();
     await readingDialog.locator('input[required]').first().fill("Release Reading");
     await readingDialog
@@ -270,7 +272,9 @@ async function gotoHydrated(page, path) {
     console.log("[ok] reading workspace saved a contextual open-response question");
 
     await gotoHydrated(page, "/teacher/listenings");
-    await page.getByRole("button", { name: "Add listening" }).click();
+    await page
+      .getByRole("button", { name: /^(New listening|Add listening)$/ })
+      .click();
     const listeningDialog = page.getByRole("dialog").last();
     await listeningDialog
       .locator('input[required]')
