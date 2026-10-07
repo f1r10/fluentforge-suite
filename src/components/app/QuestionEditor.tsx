@@ -234,19 +234,14 @@ export function QuestionEditor({
       onSubmit={(e) => { e.preventDefault(); save(false); }}
       onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(true); } }}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="space-y-2 sm:col-span-2">
+      <div className="max-w-xl">
+        <div className="space-y-2">
           <Label>{t("type")}</Label>
           <select value={f.question_type} onChange={(e) => set({ question_type: e.target.value, correct: [], grading_mode: TYPE_BY_ID[e.target.value]?.defaultGrading ?? "automatic" })} className={sel}>
             {QUESTION_TYPES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
           </select>
         </div>
-        <div className="space-y-2">
-          <Label>{t("status")}</Label>
-          <select value={f.status} onChange={(e) => set({ status: e.target.value as Form["status"] })} className={sel}>
-            {(["active", "draft", "archived"] as const).map((s) => <option key={s} value={s}>{t(s)}</option>)}
-          </select>
-        </div>
+
       </div>
 
       <div className="space-y-2">
@@ -377,6 +372,17 @@ export function QuestionEditor({
         )}
       </section>
 
+      <details className="rounded-md border border-border bg-muted/20 p-3">
+        <summary className="cursor-pointer select-none text-sm font-medium">
+          {t("advanced")}
+        </summary>
+        <div className="mt-4 space-y-5">
+        <div className="space-y-2">
+          <Label>{t("status")}</Label>
+          <select value={f.status} onChange={(e) => set({ status: e.target.value as Form["status"] })} className={sel}>
+            {(["active", "draft", "archived"] as const).map((s) => <option key={s} value={s}>{t(s)}</option>)}
+          </select>
+        </div>
       {/* Scoring & metadata */}
       <div className="grid gap-4 sm:grid-cols-5">
         <div className="space-y-2"><Label>{t("points")}</Label><Input type="number" min={0} step={0.5} value={f.points} onChange={(e) => set({ points: Number(e.target.value) })} /></div>
@@ -439,6 +445,8 @@ export function QuestionEditor({
       <div className="space-y-2"><Label>Tags</Label><Input value={f.tags} placeholder="grammar, exam-2026" onChange={(e) => set({ tags: e.target.value })} /></div>
       <div className="space-y-2"><Label>{t("explanation")}</Label><Textarea value={f.explanation} onChange={(e) => set({ explanation: e.target.value })} /></div>
       <div className="space-y-2"><Label>{t("teacher_notes")}</Label><Textarea value={f.teacher_notes} onChange={(e) => set({ teacher_notes: e.target.value })} /></div>
+        </div>
+      </details>
 
       {dup && (
         <div className="space-y-2 rounded-md border border-destructive/40 p-3 text-sm">
