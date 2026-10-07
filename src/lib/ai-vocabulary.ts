@@ -24,7 +24,7 @@ const vocabularySuggestionSchema = z.object({
 
 export type VocabularyEnrichmentSuggestion =
   z.infer<typeof vocabularySuggestionSchema> & {
-    provider: "local" | "gemini";
+    provider: "local" | "gemini" | "dictionary";
     model: string;
     generated_at: string;
   };
