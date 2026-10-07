@@ -138,7 +138,9 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pin the CLI so CI does not need a GitHub "latest release" lookup,
+          # which can fail under API rate limiting.
+          version: 2.120.0
 
       - name: Start local Supabase
         run: supabase start
