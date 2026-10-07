@@ -613,6 +613,15 @@ export const unlinkQuestionFromContext = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ questionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
+    const { data: question, error: questionError } = await context.supabase
+      .from("questions")
+      .select("id,status,reusable_independently")
+      .eq("id", data.questionId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (questionError) throw new Error(questionError.message);
+    if (!question) throw new Error("Question was not found.");
+
     const { error } = await context.supabase
       .from("questions")
       .update({
@@ -620,8 +629,12 @@ export const unlinkQuestionFromContext = createServerFn({ method: "POST" })
         reading_question_set_id: null,
         listening_question_set_id: null,
         context_sort: 0,
+        ...(!question.reusable_independently && question.status === "active"
+          ? { status: "draft" as const }
+          : {}),
       })
-      .eq("id", data.questionId);
+      .eq("id", data.questionId)
+      .is("deleted_at", null);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -730,6 +743,16 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
         ? "reading_question_set_id"
         : "listening_question_set_id";
 
+    const { data: linkedQuestions, error: linkedQuestionsError } =
+      await context.supabase
+        .from("questions")
+        .select("id,status,reusable_independently")
+        .eq(column, data.id)
+        .is("deleted_at", null);
+    if (linkedQuestionsError) {
+      throw new Error(linkedQuestionsError.message);
+    }
+
     const { error: unlinkError } = await context.supabase
       .from("questions")
       .update({
@@ -741,6 +764,20 @@ export const deleteContextQuestionSet = createServerFn({ method: "POST" })
       .eq(column, data.id)
       .is("deleted_at", null);
     if (unlinkError) throw new Error(unlinkError.message);
+
+    const idsToDraft = (linkedQuestions ?? [])
+      .filter(
+        (question) =>
+          !question.reusable_independently && question.status === "active",
+      )
+      .map((question) => question.id);
+    if (idsToDraft.length) {
+      const { error: draftError } = await context.supabase
+        .from("questions")
+        .update({ status: "draft" })
+        .in("id", idsToDraft);
+      if (draftError) throw new Error(draftError.message);
+    }
 
     const { error } = await context.supabase
       .from(table)
