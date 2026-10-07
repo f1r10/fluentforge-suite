@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { listTopics } from "@/lib/questions.functions";
 import {
   getVocabularyEntry,
+  getVocabularyEnrichmentStatus,
   listVocabulary,
   saveVocabularyEntry,
   setVocabularyStatus,
@@ -88,6 +89,11 @@ function VocabularyPage() {
     )?.code ?? "";
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const topicOpts = topicOptions(topics);
+  const { data: enrichmentStatus } = useQuery({
+    queryKey: ["vocabulary-enrichment-status"],
+    queryFn: () => getVocabularyEnrichmentStatus(),
+    staleTime: 60_000,
+  });
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("");
   const [level, setLevel] = useState("");
@@ -525,14 +531,20 @@ function VocabularyPage() {
                   {t("vocabulary_enrichment")}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {t("vocabulary_enrichment_hint")}
+                  {enrichmentStatus?.available === false
+                    ? "AI suggestions are not configured for this installation."
+                    : t("vocabulary_enrichment_hint")}
                 </div>
               </div>
               <Button
                 type="button"
                 variant="outline"
                 onClick={generateEnrichment}
-                disabled={enriching || !editor.word.trim()}
+                disabled={
+                  enriching ||
+                  !editor.word.trim() ||
+                  enrichmentStatus?.available === false
+                }
               >
                 <Sparkles className="h-4 w-4" />
                 {enriching ? t("generating") : t("suggest_enrichment")}
