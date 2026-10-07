@@ -48,41 +48,10 @@ function silentWavBuffer(durationMs = 400) {
 }
 
 function minimalPdfBuffer() {
-  const stream =
-    "BT /F1 12 Tf 72 720 Td (1. Runtime PDF import works?) Tj " +
-    "0 -18 Td (A. Yes   B. No) Tj 0 -18 Td (Answer: 1 A) Tj ET";
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
-      "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
-    "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    "5 0 obj\n<< /Length " +
-      Buffer.byteLength(stream, "utf8") +
-      " >>\nstream\n" +
-      stream +
-      "\nendstream\nendobj\n",
-  ];
-
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const object of objects) {
-    offsets.push(Buffer.byteLength(pdf, "utf8"));
-    pdf += object;
-  }
-
-  const xrefOffset = Buffer.byteLength(pdf, "utf8");
-  pdf += "xref\n0 6\n";
-  pdf += "0000000000 65535 f \n";
-  for (let index = 1; index <= 5; index += 1) {
-    pdf += String(offsets[index]).padStart(10, "0") + " 00000 n \n";
-  }
-  pdf +=
-    "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" +
-    xrefOffset +
-    "\n%%EOF\n";
-
-  return Buffer.from(pdf, "utf8");
+  return Buffer.from(
+    "JVBERi0xLjcKJcK1wrYKCjEgMCBvYmoKPDwvVHlwZS9DYXRhbG9nL1BhZ2VzIDIgMCBSPj4KZW5kb2JqCgoyIDAgb2JqCjw8L1R5cGUvUGFnZXMvQ291bnQgMS9LaWRzWzQgMCBSXT4+CmVuZG9iagoKMyAwIG9iago8PC9Gb250PDwvaGVsdiA1IDAgUj4+Pj4KZW5kb2JqCgo0IDAgb2JqCjw8L1R5cGUvUGFnZS9NZWRpYUJveFswIDAgNjEyIDc5Ml0vUm90YXRlIDAvUmVzb3VyY2VzIDMgMCBSL1BhcmVudCAyIDAgUi9Db250ZW50c1s2IDAgUiA3IDAgUiA4IDAgUiA5IDAgUl0+PgplbmRvYmoKCjUgMCBvYmoKPDwvVHlwZS9Gb250L1N1YnR5cGUvVHlwZTEvQmFzZUZvbnQvSGVsdmV0aWNhL0VuY29kaW5nL1dpbkFuc2lFbmNvZGluZz4+CmVuZG9iagoKNiAwIG9iago8PC9MZW5ndGggMTAwL0ZpbHRlci9GbGF0ZURlY29kZT4+CnN0cmVhbQp42hWHsQrDMAwFd32F/qCyLOsRCB0KWbIFtIUsITYdmqFLv782d8MdfekVlFg6iaFd4bjp8a6fHyflaLzPOWlVKYriFeaTX176i5m5yniINyhMBRjlJ3JuzyNWWoI2+gO3rxedCmVuZHN0cmVhbQplbmRvYmoKCjcgMCBvYmoKPDwvTGVuZ3RoIDYwPj4Kc3RyZWFtCgpxCkJUCjEgMCAwIDEgNzIgNzAwIFRtCi9oZWx2IDEyIFRmIFs8NDEyZTIwNTk2NTczPl1USgpFVApRCgplbmRzdHJlYW0KZW5kb2JqCgo4IDAgb2JqCjw8L0xlbmd0aCA1OT4+CnN0cmVhbQoKcQpCVAoxIDAgMCAxIDE0MCA3MDAgVG0KL2hlbHYgMTIgVGYgWzw0MjJlMjA0ZTZmPl1USgpFVApRCgplbmRzdHJlYW0KZW5kb2JqCgo5IDAgb2JqCjw8L0xlbmd0aCA3MD4+CnN0cmVhbQoKcQpCVAoxIDAgMCAxIDcyIDY4MCBUbQovaGVsdiAxMiBUZiBbPDQxNmU3Mzc3NjU3MjNhMjAzMTIwNDE+XVRKCkVUClEKCmVuZHN0cmVhbQplbmRvYmoKCnhyZWYKMCAxMAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTYgMDAwMDAgbiAKMDAwMDAwMDA2MiAwMDAwMCBuIAowMDAwMDAwMTE0IDAwMDAwIG4gCjAwMDAwMDAxNTUgMDAwMDAgbiAKMDAwMDAwMDI4MCAwMDAwMCBuIAowMDAwMDAwMzY5IDAwMDAwIG4gCjAwMDAwMDA1MzggMDAwMDAgbiAKMDAwMDAwMDY0NyAwMDAwMCBuIAowMDAwMDAwNzU1IDAwMDAwIG4gCgp0cmFpbGVyCjw8L1NpemUgMTAvUm9vdCAxIDAgUi9JRFs8QzNBQUMzODMxQkMyOTdDMjk1QzI5RDAyQzI5RDQ3QzI+PDIwMjNGOUJCMzYwNEUyMENFN0YwMUJDQjU3NDREM0ZEPl0+PgpzdGFydHhyZWYKODc0CiUlRU9GCg==",
+    "base64",
+  );
 }
 
 async function useEnglish(page) {
