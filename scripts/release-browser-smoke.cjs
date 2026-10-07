@@ -369,23 +369,8 @@ async function gotoHydrated(page, path) {
         "FluentForge lets students practise questions, readings and listenings in one learning workspace.",
       );
 
-    const readingSetsPanel = readingDialog
-      .getByText("Question sets", { exact: true })
-      .locator("xpath=ancestor::section");
-    await readingSetsPanel.getByRole("button", { name: "Add", exact: true }).click();
-    await readingSetsPanel
-      .locator('input[placeholder="Title"]')
-      .fill("Release Reading Set");
-    await readingSetsPanel
-      .locator('input[placeholder="Instructions"]')
-      .fill("Answer the reading question.");
-    await readingDialog.getByRole("button", { name: "Save", exact: true }).last().click();
-
     await readingDialog
-      .getByRole("button", { name: "Create question here" })
-      .waitFor({ timeout: 20000 });
-    await readingDialog
-      .getByRole("button", { name: "Create question here" })
+      .getByRole("button", { name: "New question", exact: true })
       .click();
 
     const readingQuestionDialog = page
@@ -430,11 +415,15 @@ async function gotoHydrated(page, path) {
         exact: true,
       })
       .waitFor({ timeout: 20000 });
+    await readingDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .last()
+      .click();
     await page.keyboard.press("Escape");
     await page
       .getByText("Release Reading", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] reading workspace saved a contextual open-response question with visual stimulus");
+    console.log("[ok] novice Reading flow created a contextual question without question-set setup");
 
     const readingRow = page
       .getByText("Release Reading", { exact: true })
@@ -495,43 +484,8 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 30000 });
     console.log("[ok] Listening media uploaded and selected without leaving the editor");
 
-    const listeningAdvanced = listeningDialog.locator("details > summary").first();
-    await listeningAdvanced.click();
     await listeningDialog
-      .getByText("Sections", { exact: true })
-      .waitFor({ timeout: 20000 });
-
-    const sectionsPanel = listeningDialog
-      .getByText("Sections", { exact: true })
-      .locator("xpath=ancestor::section");
-    await sectionsPanel.getByRole("button", { name: "Add", exact: true }).click();
-    await sectionsPanel
-      .locator('input[placeholder="Title"]')
-      .fill("Part 1");
-
-    const listeningSetsPanel = listeningDialog
-      .getByText("Question sets", { exact: true })
-      .locator("xpath=ancestor::section");
-    await listeningSetsPanel
-      .getByRole("button", { name: "Add", exact: true })
-      .click();
-    await listeningSetsPanel
-      .locator('input[placeholder="Title"]')
-      .fill("Release Listening Set");
-    await listeningSetsPanel
-      .locator('input[placeholder="Instructions"]')
-      .fill("Listen and answer.");
-    await listeningSetsPanel.locator("select").selectOption({ label: "Part 1" });
-
-    await listeningDialog
-      .getByRole("button", { name: "Save", exact: true })
-      .last()
-      .click();
-    await listeningDialog
-      .getByRole("button", { name: "Create question here" })
-      .waitFor({ timeout: 20000 });
-    await listeningDialog
-      .getByRole("button", { name: "Create question here" })
+      .getByRole("button", { name: "New question", exact: true })
       .click();
 
     const listeningQuestionDialog = page
@@ -559,11 +513,15 @@ async function gotoHydrated(page, path) {
     await listeningDialog
       .getByText("The listening activity is available.", { exact: true })
       .waitFor({ timeout: 20000 });
+    await listeningDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .last()
+      .click();
     await page.keyboard.press("Escape");
     await page
       .getByText("Release Listening", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] listening workspace saved media, section and contextual question");
+    console.log("[ok] novice Listening flow saved media and contextual question without set/section setup");
 
     const listeningRow = page
       .getByText("Release Listening", { exact: true })
