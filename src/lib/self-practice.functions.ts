@@ -549,11 +549,23 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     const vocabulary = withCatalogs(
       "vocabulary",
       (vocabularyResult.data ?? []).map((row) => ({
-        ...row,
-        translations: (row.vocabulary_translations ?? []) as Array<{
-          language: string;
-          value: string;
-        }>,
+        id: row.id,
+        word: row.word,
+        part_of_speech: row.part_of_speech,
+        learning_language: row.learning_language,
+        level: row.level,
+        translationLanguages: [
+          ...new Set(
+            (
+              (row.vocabulary_translations ?? []) as Array<{
+                language: string;
+                value: string;
+              }>
+            )
+              .map((translation) => translation.language)
+              .filter(Boolean),
+          ),
+        ],
       })),
     );
 
@@ -572,11 +584,7 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
 
     const translationLanguages = [
       ...new Set(
-        vocabulary.flatMap((row) =>
-          row.translations
-            .map((translation) => translation.language)
-            .filter(Boolean),
-        ),
+        vocabulary.flatMap((row) => row.translationLanguages),
       ),
     ].sort();
 
