@@ -256,6 +256,7 @@ export const saveImportProfile = createServerFn({ method: "POST" })
             .enum(["auto", "questions", "vocabulary", "readings", "listenings", "mixed"])
             .default("auto"),
           learning_language: z.string().max(10).nullable().default(null),
+          translation_language: z.string().max(10).nullable().default(null),
           level: z.string().max(20).nullable().default(null),
           status: z.enum(["draft", "active"]).default("draft"),
           auto_approve_confidence: z.number().min(0.5).max(1).default(0.95),
