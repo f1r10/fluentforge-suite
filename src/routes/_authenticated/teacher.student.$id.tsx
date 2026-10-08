@@ -365,6 +365,8 @@ function friendlyLocation(location: string, t: (key: string) => string) {
 
 function friendlyEvent(type: string, t: (key: string) => string) {
   const map: Record<string, string> = {
+    login: "student_signed_in",
+    logout: "student_signed_out",
     practice_finished: "practice_finished",
     practice_question_skipped: "question_skipped",
     practice_vocabulary_skipped: "vocabulary_skipped",
