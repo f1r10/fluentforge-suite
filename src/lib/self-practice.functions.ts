@@ -609,9 +609,23 @@ async function ensurePoolCatalogAccess(
   assignedIds: string[],
   catalogId: string | null,
 ) {
-  if (!catalogId) throw new Error("Choose a catalog for this content section.");
+  if (!catalogId) {
+    throw new Error("Choose a catalog for this content section.");
+  }
   if (!assignedIds.includes(catalogId)) {
     throw new Error("This catalog is not assigned to you.");
+  }
+
+  const { data: catalog, error } = await admin
+    .from("catalogs")
+    .select("id")
+    .eq("id", catalogId)
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!catalog) {
+    throw new Error("This catalog is not currently available.");
   }
 }
 
