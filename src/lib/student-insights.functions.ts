@@ -37,7 +37,7 @@ export const getTeacherStudentActivity = createServerFn({ method: "GET" })
     if (studentResult.error) throw new Error(studentResult.error.message);
     if (!studentResult.data) throw new Error("Student not found.");
 
-    const [sessionsResult, activityResult, attemptsResult] = await Promise.all([
+    const [sessionsResult, activityResult, attemptsResult, dictationResult] = await Promise.all([
       admin
         .from("student_sessions")
         .select("id,started_at,last_seen_at,current_location,revoked_at")
@@ -61,8 +61,14 @@ export const getTeacherStudentActivity = createServerFn({ method: "GET" })
         .is("reset_at", null)
         .order("started_at", { ascending: false })
         .limit(200),
+      admin
+        .from("listening_dictation_attempts")
+        .select("id,listening_id,response_text,transcript_snapshot,score_percent,submitted_at")
+        .eq("student_id", data.studentId)
+        .order("submitted_at", { ascending: false })
+        .limit(200),
     ]);
-    for (const result of [sessionsResult, activityResult, attemptsResult]) {
+    for (const result of [sessionsResult, activityResult, attemptsResult, dictationResult]) {
       if (result.error) throw new Error(result.error.message);
     }
 
@@ -225,7 +231,24 @@ export const getTeacherStudentActivity = createServerFn({ method: "GET" })
       };
     });
 
-    const answers = [...practiceAnswers, ...vocabularyAnswers, ...examAnswers]
+    const dictationAnswers = (dictationResult.data ?? []).map((row) => ({
+      id: row.id,
+      kind: "question" as const,
+      source: "dictation",
+      prompt: "Listening dictation",
+      questionType: "dictation",
+      payload: {},
+      correctAnswer: { transcript: row.transcript_snapshot },
+      explanation: null,
+      studentResponse: { value: row.response_text },
+      isCorrect: row.score_percent === 100,
+      score: row.score_percent,
+      maxScore: 100,
+      durationMs: null,
+      at: row.submitted_at,
+    }));
+
+    const answers = [...practiceAnswers, ...vocabularyAnswers, ...examAnswers, ...dictationAnswers]
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
       .slice(0, 1000);
 
@@ -288,7 +311,7 @@ export const getTeacherStudentActivity = createServerFn({ method: "GET" })
       activity: activities
         .filter(
           (row) =>
-            !["practice_answer", "vocabulary_answer"].includes(row.event_type),
+            !["practice_answer", "vocabulary_answer", "dictation_answer"].includes(row.event_type),
         )
         .slice(0, 300)
         .map((row) => ({
