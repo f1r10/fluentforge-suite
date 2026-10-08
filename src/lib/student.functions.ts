@@ -29,6 +29,43 @@ export const heartbeat = createServerFn({ method: "POST" })
   });
 
 
+export const endMySession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: sid } = await context.supabase.rpc("current_student_id");
+    if (!sid) return { ok: false };
+
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const claims = (context.claims ?? {}) as Record<string, unknown>;
+    const sessionId =
+      typeof claims["session_id"] === "string"
+        ? claims["session_id"]
+        : null;
+    const now = new Date().toISOString();
+
+    if (sessionId) {
+      const { error } = await admin
+        .from("student_sessions")
+        .update({ last_seen_at: now, revoked_at: now })
+        .eq("student_id", sid)
+        .eq("auth_session_id", sessionId)
+        .is("revoked_at", null);
+      if (error) throw new Error(error.message);
+    }
+
+    const { error: activityError } = await admin
+      .from("activity_events")
+      .insert({
+        student_id: sid,
+        category: "session",
+        event_type: "logout",
+      });
+    if (activityError) throw new Error(activityError.message);
+    return { ok: true };
+  });
+
+
 const favoriteEntitySchema = z.enum(["question", "vocabulary"]);
 
 export const toggleFavorite = createServerFn({ method: "POST" })
