@@ -978,3 +978,68 @@ def test_vocabulary_spreadsheet_accepts_common_dictionary_headers(tmp_path: Path
     assert payload["translations"] == [
         {"language": "az", "value": "alma"}
     ]
+
+
+def test_quizlet_semicolon_vocabulary_pairs():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "apple, alma; book, kitab; reliable, etibarlı\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert [item["payload"]["word"] for item in items] == [
+        "apple",
+        "book",
+        "reliable",
+    ]
+    assert [item["payload"]["definition"] for item in items] == [
+        "alma",
+        "kitab",
+        "etibarlı",
+    ]
+
+
+def test_anki_semicolon_delimited_vocabulary_csv(tmp_path: Path):
+    source = tmp_path / "anki.csv"
+    source.write_text(
+        "word;definition;part_of_speech;cefr\n"
+        "apple;a round fruit;noun;A1\n"
+        "reliable;able to be trusted;adjective;B1\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/csv")
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert extraction.stats["delimiter"] == ";"
+    assert [item["payload"]["word"] for item in items] == [
+        "apple",
+        "reliable",
+    ]
+    assert items[0]["payload"]["part_of_speech"] == "noun"
+    assert items[1]["payload"]["level"] == "B1"
