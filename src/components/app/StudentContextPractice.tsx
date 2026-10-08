@@ -9,6 +9,7 @@ import {
   type PracticeResponse,
 } from "@/components/app/PracticeQuestionCard";
 import { useI18n } from "@/lib/i18n";
+import { ListeningDictation } from "@/components/app/ListeningDictation";
 
 export type StudentQuestionSet = {
   id: string;
@@ -360,6 +361,10 @@ export function StudentListeningBlock({
             </span>
           ))}
         </div>
+      )}
+
+      {listening.playback_rules.dictation_enabled && props.showStudentTools !== false && (
+        <ListeningDictation listeningId={listening.id} />
       )}
 
       <QuestionSets sets={listening.question_sets} {...props} />
