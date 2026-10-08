@@ -19,6 +19,7 @@ import {
   Home,
   LogOut,
   RotateCcw,
+  CalendarClock,
 } from "lucide-react";
 import { getWhoAmI } from "@/lib/teacher.functions";
 import { endMySession, setMyLanguage } from "@/lib/student.functions";
@@ -48,6 +49,7 @@ const nav = [
   { to: "/student/catalogs" as const, key: "my_catalogs", icon: FolderOpen },
   { to: "/student/library" as const, key: "library", icon: BookMarked },
   { to: "/student/mistakes" as const, key: "my_mistakes", icon: RotateCcw },
+  { to: "/student/reviews" as const, key: "reviews_due", icon: CalendarClock },
   { to: "/student/practice" as const, key: "self_practice", icon: Dumbbell },
   { to: "/student/exams" as const, key: "exams", icon: ClipboardList },
   { to: "/student/notifications" as const, key: "notifications", icon: Bell },

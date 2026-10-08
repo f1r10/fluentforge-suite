@@ -5,6 +5,7 @@ import { BarChart3, BookOpen, BookType, CheckCircle2, ChevronRight, ClipboardLis
 import { getMyDashboardSettings, heartbeat, listMyFavorites } from "@/lib/student.functions";
 import { listStudentCatalogs } from "@/lib/practice.functions";
 import { getMyPracticeProgress } from "@/lib/self-practice.functions";
+import { getMyDueReviews } from "@/lib/due-reviews.functions";
 import { listStudentExams } from "@/lib/exam-attempt.functions";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n, type Lang } from "@/lib/i18n";
@@ -25,6 +26,10 @@ function StudentHome() {
   const { data: progress } = useQuery({
     queryKey: ["practice-progress"],
     queryFn: () => getMyPracticeProgress(),
+  });
+  const { data: dueReviews } = useQuery({
+    queryKey: ["due-reviews"],
+    queryFn: () => getMyDueReviews(),
   });
   const { data: exams = [] } = useQuery({
     queryKey: ["student-exams"],
@@ -77,6 +82,19 @@ function StudentHome() {
           {me.first_name} {me.last_name}
         </h1>
       </header>
+
+      <Link
+        to="/student/reviews"
+        className="mb-5 flex items-center justify-between gap-3 rounded-md border border-border p-4 hover:bg-accent"
+      >
+        <div>
+          <div className="font-medium">{t("reviews_due")}</div>
+          <p className="text-sm text-muted-foreground">{t("reviews_due_hint")}</p>
+        </div>
+        <span className="shrink-0 rounded-md bg-muted px-3 py-2 text-lg font-semibold tabular-nums">
+          {dueReviews?.count ?? "—"}
+        </span>
+      </Link>
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
