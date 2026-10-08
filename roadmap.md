@@ -1,4 +1,21 @@
 # Roadmap
+## V1.0 learning experience extension (in progress)
+
+Scope: **single teacher + students, no AI required**. Detailed acceptance plan:
+[docs/V1_0_LEARNING_EXPERIENCE_PLAN.md](docs/V1_0_LEARNING_EXPERIENCE_PLAN.md).
+
+- [x] Research Moodle course sequencing, Anki-style intervals, H5P dictation patterns.
+- [x] Add pure, regression-tested lesson sequencing, deterministic spaced reviews and dictation grading.
+- [x] Add student due-review schedule and server-graded practice integration.
+- [x] Add due-review student page, dashboard shortcut, and AZ/EN/RU/TR labels (CI and device acceptance pending).
+- [x] Add initial teacher-enabled listening dictation, student writing widget and server scoring (CI and device acceptance pending).
+- [ ] Integrate **Lesson mode** with existing catalogs: teacher-created ordered steps, progress, draft/publish immutable revision, strict server-side unlock rules and student "Continue learning".
+- [ ] Support teacher-configurable step completion (view/attempt/passing score) and verify historical grades do not mutate on lesson edits.
+- [ ] Complete review idempotency/concurrency testing on two devices and validate all graded pathways (including exam mistakes) alongside teacher progress.
+- [ ] Complete dictated audio playback limits, content visibility and teacher-level answer-detail integration; test multiple audio formats.
+- [ ] Real teacher/student UX accessibility tests, realistic language PDFs/Word/Excel import verification and browser acceptance.
+- [ ] Real target-host HTTPS/security, migration, backup/restore and reboot acceptance; merge and tag only when passing.
+
 
 ## Foundation
 - [x] Full PostgreSQL schema foundation
