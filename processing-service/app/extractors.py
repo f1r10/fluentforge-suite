@@ -687,7 +687,7 @@ def _infer_vocabulary_languages_from_text(
                 r"[^\wƏəĞğİıÖöŞşÇçÜüА-Яа-яЁё]+",
                 "",
                 token,
-            ).casefold()
+            ).casefold().replace("\u0307", "")
             for token in cleaned.split()
         ]
         languages = [aliases[token] for token in tokens if token in aliases]
