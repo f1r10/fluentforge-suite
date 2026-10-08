@@ -412,6 +412,64 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 30000 });
     console.log("[ok] teacher uploaded visual question stimulus media");
 
+    await gotoHydrated(page, "/teacher/library");
+    await page
+      .getByRole("heading", { name: "Library", level: 1 })
+      .waitFor({ timeout: 20000 });
+    await page
+      .getByRole("button", { name: "New section", exact: true })
+      .click();
+    const librarySectionDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "New section",
+          exact: true,
+        }),
+      });
+    await librarySectionDialog
+      .locator("input")
+      .first()
+      .fill("Release Books");
+    await librarySectionDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Release Books", exact: true })
+      .waitFor({ timeout: 20000 });
+
+    await page
+      .getByRole("button", { name: "Add book", exact: true })
+      .click();
+    const libraryBookDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Add book",
+          exact: true,
+        }),
+      });
+    await libraryBookDialog
+      .locator("select")
+      .first()
+      .selectOption({ label: "Release Books" });
+    await libraryBookDialog
+      .locator('input:not([type="file"])')
+      .first()
+      .fill("Release Library Book");
+    await libraryBookDialog.locator('input[type="file"]').setInputFiles({
+      name: "release-library-book.pdf",
+      mimeType: "application/pdf",
+      buffer: minimalPdfBuffer(),
+    });
+    await libraryBookDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await page
+      .getByText("Release Library Book", { exact: true })
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher created a custom library section and uploaded a PDF book");
+
     await gotoHydrated(page, "/teacher/readings");
     await page
       .getByRole("button", { name: /^(New reading|Add reading)$/ })
@@ -679,6 +737,32 @@ async function gotoHydrated(page, path) {
       .getByText("Release Catalog", { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] directly assigned catalog is visible to the student");
+
+    await gotoHydrated(studentPage, "/student/library");
+    await studentPage
+      .getByRole("heading", { name: "Library", level: 1 })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByRole("button", { name: "Release Books", exact: true })
+      .click();
+    await studentPage
+      .getByText("Release Library Book", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByRole("button", { name: "View", exact: true })
+      .click();
+    await studentPage
+      .getByRole("dialog")
+      .filter({
+        has: studentPage.getByRole("heading", {
+          name: "Release Library Book",
+          exact: true,
+        }),
+      })
+      .locator("iframe")
+      .waitFor({ timeout: 20000 });
+    await studentPage.keyboard.press("Escape");
+    console.log("[ok] student can browse and preview a teacher-shared library PDF");
 
     const studentLibraryChecks = [
       ["/student/questions", "Question Bank"],
