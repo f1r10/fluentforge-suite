@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Activity, BarChart3, Bell, BookOpen, Database, Download, FileQuestion, FileSearch, Headphones, Images, Inbox, ScrollText, Tags, LayoutDashboard, LibraryBig, Users, UsersRound, FolderOpen, ClipboardList, Settings, LogOut, Trash2 } from "lucide-react";
+import { Activity, BarChart3, Bell, BookMarked, BookOpen, Database, Download, FileQuestion, FileSearch, Headphones, Images, Inbox, ScrollText, Tags, LayoutDashboard, LibraryBig, Users, UsersRound, FolderOpen, ClipboardList, Settings, LogOut, Trash2 } from "lucide-react";
 import { getWhoAmI } from "@/lib/teacher.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { brandingQuery } from "@/routes/__root";
@@ -26,6 +26,7 @@ const NAV = [
   { to: "/teacher/readings", key: "readings", icon: LibraryBig },
   { to: "/teacher/listenings", key: "listenings", icon: Headphones },
   { to: "/teacher/media", key: "media_library", icon: Images },
+  { to: "/teacher/library", key: "library", icon: BookMarked },
   { to: "/teacher/sources", key: "sources_imports", icon: FileSearch },
   { to: "/teacher/topics", key: "topics", icon: Tags },
   { to: "/teacher/catalogs", key: "catalogs", icon: FolderOpen },
