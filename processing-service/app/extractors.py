@@ -715,6 +715,9 @@ VOCAB_POS_ALIASES = {
     "modal verb": "modal verb",
     "auxiliary verb": "auxiliary verb",
     "phrasal verb": "phrasal verb",
+    "article": "article",
+    "indefinite article": "indefinite article",
+    "definite article": "definite article",
 }
 
 VOCAB_LEVEL_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$", re.IGNORECASE)
@@ -792,6 +795,36 @@ def _parse_vocab_head(
         key = pos_match.group(1).casefold()
         pos = VOCAB_POS_ALIASES.get(key)
         value = value[: pos_match.start()].strip()
+    else:
+        # Oxford downloadable lists commonly use compact labels such as
+        # "n.", "v.", "adj.", or combined "prep., adv.".
+        short_match = re.search(
+            r"\s+((?:(?:n|v|adj|adv|prep|pron|det|conj|exclam)\.(?:\s*,\s*|\s*)?)+)\s*$",
+            value,
+            re.IGNORECASE,
+        )
+        if short_match:
+            short_map = {
+                "n": "noun",
+                "v": "verb",
+                "adj": "adjective",
+                "adv": "adverb",
+                "prep": "preposition",
+                "pron": "pronoun",
+                "det": "determiner",
+                "conj": "conjunction",
+                "exclam": "exclamation",
+            }
+            labels = [
+                short_map[token.casefold()]
+                for token in re.findall(
+                    r"(n|v|adj|adv|prep|pron|det|conj|exclam)\.",
+                    short_match.group(1),
+                    re.IGNORECASE,
+                )
+            ]
+            pos = ", ".join(dict.fromkeys(labels)) or None
+            value = value[: short_match.start()].strip()
 
     return _clean_vocab_word(value), ipa, pos, level
 
@@ -879,6 +912,20 @@ def _vocabulary_from_text(
         if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
             continue
 
+        # Recognize dictionary word-list metadata before comma-based
+        # term/definition parsing. This prevents entries such as
+        # "a, an indefinite article A1" from being split into a fake definition.
+        word, ipa, pos, level = _parse_vocab_head(line)
+        if (pos or level or ipa) and _looks_like_vocab_term(word):
+            add(
+                word,
+                ipa=ipa,
+                part_of_speech=pos,
+                level=level,
+                confidence=0.92 if level and pos else 0.84,
+            )
+            continue
+
         # Dictionary / teacher-list / Quizlet formats:
         # word<TAB>meaning, word — meaning, word - meaning, word: meaning,
         # and simple term,definition rows.
@@ -919,18 +966,6 @@ def _vocabulary_from_text(
                     else 0.76,
                 )
                 continue
-
-        # Oxford-style printable lists commonly expose: word + part of speech + CEFR.
-        word, ipa, pos, level = _parse_vocab_head(line)
-        if (pos or level or ipa) and _looks_like_vocab_term(word):
-            add(
-                word,
-                ipa=ipa,
-                part_of_speech=pos,
-                level=level,
-                confidence=0.9 if level and pos else 0.82,
-            )
-            continue
 
         # Some PDF word lists are laid out in columns. Preserve independent terms
         # split by wide whitespace instead of treating a whole row as one phrase.
