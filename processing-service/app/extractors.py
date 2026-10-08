@@ -765,6 +765,19 @@ def _split_numbered_bilingual_vocab(
     if len(tokens) < 2:
         return None
 
+    # Numbered teacher glossaries are normally written as
+    # "English headword + translation". For English, prefer a single
+    # headword token and only extend it for common phrasal-verb particles.
+    # This correctly keeps "than | daha çox" instead of "than daha | çox".
+    if learning_language == "en":
+        particles = {
+            "after", "away", "back", "down", "for", "in", "into", "off",
+            "on", "out", "over", "through", "to", "up", "with",
+        }
+        if len(tokens) >= 3 and tokens[1].casefold() in particles:
+            return " ".join(tokens[:2]), " ".join(tokens[2:])
+        return tokens[0], " ".join(tokens[1:])
+
     target_specific: dict[str, re.Pattern[str]] = {
         "az": re.compile(r"[əƏğĞıİöÖşŞçÇüÜ]"),
         "tr": re.compile(r"[ğĞıİöÖşŞçÇüÜ]"),
@@ -778,18 +791,6 @@ def _split_numbered_bilingual_vocab(
                 meaning = " ".join(tokens[index:]).strip()
                 if head and meaning:
                     return head, meaning
-
-    # Preserve common English multi-word headwords/phrasal verbs when the
-    # target text does not contain language-specific characters.
-    if learning_language == "en" and len(tokens) >= 3:
-        particles = {
-            "after", "away", "back", "down", "for", "in", "into", "off",
-            "on", "out", "over", "through", "to", "up", "with",
-        }
-        if tokens[1].casefold() in particles:
-            return " ".join(tokens[:2]), " ".join(tokens[2:])
-        if tokens[0].casefold() in {"a", "an", "the"}:
-            return " ".join(tokens[:2]), " ".join(tokens[2:])
 
     return tokens[0], " ".join(tokens[1:])
 
