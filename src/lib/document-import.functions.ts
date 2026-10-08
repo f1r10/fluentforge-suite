@@ -793,6 +793,43 @@ export const updateImportItem = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const approveAllReadyItems = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({ jobId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: candidates, error: candidateError } = await context.supabase
+      .from("import_items")
+      .select("id,item_type,payload,duplicate_of,created_entity_id")
+      .eq("job_id", data.jobId)
+      .eq("decision", "pending");
+    if (candidateError) throw new Error(candidateError.message);
+
+    const readyIds = (candidates ?? [])
+      .filter(
+        (item) =>
+          !item.duplicate_of &&
+          !item.created_entity_id &&
+          validateImportItemPayload(item.item_type, item.payload).state ===
+            "ready",
+      )
+      .map((item) => item.id);
+
+    if (readyIds.length) {
+      const { error } = await context.supabase
+        .from("import_items")
+        .update({ decision: "approved" })
+        .in("id", readyIds);
+      if (error) throw new Error(error.message);
+    }
+
+    return {
+      approved: readyIds.length,
+      skipped: (candidates?.length ?? 0) - readyIds.length,
+    };
+  });
+
 export const approveHighConfidenceItems = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
