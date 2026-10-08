@@ -224,12 +224,18 @@ async function gotoHydrated(page, path) {
 
     await page.keyboard.press("Escape");
     await gotoHydrated(page, "/teacher/questions");
-    await page.locator("select").last().selectOption("draft");
+    assert(
+      (await page.locator("select").last().inputValue()) === "all",
+      "Question Bank must show all statuses by default so imported drafts are not hidden.",
+    );
     const importedQuestion = page
       .getByText("Runtime PDF import works?", { exact: true })
       .locator("xpath=ancestor::li");
     await importedQuestion.waitFor({ timeout: 20000 });
-    console.log("[ok] imported PDF question visible as a review-safe draft in teacher Question Bank");
+    await importedQuestion
+      .getByText("draft", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] imported PDF draft is visible in Question Bank without changing filters");
 
     await importedQuestion.getByRole("checkbox", { name: "select" }).click();
     await page.getByRole("button", { name: "Enable", exact: true }).click();
@@ -292,12 +298,18 @@ async function gotoHydrated(page, path) {
     await page.keyboard.press("Escape");
 
     await gotoHydrated(page, "/teacher/vocabulary");
-    await page.locator("select").last().selectOption("draft");
+    assert(
+      (await page.locator("select").last().inputValue()) === "all",
+      "Vocabulary Bank must show all statuses by default so imported drafts are not hidden.",
+    );
     const importedVocabularyRow = page
       .getByText("releaseword", { exact: true })
       .locator("xpath=ancestor::tr");
     await importedVocabularyRow.waitFor({ timeout: 20000 });
-    console.log("[ok] CSV vocabulary import reached Vocabulary Bank as review-safe draft");
+    await importedVocabularyRow
+      .getByText("draft", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] imported vocabulary draft is visible without changing filters");
 
     await importedVocabularyRow.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Active", exact: true }).click();
