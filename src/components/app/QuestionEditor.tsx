@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,16 +11,21 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { saveQuestion, type QuestionInput } from "@/lib/questions.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions, type TopicRow } from "@/components/app/topics";
+import { QuestionLabellingEditor, type SpatialLabel } from "@/components/app/QuestionLabellingEditor";
+import { QuestionMediaAttachment } from "@/components/app/QuestionMediaAttachment";
 import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
 
 type Opt = { id: string; text: string };
 type Pair = { left: string; right: string };
 type Form = {
   question_type: string; prompt: string; instructions: string; explanation: string; teacher_notes: string;
   level: string; learning_language: string; status: "active" | "draft" | "archived";
+  difficulty: number | null; reusable_independently: boolean;
   grading_mode: "automatic" | "manual" | "ai_assisted"; points: number; partial: boolean; negative: number;
-  case_sensitive: boolean; ignore_punctuation: boolean; ignore_diacritics: boolean;
+  case_sensitive: boolean; trim_whitespace: boolean; ignore_punctuation: boolean; ignore_diacritics: boolean;
   options: Opt[]; correct: string[]; blanks: string[]; pairs: Pair[]; order: string[]; model_answer: string;
+  media_id: string; media_label: string; labels: SpatialLabel[];
   topicIds: string[]; tags: string;
 };
 
@@ -29,11 +34,13 @@ const sel = "h-9 w-full rounded-md border border-input bg-background px-2 text-s
 
 function empty(type = "single_choice"): Form {
   return {
-    question_type: type, prompt: "", instructions: "", explanation: "", teacher_notes: "", level: "", learning_language: "en", status: "active",
+    question_type: type, prompt: "", instructions: "", explanation: "", teacher_notes: "", level: "", learning_language: "", status: "active",
+    difficulty: null, reusable_independently: false,
     grading_mode: TYPE_BY_ID[type]?.defaultGrading ?? "automatic", points: 1, partial: false, negative: 0,
-    case_sensitive: false, ignore_punctuation: false, ignore_diacritics: false,
+    case_sensitive: false, trim_whitespace: true, ignore_punctuation: false, ignore_diacritics: false,
     options: [{ id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }, { id: uid(), text: "" }], correct: [], blanks: [""],
-    pairs: [{ left: "", right: "" }, { left: "", right: "" }], order: ["", "", ""], model_answer: "", topicIds: [], tags: "",
+    pairs: [{ left: "", right: "" }, { left: "", right: "" }], order: ["", "", ""], model_answer: "",
+    media_id: "", media_label: "", labels: [], topicIds: [], tags: "",
   };
 }
 
@@ -45,12 +52,20 @@ export function fromQuestion(q: QuestionInput & { topicIds?: string[]; tags?: st
   const n = (q.normalization ?? {}) as Record<string, boolean>;
   return {
     ...f, prompt: q.prompt ?? "", instructions: q.instructions ?? "", explanation: q.explanation ?? "", teacher_notes: q.teacher_notes ?? "",
-    level: q.level ?? "", learning_language: q.learning_language ?? "", status: q.status ?? "active", grading_mode: q.grading_mode ?? "automatic",
+    level: q.level ?? "", learning_language: q.learning_language ?? "", status: q.status ?? "active",
+    difficulty: q.difficulty ?? null,
+    reusable_independently: q.reusable_independently ?? false,
+    grading_mode: q.grading_mode ?? "automatic",
     points: Number(s["points"] ?? 1), partial: !!s["partial"], negative: Number(s["negative"] ?? 0),
-    case_sensitive: !!n["case_sensitive"], ignore_punctuation: !!n["ignore_punctuation"], ignore_diacritics: !!n["ignore_diacritics"],
+    case_sensitive: !!n["case_sensitive"],
+    trim_whitespace: n["trim_whitespace"] !== false,
+    ignore_punctuation: !!n["ignore_punctuation"], ignore_diacritics: !!n["ignore_diacritics"],
     options: (p["options"] as Opt[]) ?? f.options, correct: (k["correct"] as string[]) ?? [],
     blanks: ((k["blanks"] as string[][]) ?? [[]]).map((b) => b.join(" | ")),
     pairs: (k["pairs"] as Pair[]) ?? f.pairs, order: (k["order"] as string[]) ?? f.order, model_answer: String(k["model_answer"] ?? ""),
+    media_id: typeof p["media_id"] === "string" ? p["media_id"] : "",
+    media_label: "",
+    labels: Array.isArray(p["labels"]) ? (p["labels"] as SpatialLabel[]) : [],
     topicIds: q.topicIds ?? [], tags: (q.tags ?? []).join(", "),
   };
 }
@@ -67,16 +82,49 @@ function toInput(f: Form, id?: string): QuestionInput {
       break;
     }
     case "fixed_choice": payload = { options: def.fixedOptions }; answer_key = { correct: f.correct }; break;
-    case "text": answer_key = { blanks: f.blanks.map((b) => b.split("|").map((x) => x.trim()).filter(Boolean)) }; payload = { blank_count: f.blanks.length }; break;
+    case "text":
+      answer_key = {
+        blanks: f.blanks.map((b) =>
+          b
+            .split("|")
+            .map((x) => x.trim())
+            .filter(Boolean),
+        ),
+      };
+      payload = {
+        blank_count: f.blanks.length,
+      };
+      break;
     case "open": answer_key = f.model_answer ? { model_answer: f.model_answer } : {}; break;
-    case "matching": answer_key = { pairs: f.pairs.filter((p) => p.left.trim() || p.right.trim()) }; break;
+    case "matching":
+      if (isSpatialLabelling(f.question_type)) {
+        payload = {
+          media_id: f.media_id || null,
+          labels: f.labels,
+          allow_reuse: false,
+        };
+        answer_key = {
+          pairs: f.labels.map((label) => ({
+            left: label.id,
+            right: f.pairs.find((pair) => pair.left === label.id)?.right.trim() ?? "",
+          })),
+        };
+      } else {
+        answer_key = { pairs: f.pairs.filter((p) => p.left.trim() || p.right.trim()) };
+      }
+      break;
     case "ordering": answer_key = { order: f.order.filter((x) => x.trim()) }; break;
+  }
+  if (!isSpatialLabelling(f.question_type) && f.media_id) {
+    payload = { ...payload, media_id: f.media_id };
   }
   return {
     id, question_type: f.question_type, prompt: f.prompt, instructions: f.instructions || null, payload, answer_key,
     scoring: { points: f.points, partial: f.partial, negative: f.negative || 0 },
-    normalization: { case_sensitive: f.case_sensitive, ignore_punctuation: f.ignore_punctuation, ignore_diacritics: f.ignore_diacritics },
+    normalization: { case_sensitive: f.case_sensitive, trim_whitespace: f.trim_whitespace, ignore_punctuation: f.ignore_punctuation, ignore_diacritics: f.ignore_diacritics },
     explanation: f.explanation || null, teacher_notes: f.teacher_notes || null, level: f.level || null, learning_language: f.learning_language || null,
+    difficulty: f.difficulty,
+    reusable_independently: f.reusable_independently,
     grading_mode: def.editor === "open" ? f.grading_mode : "automatic", status: f.status,
     topicIds: f.topicIds, tags: f.tags.split(",").map((x) => x.trim()).filter(Boolean),
   };
@@ -88,18 +136,59 @@ function validate(f: Form): string | null {
   if ((def.editor === "choice" || def.editor === "fixed_choice") && f.correct.length === 0) return "Mark the correct answer.";
   if (def.editor === "choice" && !def.multiple && f.correct.length > 1) return "Only one correct answer is allowed.";
   if (def.editor === "text" && f.blanks.every((b) => !b.trim())) return "Enter at least one accepted answer.";
+  if (isAudioTextQuestion(f.question_type) && !f.media_id) {
+    return "Choose audio or video media for this question.";
+  }
+  if (isSpatialLabelling(f.question_type)) {
+    if (!f.media_id) return "Choose an image for this labelling question.";
+    if (!f.labels.length) return "Add at least one label position on the image.";
+    if (f.labels.some((label) => !(f.pairs.find((pair) => pair.left === label.id)?.right ?? "").trim())) {
+      return "Every label position needs a correct answer.";
+    }
+  }
   return null;
 }
 
-export function QuestionEditor({ id, initial, topics }: { id?: string; initial?: Form; topics: TopicRow[] }) {
+export function QuestionEditor({
+  id,
+  initial,
+  topics,
+  onSaved,
+}: {
+  id?: string;
+  initial?: Form;
+  topics: TopicRow[];
+  onSaved?: (
+    questionId: string,
+    options: { next: boolean },
+  ) => Promise<void> | void;
+}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const languages = useContentLanguages();
   const [f, setF] = useState<Form>(initial ?? empty());
   const [busy, setBusy] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
   const def = TYPE_BY_ID[f.question_type]!;
   const set = (patch: Partial<Form>) => setF({ ...f, ...patch });
+
+  useEffect(() => {
+    if (id || initial || f.learning_language) return;
+    setF((current) =>
+      current.learning_language
+        ? current
+        : {
+            ...current,
+            learning_language: languages.defaultLearningCode,
+          },
+    );
+  }, [
+    id,
+    initial,
+    f.learning_language,
+    languages.defaultLearningCode,
+  ]);
 
   async function save(next: boolean, force = false) {
     const err = validate(f);
@@ -111,6 +200,23 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       setDup(null);
       qc.invalidateQueries({ queryKey: ["questions"] });
       toast.success(t("save"));
+
+      if (onSaved && r.id) {
+        await onSaved(r.id, { next });
+        if (next) {
+          const keep = empty(f.question_type);
+          setF({
+            ...keep,
+            level: f.level,
+            learning_language: f.learning_language,
+            topicIds: f.topicIds,
+            tags: f.tags,
+          });
+          setTimeout(() => document.getElementById("prompt")?.focus(), 0);
+        }
+        return;
+      }
+
       if (next) {
         const keep = empty(f.question_type);
         setF({ ...keep, level: f.level, learning_language: f.learning_language, topicIds: f.topicIds, tags: f.tags });
@@ -128,19 +234,14 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       onSubmit={(e) => { e.preventDefault(); save(false); }}
       onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(true); } }}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="space-y-2 sm:col-span-2">
+      <div className="max-w-xl">
+        <div className="space-y-2">
           <Label>{t("type")}</Label>
           <select value={f.question_type} onChange={(e) => set({ question_type: e.target.value, correct: [], grading_mode: TYPE_BY_ID[e.target.value]?.defaultGrading ?? "automatic" })} className={sel}>
             {QUESTION_TYPES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
           </select>
         </div>
-        <div className="space-y-2">
-          <Label>{t("status")}</Label>
-          <select value={f.status} onChange={(e) => set({ status: e.target.value as Form["status"] })} className={sel}>
-            {(["active", "draft", "archived"] as const).map((s) => <option key={s} value={s}>{t(s)}</option>)}
-          </select>
-        </div>
+
       </div>
 
       <div className="space-y-2">
@@ -177,6 +278,23 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
             ))}
           </div>
         )}
+        {!isSpatialLabelling(f.question_type) && (
+          <QuestionMediaAttachment
+            mediaId={f.media_id}
+            mediaLabel={f.media_label}
+            allowedKinds={
+              isAudioTextQuestion(f.question_type)
+                ? ["audio", "video"]
+                : ["image", "audio", "video"]
+            }
+            onChange={(media) =>
+              set({
+                media_id: media?.id ?? "",
+                media_label: media?.label ?? "",
+              })
+            }
+          />
+        )}
         {def.editor === "text" && (
           <>
             <Label>{t("accepted_answers")}</Label>
@@ -190,6 +308,7 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
             <Button type="button" variant="outline" size="sm" onClick={() => set({ blanks: [...f.blanks, ""] })}><Plus className="h-4 w-4" />{t("add")}</Button>
             <div className="flex flex-wrap gap-4 pt-2 text-sm">
               <label className="flex items-center gap-2"><Checkbox checked={f.case_sensitive} onCheckedChange={(c) => set({ case_sensitive: !!c })} />{t("case_sensitive")}</label>
+              <label className="flex items-center gap-2"><Checkbox checked={f.trim_whitespace} onCheckedChange={(c) => set({ trim_whitespace: !!c })} />{t("trim_whitespace")}</label>
               <label className="flex items-center gap-2"><Checkbox checked={f.ignore_punctuation} onCheckedChange={(c) => set({ ignore_punctuation: !!c })} />{t("ignore_punctuation")}</label>
               <label className="flex items-center gap-2"><Checkbox checked={f.ignore_diacritics} onCheckedChange={(c) => set({ ignore_diacritics: !!c })} />{t("ignore_diacritics")}</label>
             </div>
@@ -206,7 +325,23 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
             <div className="space-y-2 sm:col-span-2"><Label>Model answer (optional)</Label><Textarea value={f.model_answer} onChange={(e) => set({ model_answer: e.target.value })} /></div>
           </div>
         )}
-        {def.editor === "matching" && (
+        {def.editor === "matching" && isSpatialLabelling(f.question_type) && (
+          <QuestionLabellingEditor
+            mediaId={f.media_id}
+            mediaLabel={f.media_label}
+            labels={f.labels}
+            pairs={f.pairs}
+            onChange={(value) =>
+              set({
+                media_id: value.mediaId,
+                media_label: value.mediaLabel,
+                labels: value.labels,
+                pairs: value.pairs,
+              })
+            }
+          />
+        )}
+        {def.editor === "matching" && !isSpatialLabelling(f.question_type) && (
           <>
             <Label>{t("pairs")}</Label>
             {f.pairs.map((p, i) => (
@@ -237,10 +372,32 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
         )}
       </section>
 
+      <details className="rounded-md border border-border bg-muted/20 p-3">
+        <summary className="cursor-pointer select-none text-sm font-medium">
+          {t("advanced")}
+        </summary>
+        <div className="mt-4 space-y-5">
+        <div className="space-y-2">
+          <Label>{t("status")}</Label>
+          <select value={f.status} onChange={(e) => set({ status: e.target.value as Form["status"] })} className={sel}>
+            {(["active", "draft", "archived"] as const).map((s) => <option key={s} value={s}>{t(s)}</option>)}
+          </select>
+        </div>
       {/* Scoring & metadata */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-5">
         <div className="space-y-2"><Label>{t("points")}</Label><Input type="number" min={0} step={0.5} value={f.points} onChange={(e) => set({ points: Number(e.target.value) })} /></div>
         <div className="space-y-2"><Label>{t("negative_marking")}</Label><Input type="number" min={0} step={0.25} value={f.negative} onChange={(e) => set({ negative: Number(e.target.value) })} /></div>
+        <div className="space-y-2">
+          <Label>{t("difficulty")}</Label>
+          <select
+            value={f.difficulty ?? ""}
+            onChange={(e) => set({ difficulty: e.target.value ? Number(e.target.value) : null })}
+            className={sel}
+          >
+            <option value="">—</option>
+            {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </div>
         <div className="space-y-2">
           <Label>{t("level")}</Label>
           <select value={f.level} onChange={(e) => set({ level: e.target.value })} className={sel}><option value="">—</option>{LEVELS.map((l) => <option key={l}>{l}</option>)}</select>
@@ -248,7 +405,20 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
         <div className="space-y-2">
           <Label>{t("language")}</Label>
           <select value={f.learning_language} onChange={(e) => set({ learning_language: e.target.value })} className={sel}>
-            <option value="">—</option><option value="en">English</option><option value="az">Azərbaycanca</option><option value="ru">Русский</option><option value="tr">Türkçe</option>
+            <option value="">—</option>
+            {f.learning_language &&
+              !languages.learning.some(
+                (language) => language.code === f.learning_language,
+              ) && (
+                <option value={f.learning_language}>
+                  {f.learning_language}
+                </option>
+              )}
+            {languages.learning.map((language) => (
+              <option key={language.code} value={language.code}>
+                {language.label}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -263,6 +433,8 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       <div className="space-y-2"><Label>Tags</Label><Input value={f.tags} placeholder="grammar, exam-2026" onChange={(e) => set({ tags: e.target.value })} /></div>
       <div className="space-y-2"><Label>{t("explanation")}</Label><Textarea value={f.explanation} onChange={(e) => set({ explanation: e.target.value })} /></div>
       <div className="space-y-2"><Label>{t("teacher_notes")}</Label><Textarea value={f.teacher_notes} onChange={(e) => set({ teacher_notes: e.target.value })} /></div>
+        </div>
+      </details>
 
       {dup && (
         <div className="space-y-2 rounded-md border border-destructive/40 p-3 text-sm">
@@ -280,6 +452,14 @@ export function QuestionEditor({ id, initial, topics }: { id?: string; initial?:
       </div>
     </form>
   );
+}
+
+function isSpatialLabelling(type: string) {
+  return ["image_labelling", "diagram_labelling", "map_labelling"].includes(type);
+}
+
+function isAudioTextQuestion(type: string) {
+  return ["dictation", "listening_transcription"].includes(type);
 }
 
 function TopicPicker({ topics, value, onChange }: { topics: TopicRow[]; value: string[]; onChange: (v: string[]) => void }) {

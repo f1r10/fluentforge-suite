@@ -44,18 +44,54 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+function withSecurityHeaders(request: Request, response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "SAMEORIGIN");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set(
+    "permissions-policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  );
+  headers.set(
+    "content-security-policy",
+    "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'",
+  );
+
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  if (
+    new URL(request.url).protocol === "https:" ||
+    forwardedProto === "https"
+  ) {
+    headers.set(
+      "strict-transport-security",
+      "max-age=31536000",
+    );
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      const normalized = await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(request, normalized);
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return withSecurityHeaders(
+        request,
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
     }
   },
 };
