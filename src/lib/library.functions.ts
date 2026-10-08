@@ -121,7 +121,7 @@ export const deleteLibraryCategory = createServerFn({ method: "POST" })
       throw new Error("Built-in library sections cannot be deleted.");
     }
 
-    const { count, error: countError } = await context.supabase
+    const { count, error: countError } = await admin
       .from("library_books")
       .select("id", { count: "exact", head: true })
       .eq("category_id", data.id)
@@ -131,7 +131,7 @@ export const deleteLibraryCategory = createServerFn({ method: "POST" })
       throw new Error("Move or delete the books in this section first.");
     }
 
-    const { error } = await context.supabase
+    const { error } = await admin
       .from("library_categories")
       .update({
         deleted_at: new Date().toISOString(),
@@ -185,8 +185,11 @@ export const listTeacherLibraryBooks = createServerFn({ method: "GET" })
 export const saveLibraryBook = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => bookInputSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    const { data: category, error: categoryError } = await context.supabase
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: category, error: categoryError } = await admin
       .from("library_categories")
       .select("id")
       .eq("id", data.categoryId)
