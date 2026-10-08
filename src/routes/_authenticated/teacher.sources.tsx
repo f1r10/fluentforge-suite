@@ -317,6 +317,7 @@ function ImportProfileDialog({
   const [name, setName] = useState("");
   const [expectedContent, setExpectedContent] = useState<ImportTarget>("auto");
   const [language, setLanguage] = useState("");
+  const [translationLanguage, setTranslationLanguage] = useState("");
   const [level, setLevel] = useState("");
   const [status, setStatus] = useState<"draft" | "active">("draft");
   const [confidence, setConfidence] = useState(0.95);
@@ -383,6 +384,10 @@ function ImportProfileDialog({
           config: {
             expected_content: expectedContent,
             learning_language: language || null,
+            translation_language:
+              expectedContent === "vocabulary"
+                ? translationLanguage || null
+                : null,
             level: level || null,
             status,
             auto_approve_confidence: confidence,
@@ -466,7 +471,7 @@ function ImportProfileDialog({
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
             >
-              <option value="">{t("language")}: —</option>
+              <option value="">{t("learning_language")}: —</option>
               <option value="en">English</option>
               <option value="az">Azərbaycanca</option>
               <option value="ru">Русский</option>
@@ -485,6 +490,32 @@ function ImportProfileDialog({
               ))}
             </select>
           </div>
+
+          {expectedContent === "vocabulary" && (
+            <div className="space-y-2 rounded-md border border-border p-3">
+              <div className="text-sm font-medium">
+                {t("vocabulary_pair_language")}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("vocabulary_pair_language_hint")}
+              </p>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={translationLanguage}
+                onChange={(event) =>
+                  setTranslationLanguage(event.target.value)
+                }
+              >
+                <option value="">
+                  {t("treat_second_column_as_definition")}
+                </option>
+                <option value="az">Azərbaycanca</option>
+                <option value="en">English</option>
+                <option value="ru">Русский</option>
+                <option value="tr">Türkçe</option>
+              </select>
+            </div>
+          )}
 
           <select
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
