@@ -348,6 +348,139 @@ def _extract_image(path: Path) -> Extraction:
     return Extraction("image_ocr", [{"page": 1, "text": text, "method": "ocr"}], [], text, {"pages": 1})
 
 
+def _questions_from_fluentforge_export(
+    extraction: Extraction,
+) -> list[dict[str, Any]] | None:
+    """Reconstruct the platform's own paginated Question Bank PDF export.
+
+    The PDF print layout can wrap one question across page boundaries. A fresh
+    question starts only at a typed export heading; nested numbered exercises
+    and text accidentally embedded inside an option are not new headings.
+    """
+    if not extraction.pages or not any(
+        "FluentForge Question Bank" in str(page.get("text") or "")
+        for page in extraction.pages[:2]
+    ):
+        return None
+
+    header = re.compile(
+        r"^\s*(\d{1,4})\.\s+Single\s+Choice\s*[·•]\s*([A-Za-z]{2,5})\s*$",
+        re.IGNORECASE,
+    )
+    typed_header = re.compile(r"^\s*\d{1,4}\.\s+[^.\n]{2,60}[·•]\s*[A-Za-z]{2,5}\s*$")
+    option = re.compile(r"^\s*([A-Oa-o])[.)]\s*(.+?)\s*$")
+    embedded = re.compile(
+        r"(?<!\w)\d{1,3}[.,]\s*(?=(?:Choose|Which|What|When|Where|How|"
+        r"Fill|Select|Complete|Identify|Match|Find|Write)\b)",
+        re.IGNORECASE,
+    )
+    footer = re.compile(r"\bEnd of Section\b", re.IGNORECASE)
+    raw_questions: list[dict[str, Any]] = []
+
+    for page in extraction.pages:
+        for raw_line in str(page.get("text") or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = header.match(line)
+            if match:
+                raw_questions.append(
+                    {
+                        "number": int(match.group(1)),
+                        "language": match.group(2).lower(),
+                        "page": page.get("page"),
+                        "lines": [],
+                    }
+                )
+                continue
+            # Do not partially interpret exports containing other question
+            # types. Generic processing remains the safe fallback.
+            if typed_header.match(line):
+                return None
+            if raw_questions and not line.startswith("Generated:"):
+                raw_questions[-1]["lines"].append(line)
+
+    if not raw_questions:
+        return None
+
+    out: list[dict[str, Any]] = []
+    for raw in raw_questions:
+        prompt: list[str] = []
+        options: list[dict[str, str]] = []
+        warnings: list[str] = []
+        foreign_question_tail = False
+
+        for line in raw["lines"]:
+            if foreign_question_tail:
+                # Keep its source page in the uploaded PDF; do not turn the
+                # unrelated fragment into an option or a synthetic question.
+                continue
+
+            choice = option.match(line)
+            if choice:
+                letter, value = choice.group(1).lower(), choice.group(2).strip()
+                embedded_match = embedded.search(value)
+                if embedded_match:
+                    warnings.append(
+                        f"Source PDF contains a second numbered question inside option {letter.upper()}."
+                    )
+                    value = value[: embedded_match.start()].strip()
+                    foreign_question_tail = True
+
+                footer_match = footer.search(value)
+                if footer_match:
+                    warnings.append(
+                        f"Source PDF contains a section footer inside option {letter.upper()}."
+                    )
+                    value = value[: footer_match.start()].strip()
+
+                if letter > "h":
+                    warnings.append(f"Unexpected option {letter.upper()} in source PDF.")
+                    continue
+                if not value:
+                    warnings.append(f"Option {letter.upper()} has no text in source PDF.")
+                    continue
+                if any(existing["id"] == letter for existing in options):
+                    warnings.append(f"Repeated option {letter.upper()} in source PDF.")
+                    continue
+                options.append({"id": letter, "text": value})
+            elif options:
+                options[-1]["text"] = f"{options[-1]['text']} {line}".strip()
+            elif line != "FluentForge Question Bank":
+                prompt.append(line)
+
+        if len(options) < 2:
+            warnings.append("Fewer than two answer options were recovered.")
+        if not prompt:
+            warnings.append("Question text is missing from source PDF.")
+
+        payload = {
+            "question_type": "single_choice",
+            "prompt": "\n".join(prompt).strip(),
+            "learning_language": raw["language"],
+            "payload": {"options": options},
+            "answer_key": {"correct": []},
+            "status": "draft",
+        }
+        if warnings:
+            # The review API treats these as needs_fix, including bulk
+            # approvals. The original PDF remains available for manual repair.
+            payload["import_warnings"] = warnings
+
+        out.append(
+            {
+                "item_type": "question",
+                "page": raw["page"],
+                "sheet": None,
+                "crop": None,
+                "payload": payload,
+                "confidence": 0.35 if warnings else 0.77,
+            }
+        )
+
+    return out
+
+
 def detect_candidates(
     extraction: Extraction,
     profile: dict[str, Any] | None = None,
@@ -355,6 +488,10 @@ def detect_candidates(
     candidates: list[dict[str, Any]] = []
     spreadsheet_mapping = _spreadsheet_mapping(profile)
     expected_content = str((profile or {}).get("expected_content") or "auto")
+    if expected_content in {"auto", "questions", "mixed"}:
+        exported_questions = _questions_from_fluentforge_export(extraction)
+        if exported_questions is not None:
+            return exported_questions
     global_answers = _extract_global_answer_key(extraction.full_text)
 
     for page in extraction.pages:

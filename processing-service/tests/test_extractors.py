@@ -501,6 +501,58 @@ def test_checkbox_pdf_options_and_true_false_are_reconstructed():
     ]
 
 
+def test_fluentforge_export_reconstructs_paginated_questions_and_quarantines_contamination():
+    from app.extractors import Extraction
+
+    pages = [
+        {
+            "page": 1,
+            "text": (
+                "FluentForge Question Bank\n"
+                "Generated: 2026-10-08T09:03:27Z · 3 question(s)\n"
+                "1. Single Choice · EN\n"
+                "Why is the sky blue?\n"
+                "A. Light scattering\n"
+                "B. Oxygen\n"
+                "2. Single Choice · EN\n"
+                "Choose the correct nouns.\n"
+                "1. salt\n"
+                "2. water\n"
+                "A. 1,2\n"
+            ),
+        },
+        {
+            "page": 2,
+            "text": (
+                "B. 1 only\n"
+                "C. 2 only 13.Choose the uncountable nouns.\n"
+                "F. wood\n"
+                "G. desk\n"
+                "3. Single Choice · EN\n"
+                "Choose the correct answer.\n"
+                "A. first\n"
+                "B. second\n"
+            ),
+        },
+    ]
+    extraction = Extraction("pdf_layout_native", pages, [], "\n".join(p["text"] for p in pages), {})
+    items = detect_candidates(extraction, profile={"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+
+    assert len(questions) == 3
+    assert [question["page"] for question in questions] == [1, 1, 2]
+    assert questions[1]["payload"]["prompt"] == "Choose the correct nouns.\n1. salt\n2. water"
+    assert [option["text"] for option in questions[1]["payload"]["payload"]["options"]] == [
+        "1,2",
+        "1 only",
+        "2 only",
+    ]
+    assert len(questions[1]["payload"]["import_warnings"]) == 1
+    assert questions[1]["confidence"] < 0.5
+    assert "import_warnings" not in questions[0]["payload"]
+    assert "import_warnings" not in questions[2]["payload"]
+
+
 def test_numbered_question_without_space_after_period_is_detected():
     from app.extractors import Extraction
 

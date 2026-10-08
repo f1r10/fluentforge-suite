@@ -203,6 +203,16 @@ function validateImportItemPayload(
 ): ImportItemValidation {
   try {
     if (itemType === "question") {
+      const warnings =
+        payload && typeof payload === "object"
+          ? (payload as Record<string, unknown>).import_warnings
+          : null;
+      if (Array.isArray(warnings) && warnings.length > 0) {
+        return {
+          state: "needs_fix",
+          message: warnings.map((warning) => String(warning)).join(" "),
+        };
+      }
       normalizeImportedQuestion(
         payload && typeof payload === "object"
           ? (payload as Record<string, unknown>)
