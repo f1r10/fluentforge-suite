@@ -1849,12 +1849,12 @@ def _split_concatenated_question_lines(lines: list[str]) -> list[str]:
     # Do not split numbered statements in the prompt: only split when an
     # earlier A-H option marker exists on the *same* source line.
     question_start = re.compile(
-        r"(?<!\\w)\\d{1,4}[\\.)]\\s*(?=(?:Choose|Select|Which|What|When|Where|"
+        r"(?<!\w)\d{1,4}[\.)]\s*(?=(?:Choose|Select|Which|What|When|Where|"
         r"Who|Why|How|Complete|Fill|Identify|Find|Match|Arrange|Write|"
-        r"Is|Are|Do|Does|Did|Can|Could|Should|Would)\\b)",
+        r"Is|Are|Do|Does|Did|Can|Could|Should|Would)\b)",
         re.IGNORECASE,
     )
-    option_start = re.compile(r"(?<!\\w)[A-Ha-h][\\.)]\\s*\\S")
+    option_start = re.compile(r"(?<!\w)[A-Ha-h][\.)]\s*\S")
     out: list[str] = []
     for line in lines:
         split_at = [
