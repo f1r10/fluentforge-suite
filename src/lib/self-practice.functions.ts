@@ -34,6 +34,7 @@ const questionPoolSchema = commonPoolSchema.extend({
   types: z.array(z.string().max(60)).max(50).default([]),
   topicIds: z.array(z.string().uuid()).max(100).default([]),
   sourceFileId: z.string().uuid().nullable().default(null),
+  difficulty: z.number().int().min(1).max(5).nullable().default(null),
   historyMode: historyModeSchema.default("all"),
   excludeAnswered: z.boolean().default(false),
 });
@@ -681,6 +682,7 @@ async function selectQuestionPracticeIds(
     p_source_file_id: pool.sourceFileId,
     p_history_mode: pool.historyMode,
     p_exclude_answered: pool.excludeAnswered,
+    p_difficulty: pool.difficulty,
   });
   if (result.error) throw new Error(result.error.message);
   return ((result.data ?? []) as Array<{ question_id: string }>).map(
