@@ -36,7 +36,7 @@ function QuestionBank() {
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const { data: catalogs } = useSuspenseQuery(catalogsQuery);
   const tOpts = topicOptions(topics);
-  const [f, setF] = useState({ text: "", type: "", level: "", topicId: "", status: "active" as "active" | "draft" | "archived" | "all", page: 0 });
+  const [f, setF] = useState({ text: "", type: "", level: "", topicId: "", status: "all" as "active" | "draft" | "archived" | "all", page: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkTopic, setBulkTopic] = useState("");
   const [bulkCatalog, setBulkCatalog] = useState("");
