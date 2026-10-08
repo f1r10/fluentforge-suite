@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { BookType, Play, RotateCcw, XCircle } from "lucide-react";
@@ -109,14 +109,36 @@ function StudentMistakesPage() {
                         {formatDateTime(item.lastWrongAt, lang)}
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setQuestion(item)}
-                    >
-                      <Play className="h-4 w-4" />
-                      {t("practice_again")}
-                    </Button>
+                    {item.context?.kind === "reading" ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <Link
+                          to="/student/readings/$id"
+                          params={{ id: item.context.id }}
+                        >
+                          <Play className="h-4 w-4" />
+                          {t("practice_again")}
+                        </Link>
+                      </Button>
+                    ) : item.context?.kind === "listening" ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <Link
+                          to="/student/listenings/$id"
+                          params={{ id: item.context.id }}
+                        >
+                          <Play className="h-4 w-4" />
+                          {t("practice_again")}
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setQuestion(item)}
+                      >
+                        <Play className="h-4 w-4" />
+                        {t("practice_again")}
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
