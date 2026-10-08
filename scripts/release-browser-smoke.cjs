@@ -248,10 +248,19 @@ async function gotoHydrated(page, path) {
 
     await gotoHydrated(page, "/teacher/vocabulary");
     await page.locator("select").last().selectOption("draft");
+    const importedVocabularyRow = page
+      .getByText("releaseword", { exact: true })
+      .locator("xpath=ancestor::tr");
+    await importedVocabularyRow.waitFor({ timeout: 20000 });
+    console.log("[ok] CSV vocabulary import reached Vocabulary Bank as review-safe draft");
+
+    await importedVocabularyRow.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Active", exact: true }).click();
+    await page.locator("select").last().selectOption("active");
     await page
       .getByText("releaseword", { exact: true })
       .waitFor({ timeout: 20000 });
-    console.log("[ok] CSV vocabulary import reached Vocabulary Bank as review-safe draft");
+    console.log("[ok] teacher promoted imported vocabulary to active");
 
     await gotoHydrated(page, "/teacher/catalogs");
     await page
@@ -675,19 +684,31 @@ async function gotoHydrated(page, path) {
     console.log("[ok] student opened listening media and contextual question set");
 
     await gotoHydrated(studentPage, "/student/practice");
-    const practiceCountInputs = studentPage.locator('input[type="number"]');
-    await practiceCountInputs.nth(0).fill("1");
-    await practiceCountInputs.nth(1).fill("1");
-    await practiceCountInputs.nth(2).fill("1");
     const sessionModeField = studentPage
       .getByText("Session mode", { exact: true })
       .locator("xpath=..");
     await sessionModeField.locator("select").selectOption("mock_exam");
+
+    for (const label of [
+      "Question count",
+      "Vocabulary count",
+      "Reading count",
+      "Listening count",
+    ]) {
+      const field = studentPage
+        .getByText(label, { exact: true })
+        .locator("xpath=..");
+      await field.locator('input[type="number"]').fill("1");
+    }
+
     await studentPage
       .getByRole("button", { name: "Generate practice" })
       .click();
     await studentPage
       .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await studentPage
+      .getByText("releaseword", { exact: true })
       .waitFor({ timeout: 30000 });
     await studentPage
       .getByText("Release Reading", { exact: true })
@@ -698,7 +719,7 @@ async function gotoHydrated(page, path) {
     await studentPage
       .getByText(/Time remaining:/)
       .waitFor({ timeout: 20000 });
-    console.log("[ok] student built a timed mixed mock exam from Question Bank, reading and listening");
+    console.log("[ok] student built a timed four-domain mock exam from Question Bank, Vocabulary, Reading and Listening");
 
     await studentContext.close();
     console.log("FluentForge release browser acceptance passed.");
