@@ -729,7 +729,7 @@ VOCAB_BOILERPLATE_RE = re.compile(
 
 
 def _clean_vocab_word(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.")
+    return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.!?")
 
 
 def _vocabulary_payload(
