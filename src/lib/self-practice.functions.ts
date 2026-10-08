@@ -451,8 +451,20 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
     const studentId = await getStudentId(context.supabase);
     const assignedIds = await assignedCatalogIds(admin, studentId);
 
-    const [topicsResult, catalogsResult, sourcesResult, languageResult] = await Promise.all([
-      admin.from("topics").select("id,name,parent_id,sort_order").order("sort_order").order("name"),
+    const [
+      topicsResult,
+      catalogsResult,
+      questionsResult,
+      vocabularyResult,
+      readingsResult,
+      listeningsResult,
+      catalogItemsResult,
+    ] = await Promise.all([
+      admin
+        .from("topics")
+        .select("id,name,parent_id,sort_order")
+        .order("sort_order")
+        .order("name"),
       assignedIds.length
         ? admin
             .from("catalogs")
@@ -463,150 +475,221 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
             .order("sort_order")
             .order("name")
         : Promise.resolve({ data: [], error: null }),
-      Promise.all([
-        admin
-          .from("questions")
-          .select("source_file_id")
-          .eq("status", "active")
-          .eq("context_kind", "none")
-          .is("deleted_at", null)
-          .not("source_file_id", "is", null)
-          .limit(2_000),
-        admin
-          .from("readings")
-          .select("source_file_id")
-          .eq("status", "active")
-          .is("deleted_at", null)
-          .not("source_file_id", "is", null)
-          .limit(1_000),
-        admin
-          .from("listenings")
-          .select("source_file_id")
-          .eq("status", "active")
-          .is("deleted_at", null)
-          .not("source_file_id", "is", null)
-          .limit(1_000),
-      ]),
-      Promise.all([
-        admin
-          .from("questions")
-          .select("learning_language")
-          .eq("status", "active")
-          .eq("context_kind", "none")
-          .is("deleted_at", null)
-          .not("learning_language", "is", null)
-          .limit(2_000),
-        admin
-          .from("readings")
-          .select("learning_language")
-          .eq("status", "active")
-          .is("deleted_at", null)
-          .not("learning_language", "is", null)
-          .limit(1_000),
-        admin
-          .from("listenings")
-          .select("learning_language")
-          .eq("status", "active")
-          .is("deleted_at", null)
-          .not("learning_language", "is", null)
-          .limit(1_000),
-      ]),
+      admin
+        .from("questions")
+        .select("id,prompt,question_type,learning_language,level")
+        .eq("status", "active")
+        .eq("context_kind", "none")
+        .is("deleted_at", null)
+        .order("updated_at", { ascending: false })
+        .limit(1_000),
+      admin
+        .from("vocabulary_entries")
+        .select(
+          "id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)",
+        )
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("word")
+        .limit(1_000),
+      admin
+        .from("readings")
+        .select("id,title,learning_language,level")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("title")
+        .limit(1_000),
+      admin
+        .from("listenings")
+        .select("id,title,learning_language,level,media_id")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("title")
+        .limit(1_000),
+      assignedIds.length
+        ? admin
+            .from("catalog_items")
+            .select("catalog_id,entity_type,entity_id")
+            .in("catalog_id", assignedIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
-    for (const result of [topicsResult, catalogsResult]) {
-      if (result.error) throw new Error(result.error.message);
-    }
-    for (const result of sourcesResult) {
-      if (result.error) throw new Error(result.error.message);
-    }
-    for (const result of languageResult) {
+    for (const result of [
+      topicsResult,
+      catalogsResult,
+      questionsResult,
+      vocabularyResult,
+      readingsResult,
+      listeningsResult,
+      catalogItemsResult,
+    ]) {
       if (result.error) throw new Error(result.error.message);
     }
 
-    const sourceIds = [
-      ...new Set(
-        sourcesResult
-          .flatMap((result) => result.data ?? [])
-          .map((row) => row.source_file_id)
-          .filter((value): value is string => !!value),
-      ),
-    ];
-    const sourceFilesResult = sourceIds.length
-      ? await admin
-          .from("source_files")
-          .select("id,original_filename,created_at")
-          .in("id", sourceIds)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false })
-          .limit(200)
-      : { data: [], error: null };
-    if (sourceFilesResult.error) {
-      throw new Error(sourceFilesResult.error.message);
+    const memberships = new Map<string, string[]>();
+    for (const row of catalogItemsResult.data ?? []) {
+      const key = `${row.entity_type}:${row.entity_id}`;
+      memberships.set(key, [
+        ...(memberships.get(key) ?? []),
+        row.catalog_id,
+      ]);
     }
+
+    const withCatalogs = <
+      T extends { id: string },
+    >(
+      kind: "question" | "vocabulary" | "reading" | "listening",
+      rows: T[],
+    ) =>
+      rows.map((row) => ({
+        ...row,
+        catalogIds: memberships.get(`${kind}:${row.id}`) ?? [],
+      }));
+
+    const vocabulary = withCatalogs(
+      "vocabulary",
+      (vocabularyResult.data ?? []).map((row) => ({
+        ...row,
+        translations: (row.vocabulary_translations ?? []) as Array<{
+          language: string;
+          value: string;
+        }>,
+      })),
+    );
 
     const languages = [
       ...new Set(
-        languageResult
-          .flatMap((result) => result.data ?? [])
+        [
+          ...(questionsResult.data ?? []),
+          ...(vocabularyResult.data ?? []),
+          ...(readingsResult.data ?? []),
+          ...(listeningsResult.data ?? []),
+        ]
           .map((row) => row.learning_language)
           .filter((value): value is string => !!value),
+      ),
+    ].sort();
+
+    const translationLanguages = [
+      ...new Set(
+        vocabulary.flatMap((row) =>
+          row.translations
+            .map((translation) => translation.language)
+            .filter(Boolean),
+        ),
       ),
     ].sort();
 
     return {
       topics: topicsResult.data ?? [],
       catalogs: catalogsResult.data ?? [],
-      sources: sourceFilesResult.data ?? [],
       languages,
-      questionTypes: QUESTION_TYPES.map((type) => ({ id: type.id, label: type.label })),
+      translationLanguages,
+      questionTypes: QUESTION_TYPES.map((type) => ({
+        id: type.id,
+        label: type.label,
+      })),
+      questions: withCatalogs("question", questionsResult.data ?? []),
+      vocabulary,
+      readings: withCatalogs("reading", readingsResult.data ?? []),
+      listenings: withCatalogs("listening", listeningsResult.data ?? []),
     };
   });
 
-async function selectContextPracticeIds(
+async function ensurePoolCatalogAccess(
   admin: Admin,
-  kind: "reading" | "listening",
-  count: number,
-  filters: SelfPracticeGenerator,
+  assignedIds: string[],
+  catalogId: string | null,
 ) {
-  if (count <= 0) return [];
+  if (!catalogId) throw new Error("Choose a catalog for this content section.");
+  if (!assignedIds.includes(catalogId)) {
+    throw new Error("This catalog is not assigned to you.");
+  }
+}
 
-  const table = kind === "reading" ? "readings" : "listenings";
-  const relationTable =
-    kind === "reading" ? "reading_topics" : "listening_topics";
-  const ownerColumn = kind === "reading" ? "reading_id" : "listening_id";
+async function catalogEntityIds(
+  admin: Admin,
+  catalogId: string,
+  entityType: "question" | "vocabulary" | "reading" | "listening",
+) {
+  const { data, error } = await admin
+    .from("catalog_items")
+    .select("entity_id")
+    .eq("catalog_id", catalogId)
+    .eq("entity_type", entityType);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => row.entity_id);
+}
 
-  let allowedIds: string[] | null = null;
-
-  if (filters.catalogId) {
-    const { data: items, error } = await admin
-      .from("catalog_items")
-      .select("entity_id")
-      .eq("catalog_id", filters.catalogId)
-      .eq("entity_type", kind);
+async function selectQuestionPracticeIds(
+  admin: Admin,
+  studentId: string,
+  assignedIds: string[],
+  pool: SelfPracticeGenerator["questions"],
+) {
+  if (pool.source === "specific") {
+    if (!pool.specificIds.length) return [];
+    const { data, error } = await admin
+      .from("questions")
+      .select("id")
+      .in("id", pool.specificIds)
+      .eq("status", "active")
+      .eq("context_kind", "none")
+      .is("deleted_at", null);
     if (error) throw new Error(error.message);
-    allowedIds = (items ?? []).map((row) => row.entity_id);
-    if (!allowedIds.length) return [];
+    const available = new Set((data ?? []).map((row) => row.id));
+    return pool.specificIds.filter((id) => available.has(id));
   }
 
-  if (filters.topicIds.length) {
-    const { data: tagged, error } = await admin
-      .from(relationTable)
-      .select(ownerColumn)
-      .in("topic_id", filters.topicIds);
-    if (error) throw new Error(error.message);
-    const topicIds = [
-      ...new Set(
-        (tagged ?? [])
-          .map((row) => String((row as Record<string, unknown>)[ownerColumn] ?? ""))
-          .filter(Boolean),
-      ),
-    ];
-    if (!topicIds.length) return [];
-    allowedIds =
-      allowedIds == null
-        ? topicIds
-        : allowedIds.filter((id) => topicIds.includes(id));
+  let catalogId: string | null = null;
+  if (pool.source === "catalog") {
+    await ensurePoolCatalogAccess(admin, assignedIds, pool.catalogId);
+    catalogId = pool.catalogId;
+  }
+
+  if (pool.count <= 0) return [];
+  const result = await admin.rpc("select_self_practice_question_ids", {
+    p_student_id: studentId,
+    p_count: pool.count,
+    p_language: pool.language,
+    p_level: pool.level,
+    p_types: pool.types.length ? pool.types : null,
+    p_topic_ids: pool.topicIds.length ? pool.topicIds : null,
+    p_catalog_id: catalogId,
+    p_source_file_id: pool.sourceFileId,
+    p_history_mode: pool.historyMode,
+    p_exclude_answered: pool.excludeAnswered,
+  });
+  if (result.error) throw new Error(result.error.message);
+  return ((result.data ?? []) as Array<{ question_id: string }>).map(
+    (row) => row.question_id,
+  );
+}
+
+async function selectContextPracticeIds(
+  admin: Admin,
+  assignedIds: string[],
+  kind: "reading" | "listening",
+  pool:
+    | SelfPracticeGenerator["readings"]
+    | SelfPracticeGenerator["listenings"],
+) {
+  const table = kind === "reading" ? "readings" : "listenings";
+  let allowedIds: string[] | null = null;
+
+  if (pool.source === "specific") {
+    allowedIds = pool.specificIds;
     if (!allowedIds.length) return [];
+  } else if (pool.source === "catalog") {
+    await ensurePoolCatalogAccess(admin, assignedIds, pool.catalogId);
+    allowedIds = await catalogEntityIds(
+      admin,
+      pool.catalogId!,
+      kind,
+    );
+    if (!allowedIds.length) return [];
+  } else if (pool.count <= 0) {
+    return [];
   }
 
   let query = admin
@@ -616,13 +699,8 @@ async function selectContextPracticeIds(
     .is("deleted_at", null)
     .limit(1_000);
 
-  if (filters.language) {
-    query = query.eq("learning_language", filters.language);
-  }
-  if (filters.level) query = query.eq("level", filters.level);
-  if (filters.sourceFileId) {
-    query = query.eq("source_file_id", filters.sourceFileId);
-  }
+  if (pool.language) query = query.eq("learning_language", pool.language);
+  if (pool.level) query = query.eq("level", pool.level);
   if (allowedIds) query = query.in("id", allowedIds);
 
   const { data, error } = await query;
@@ -677,9 +755,103 @@ async function selectContextPracticeIds(
       .filter(Boolean),
   );
 
-  return shuffle(
-    candidateIds.filter((id) => parentsWithQuestions.has(id)),
-  ).slice(0, count);
+  const usable = candidateIds.filter((id) =>
+    parentsWithQuestions.has(id),
+  );
+  if (pool.source === "specific") {
+    const usableSet = new Set(usable);
+    return pool.specificIds.filter((id) => usableSet.has(id));
+  }
+  return shuffle(usable).slice(0, pool.count);
+}
+
+async function selectVocabularyPracticeItems(
+  admin: Admin,
+  assignedIds: string[],
+  pool: SelfPracticeGenerator["vocabulary"],
+): Promise<SelfPracticeVocabularyItem[]> {
+  let allowedIds: string[] | null = null;
+
+  if (pool.source === "specific") {
+    allowedIds = pool.specificIds;
+    if (!allowedIds.length) return [];
+  } else if (pool.source === "catalog") {
+    await ensurePoolCatalogAccess(admin, assignedIds, pool.catalogId);
+    allowedIds = await catalogEntityIds(
+      admin,
+      pool.catalogId!,
+      "vocabulary",
+    );
+    if (!allowedIds.length) return [];
+  } else if (pool.count <= 0) {
+    return [];
+  }
+
+  let query = admin
+    .from("vocabulary_entries")
+    .select(
+      "id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)",
+    )
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .limit(1_000);
+
+  if (pool.language) query = query.eq("learning_language", pool.language);
+  if (pool.level) query = query.eq("level", pool.level);
+  if (allowedIds) query = query.in("id", allowedIds);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const candidates = (data ?? []).flatMap((row) => {
+    const translations = (row.vocabulary_translations ?? []) as Array<{
+      language: string;
+      value: string;
+    }>;
+    const target = translations.find(
+      (translation) =>
+        translation.language.toLowerCase() ===
+        pool.translationLanguage.toLowerCase(),
+    );
+    if (!target) return [];
+
+    const direction =
+      pool.direction === "mixed"
+        ? Math.random() < 0.5
+          ? ("word_to_translation" as const)
+          : ("translation_to_word" as const)
+        : pool.direction;
+
+    return [
+      {
+        entryId: row.id,
+        prompt:
+          direction === "word_to_translation" ? row.word : target.value,
+        direction,
+        targetLanguage: target.language,
+        learningLanguage: row.learning_language,
+        level: row.level,
+        partOfSpeech: row.part_of_speech,
+      },
+    ];
+  });
+
+  if (pool.source === "specific") {
+    const byId = new Map(candidates.map((row) => [row.entryId, row]));
+    return pool.specificIds.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
+    });
+  }
+  return shuffle(candidates).slice(0, pool.count);
+}
+
+function requestedPoolCount(
+  source: "all" | "catalog" | "specific",
+  count: number,
+  specificIds: string[],
+) {
+  return source === "specific" ? specificIds.length : count;
 }
 
 export const generateSelfPractice = createServerFn({ method: "POST" })
@@ -689,58 +861,37 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
+    const assignedIds = await assignedCatalogIds(admin, studentId);
 
-    if (data.catalogId) {
-      const assignedIds = await assignedCatalogIds(admin, studentId);
-      if (!assignedIds.includes(data.catalogId)) {
-        throw new Error("This catalog is not assigned to you.");
-      }
-      const { data: catalog, error } = await admin
-        .from("catalogs")
-        .select("id")
-        .eq("id", data.catalogId)
-        .eq("status", "active")
-        .is("deleted_at", null)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!catalog) throw new Error("Catalog not found.");
-    }
+    const [questionIds, vocabulary, readingIds, listeningIds] =
+      await Promise.all([
+        selectQuestionPracticeIds(
+          admin,
+          studentId,
+          assignedIds,
+          data.questions,
+        ),
+        selectVocabularyPracticeItems(
+          admin,
+          assignedIds,
+          data.vocabulary,
+        ),
+        selectContextPracticeIds(
+          admin,
+          assignedIds,
+          "reading",
+          data.readings,
+        ),
+        selectContextPracticeIds(
+          admin,
+          assignedIds,
+          "listening",
+          data.listenings,
+        ),
+      ]);
 
-    if (data.sourceFileId) {
-      const { data: source, error } = await admin
-        .from("source_files")
-        .select("id")
-        .eq("id", data.sourceFileId)
-        .is("deleted_at", null)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!source) throw new Error("Source not found.");
-    }
-
-    let selected: Array<{ question_id: string }> = [];
-    if (data.count > 0) {
-      const result = await admin.rpc(
-        "select_self_practice_question_ids",
-        {
-          p_student_id: studentId,
-          p_count: data.count,
-          p_language: data.language,
-          p_level: data.level,
-          p_types: data.types.length ? data.types : null,
-          p_topic_ids: data.topicIds.length ? data.topicIds : null,
-          p_catalog_id: data.catalogId,
-          p_source_file_id: data.sourceFileId,
-          p_history_mode: data.historyMode,
-          p_exclude_answered: data.excludeAnswered,
-        },
-      );
-      if (result.error) throw new Error(result.error.message);
-      selected = (result.data ?? []) as Array<{ question_id: string }>;
-    }
-
-    const ids = selected.map((row) => row.question_id);
-    const loaded = await loadSelfPracticeQuestions(admin, ids);
-    const ordered = ids
+    const loaded = await loadSelfPracticeQuestions(admin, questionIds);
+    const ordered = questionIds
       .map((id) => loaded.get(id))
       .filter((question): question is LoadedQuestion => !!question);
 
@@ -751,15 +902,6 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
       6 * 60 * 60,
     );
 
-    const [readingIds, listeningIds] = await Promise.all([
-      selectContextPracticeIds(admin, "reading", data.readingCount, data),
-      selectContextPracticeIds(
-        admin,
-        "listening",
-        data.listeningCount,
-        data,
-      ),
-    ]);
     const {
       loadReadingPracticeData,
       loadListeningPracticeData,
@@ -769,10 +911,37 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
       loadListeningPracticeData(admin, listeningIds),
     ]);
 
+    const requested =
+      requestedPoolCount(
+        data.questions.source,
+        data.questions.count,
+        data.questions.specificIds,
+      ) +
+      requestedPoolCount(
+        data.vocabulary.source,
+        data.vocabulary.count,
+        data.vocabulary.specificIds,
+      ) +
+      requestedPoolCount(
+        data.readings.source,
+        data.readings.count,
+        data.readings.specificIds,
+      ) +
+      requestedPoolCount(
+        data.listenings.source,
+        data.listenings.count,
+        data.listenings.specificIds,
+      );
+
     return {
-      requested: data.count + data.readingCount + data.listeningCount,
-      generated: hydrated.length + readings.length + listenings.length,
+      requested,
+      generated:
+        hydrated.length +
+        vocabulary.length +
+        readings.length +
+        listenings.length,
       questions: hydrated.map(publicQuestion),
+      vocabulary,
       readings,
       listenings,
       filters: data,
