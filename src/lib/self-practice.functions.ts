@@ -49,10 +49,12 @@ const vocabularyPoolSchema = commonPoolSchema.extend({
 
 const readingPoolSchema = commonPoolSchema.extend({
   count: z.number().int().min(0).max(20).default(0),
+  topicIds: z.array(z.string().uuid()).max(100).default([]),
 });
 
 const listeningPoolSchema = commonPoolSchema.extend({
   count: z.number().int().min(0).max(20).default(0),
+  topicIds: z.array(z.string().uuid()).max(100).default([]),
 });
 
 const generatorSchema = z.object({
@@ -714,6 +716,33 @@ async function selectContextPracticeIds(
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
     return [];
+  }
+
+  if (pool.topicIds.length) {
+    const relationTable =
+      kind === "reading" ? "reading_topics" : "listening_topics";
+    const parentColumn =
+      kind === "reading" ? "reading_id" : "listening_id";
+    const { data: tagged, error: taggedError } = await admin
+      .from(relationTable)
+      .select(parentColumn)
+      .in("topic_id", pool.topicIds);
+    if (taggedError) throw new Error(taggedError.message);
+    const taggedIds = [
+      ...new Set(
+        (tagged ?? [])
+          .map((row) =>
+            String((row as Record<string, unknown>)[parentColumn] ?? ""),
+          )
+          .filter(Boolean),
+      ),
+    ];
+    if (!taggedIds.length) return [];
+    allowedIds =
+      allowedIds == null
+        ? taggedIds
+        : allowedIds.filter((id) => taggedIds.includes(id));
+    if (!allowedIds.length) return [];
   }
 
   let query = admin
