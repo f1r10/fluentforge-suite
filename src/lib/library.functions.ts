@@ -105,8 +105,11 @@ export const saveLibraryCategory = createServerFn({ method: "POST" })
 export const deleteLibraryCategory = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }) => {
-    const { data: category, error: categoryError } = await context.supabase
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: category, error: categoryError } = await admin
       .from("library_categories")
       .select("id,system_key")
       .eq("id", data.id)
@@ -194,7 +197,7 @@ export const saveLibraryBook = createServerFn({ method: "POST" })
 
     let mediaId = data.mediaId ?? null;
     if (data.id && !mediaId) {
-      const { data: current, error: currentError } = await context.supabase
+      const { data: current, error: currentError } = await admin
         .from("library_books")
         .select("media_id")
         .eq("id", data.id)
@@ -205,7 +208,7 @@ export const saveLibraryBook = createServerFn({ method: "POST" })
     }
     if (!mediaId) throw new Error("Choose a book/document file.");
 
-    const { data: media, error: mediaError } = await context.supabase
+    const { data: media, error: mediaError } = await admin
       .from("media_assets")
       .select("id,kind")
       .eq("id", mediaId)
@@ -231,7 +234,7 @@ export const saveLibraryBook = createServerFn({ method: "POST" })
     };
 
     if (data.id) {
-      const { error } = await context.supabase
+      const { error } = await admin
         .from("library_books")
         .update(fields)
         .eq("id", data.id)
@@ -240,14 +243,13 @@ export const saveLibraryBook = createServerFn({ method: "POST" })
       return { id: data.id };
     }
 
-    const { data: created, error } = await context.supabase
+    const { data: created, error } = await admin
       .from("library_books")
       .insert(fields)
       .select("id")
       .single();
-    if (error || !created) {
-      throw new Error(error?.message ?? "Could not add book to library.");
-    }
+    if (error) throw new Error(error.message);
+    if (!created) throw new Error("Could not add book to library.");
     return { id: created.id };
   });
 
