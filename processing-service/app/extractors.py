@@ -778,6 +778,35 @@ def _parse_vocab_head(
         ipa = ipa_match.group(1)
         value = f"{value[:ipa_match.start()]} {value[ipa_match.end():]}".strip()
 
+    # Cambridge exam word lists commonly use parenthesized labels:
+    # "(adj)", "(n & v)", "(phr v)", "(mv)", "(n pl)".
+    cambridge_match = re.search(r"\s*\(([^()]{1,40})\)\s*$", value)
+    if cambridge_match:
+        raw_label = cambridge_match.group(1).strip().casefold()
+        token_map = {
+            "n": "noun",
+            "n pl": "noun",
+            "v": "verb",
+            "adj": "adjective",
+            "adv": "adverb",
+            "prep": "preposition",
+            "pron": "pronoun",
+            "det": "determiner",
+            "conj": "conjunction",
+            "exclam": "exclamation",
+            "mv": "modal verb",
+            "phr v": "phrasal verb",
+        }
+        pieces = [
+            piece.strip()
+            for piece in re.split(r"\s*(?:&|,)\s*", raw_label)
+            if piece.strip()
+        ]
+        labels = [token_map[piece] for piece in pieces if piece in token_map]
+        if labels and len(labels) == len(pieces):
+            pos = ", ".join(dict.fromkeys(labels))
+            value = value[: cambridge_match.start()].strip()
+
     pos_match = re.search(
         r"(?:\s+|\()("
         + "|".join(
@@ -791,11 +820,11 @@ def _parse_vocab_head(
         value,
         re.IGNORECASE,
     )
-    if pos_match:
+    if pos is None and pos_match:
         key = pos_match.group(1).casefold()
         pos = VOCAB_POS_ALIASES.get(key)
         value = value[: pos_match.start()].strip()
-    else:
+    elif pos is None:
         # Oxford downloadable lists commonly use compact labels such as
         # "n.", "v.", "adj.", or combined "prep., adv.".
         short_match = re.search(
