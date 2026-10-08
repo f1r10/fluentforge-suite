@@ -1248,8 +1248,6 @@ def test_numbered_bilingual_vocabulary_rows_strip_numbers_and_split_translation(
         extraction,
         profile={
             "expected_content": "vocabulary",
-            "learning_language": "en",
-            "translation_language": "az",
             "status": "draft",
         },
     )
