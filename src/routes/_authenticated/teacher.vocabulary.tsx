@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { FileUp, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -97,7 +97,7 @@ function VocabularyPage() {
   const [search, setSearch] = useState("");
   const [language, setLanguage] = useState("");
   const [level, setLevel] = useState("");
-  const [status, setStatus] = useState<Status>("active");
+  const [status, setStatus] = useState<Status>("all");
   const [topicId, setTopicId] = useState("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -372,21 +372,29 @@ function VocabularyPage() {
           <h1 className="text-2xl font-bold">{t("vocabulary")}</h1>
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
-        <Button
-          disabled={languages.isPending}
-          onClick={() => {
-            setEnrichment(null);
-            setEditor(
-              emptyEditor(
-                languages.defaultLearningCode,
-                defaultTranslationFor(languages.defaultLearningCode),
-              ),
-            );
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          {t("add_vocabulary")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/teacher/sources" search={{ target: "vocabulary" }}>
+              <FileUp className="h-4 w-4" />
+              {t("import_vocabulary_documents")}
+            </Link>
+          </Button>
+          <Button
+            disabled={languages.isPending}
+            onClick={() => {
+              setEnrichment(null);
+              setEditor(
+                emptyEditor(
+                  languages.defaultLearningCode,
+                  defaultTranslationFor(languages.defaultLearningCode),
+                ),
+              );
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            {t("add_vocabulary")}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-2 md:grid-cols-5">
