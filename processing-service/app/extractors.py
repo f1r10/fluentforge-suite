@@ -615,12 +615,23 @@ def _vocabulary_defaults(profile: dict[str, Any] | None) -> dict[str, Any]:
     learning_language = str(profile.get("learning_language") or "en").strip().lower()
     if not re.fullmatch(r"[a-z]{2,10}", learning_language):
         learning_language = "en"
+    translation_language = str(
+        profile.get("translation_language") or ""
+    ).strip().lower() or None
+    if translation_language and not re.fullmatch(
+        r"[a-z]{2,10}", translation_language
+    ):
+        translation_language = None
+    if translation_language == learning_language:
+        translation_language = None
+
     level = str(profile.get("level") or "").strip() or None
     status = str(profile.get("status") or "draft").strip().lower()
     if status not in {"draft", "active"}:
         status = "draft"
     return {
         "learning_language": learning_language,
+        "translation_language": translation_language,
         "level": level,
         "status": status,
     }
@@ -679,6 +690,7 @@ def _vocabulary_payload(
     ipa: str | None = None,
     part_of_speech: str | None = None,
     level: str | None = None,
+    translations: list[dict[str, str]] | None = None,
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -692,7 +704,7 @@ def _vocabulary_payload(
         "level": level or defaults["level"],
         "notes": None,
         "status": defaults["status"],
-        "translations": [],
+        "translations": translations or [],
         "examples": [],
         "tags": tags or [],
     }
@@ -766,6 +778,7 @@ def _vocabulary_from_text(
         ipa: str | None = None,
         part_of_speech: str | None = None,
         level: str | None = None,
+        translations: list[dict[str, str]] | None = None,
         confidence: float,
     ) -> None:
         clean = _clean_vocab_word(word)
@@ -788,6 +801,7 @@ def _vocabulary_from_text(
                     ipa=ipa,
                     part_of_speech=part_of_speech,
                     level=level,
+                    translations=translations,
                 ),
                 "confidence": confidence,
             }
@@ -834,13 +848,28 @@ def _vocabulary_from_text(
                 and len(meaning) <= 10_000
                 and not VOCAB_LEVEL_RE.fullmatch(meaning)
             ):
+                translation_language = defaults.get("translation_language")
                 add(
                     word,
-                    definition=meaning,
+                    definition=None if translation_language else meaning,
                     ipa=ipa,
                     part_of_speech=pos,
                     level=level,
-                    confidence=0.82 if (pos or level or ipa) else 0.76,
+                    translations=(
+                        [
+                            {
+                                "language": translation_language,
+                                "value": meaning,
+                            }
+                        ]
+                        if translation_language
+                        else None
+                    ),
+                    confidence=0.86
+                    if translation_language
+                    else 0.82
+                    if (pos or level or ipa)
+                    else 0.76,
                 )
                 continue
 
@@ -954,13 +983,17 @@ def _vocabulary_from_rows(
         translations: list[dict[str, str]] = []
 
         translation_value = cell(row, translation_idx)
-        translation_language = cell(row, translation_language_idx).lower()
+        translation_language = (
+            cell(row, translation_language_idx).lower()
+            or str(defaults.get("translation_language") or "").lower()
+        )
         if translation_value and re.fullmatch(r"[a-z]{2,10}", translation_language):
             translations.append(
                 {"language": translation_language, "value": translation_value}
             )
         elif translation_value and not definition:
-            # Preserve an unlabeled second-language value without inventing its language.
+            # Without a configured/declared target language, preserve the value
+            # as a definition instead of inventing a translation language.
             definition = translation_value
 
         for index, language in explicit_translation_columns:
@@ -974,7 +1007,17 @@ def _vocabulary_from_rows(
             and not definition
             and not translations
         ):
-            definition = row[1].strip()
+            second = row[1].strip()
+            target_language = defaults.get("translation_language")
+            if second and target_language:
+                translations.append(
+                    {
+                        "language": str(target_language),
+                        "value": second,
+                    }
+                )
+            else:
+                definition = second
 
         example = cell(row, example_idx)
         examples = (
