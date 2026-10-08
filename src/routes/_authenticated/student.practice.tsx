@@ -224,6 +224,11 @@ function SelfPracticePage() {
     listenings.length > 0;
 
   useEffect(() => {
+    if (focus) {
+      localStorage.removeItem(STORAGE_KEY);
+      setResumeChecked(true);
+      return;
+    }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
@@ -251,7 +256,7 @@ function SelfPracticePage() {
     } finally {
       setResumeChecked(true);
     }
-  }, []);
+  }, [focus]);
 
   useEffect(() => {
     if (
@@ -641,48 +646,56 @@ function SelfPracticePage() {
           />
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <QuestionPoolCard
-              options={options}
-              pool={filters.questions}
-              onChange={(questions) =>
-                setFilters((current) => ({ ...current, questions }))
-              }
-            />
+            {(!focus || focus === "questions") && (
+              <QuestionPoolCard
+                options={options}
+                pool={filters.questions}
+                onChange={(questions) =>
+                  setFilters((current) => ({ ...current, questions }))
+                }
+              />
+            )}
 
-            <VocabularyPoolCard
-              options={options}
-              pool={filters.vocabulary}
-              onChange={(vocabularyPool) =>
-                setFilters((current) => ({
-                  ...current,
-                  vocabulary: vocabularyPool,
-                }))
-              }
-            />
+            {(!focus || focus === "vocabulary") && (
+              <VocabularyPoolCard
+                options={options}
+                pool={filters.vocabulary}
+                onChange={(vocabularyPool) =>
+                  setFilters((current) => ({
+                    ...current,
+                    vocabulary: vocabularyPool,
+                  }))
+                }
+              />
+            )}
 
-            <ContextPoolCard
-              kind="reading"
-              options={options}
-              pool={filters.readings}
-              onChange={(readingsPool) =>
-                setFilters((current) => ({
-                  ...current,
-                  readings: readingsPool,
-                }))
-              }
-            />
+            {(!focus || focus === "readings") && (
+              <ContextPoolCard
+                kind="reading"
+                options={options}
+                pool={filters.readings}
+                onChange={(readingsPool) =>
+                  setFilters((current) => ({
+                    ...current,
+                    readings: readingsPool,
+                  }))
+                }
+              />
+            )}
 
-            <ContextPoolCard
-              kind="listening"
-              options={options}
-              pool={filters.listenings}
-              onChange={(listeningsPool) =>
-                setFilters((current) => ({
-                  ...current,
-                  listenings: listeningsPool,
-                }))
-              }
-            />
+            {(!focus || focus === "listenings") && (
+              <ContextPoolCard
+                kind="listening"
+                options={options}
+                pool={filters.listenings}
+                onChange={(listeningsPool) =>
+                  setFilters((current) => ({
+                    ...current,
+                    listenings: listeningsPool,
+                  }))
+                }
+              />
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/20 p-4">
