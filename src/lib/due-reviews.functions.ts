@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "./teacher-middleware";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 export type DueReviewItem = {
   id: string;
