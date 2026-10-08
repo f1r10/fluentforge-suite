@@ -770,7 +770,7 @@ async function gradeAndLog(
   });
 
   if (results.length) {
-    const { error } = await admin.from("activity_events").insert(
+    const { data: loggedEvents, error } = await admin.from("activity_events").insert(
       results.map((result) => ({
         student_id: studentId,
         category: "practice",
@@ -790,8 +790,10 @@ async function gradeAndLog(
           needs_review: result.needs_review,
         } as never,
       })),
-    );
+    ).select("id");
     if (error) throw new Error(error.message);
+    const { recordReviewEvents } = await import("./review-schedule.server");
+    await recordReviewEvents(admin, loggedEvents ?? []);
   }
 
   return results.map(({ response, duration_ms, ...result }) => result);
@@ -919,7 +921,7 @@ export const submitVocabularyPracticeAnswer = createServerFn({
       );
     if (upsertError) throw new Error(upsertError.message);
 
-    const { error: activityError } = await admin.from("activity_events").insert({
+    const { data: gradedEvent, error: activityError } = await admin.from("activity_events").insert({
       student_id: studentId,
       category: "practice",
       event_type:
@@ -944,8 +946,12 @@ export const submitVocabularyPracticeAnswer = createServerFn({
         learner_state: next.state,
         correct_streak: next.correct_streak,
       } as never,
-    });
+    }).select("id").single();
     if (activityError) throw new Error(activityError.message);
+    if (data.mode !== "flashcard" && gradedEvent) {
+      const { recordReviewEvents } = await import("./review-schedule.server");
+      await recordReviewEvents(admin, [gradedEvent]);
+    }
 
     return {
       entryId: entry.id,

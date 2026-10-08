@@ -402,7 +402,7 @@ async function logPracticeAnswers(
 ) {
   if (!results.length) return;
 
-  const { error } = await admin.from("activity_events").insert(
+  const { data: loggedEvents, error } = await admin.from("activity_events").insert(
     results.map((result) => ({
       student_id: studentId,
       category: "practice",
@@ -423,8 +423,10 @@ async function logPracticeAnswers(
         needs_review: result.needs_review,
       } as never,
     })),
-  );
+  ).select("id");
   if (error) throw new Error(error.message);
+  const { recordReviewEvents } = await import("./review-schedule.server");
+  await recordReviewEvents(admin, loggedEvents ?? []);
 }
 
 async function gradeAndLog(
@@ -1134,7 +1136,7 @@ async function logVocabularyPracticeAnswers(
     .upsert(stateRows, { onConflict: "student_id,entry_id" });
   if (upsertError) throw new Error(upsertError.message);
 
-  const { error: activityError } = await admin.from("activity_events").insert(
+  const { data: loggedEvents, error: activityError } = await admin.from("activity_events").insert(
     results.map((result) => ({
       student_id: studentId,
       category: "practice",
@@ -1158,8 +1160,10 @@ async function logVocabularyPracticeAnswers(
         expected: result.expected,
       } as never,
     })),
-  );
+  ).select("id");
   if (activityError) throw new Error(activityError.message);
+  const { recordReviewEvents } = await import("./review-schedule.server");
+  await recordReviewEvents(admin, loggedEvents ?? []);
 }
 
 export const submitSelfPracticeVocabularyAnswer = createServerFn({
