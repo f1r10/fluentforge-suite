@@ -729,7 +729,7 @@ VOCAB_BOILERPLATE_RE = re.compile(
 
 
 def _clean_vocab_word(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.!?")
+    return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.")
 
 
 def _vocabulary_payload(
@@ -861,7 +861,7 @@ def _parse_vocab_head(
 def _looks_like_vocab_term(value: str) -> bool:
     if not value or len(value) > 120 or VOCAB_BOILERPLATE_RE.search(value):
         return False
-    if value.endswith((".", "?", "!", ";", ":")):
+    if value.endswith((".", "?", "!", ";", ":")) and len(value.split()) > 3:
         return False
     if re.search(r"\b\d{3,4}\b", value):
         return False
