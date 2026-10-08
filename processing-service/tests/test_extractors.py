@@ -831,3 +831,150 @@ def test_listening_target_splits_multiple_tasks_on_one_page():
         "listening:page:9:task:1",
         "listening:page:9:task:2",
     }
+
+
+def test_oxford_style_vocabulary_list_detection():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "ability noun A2\n"
+                    "abandon verb B2\n"
+                    "accurate adjective B1\n"
+                    "carefully adverb B1\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "status": "draft",
+        },
+    )
+
+    assert [item["payload"]["word"] for item in items] == [
+        "ability",
+        "abandon",
+        "accurate",
+        "carefully",
+    ]
+    assert items[0]["payload"]["part_of_speech"] == "noun"
+    assert items[0]["payload"]["level"] == "A2"
+    assert items[1]["payload"]["part_of_speech"] == "verb"
+    assert items[1]["payload"]["level"] == "B2"
+
+
+def test_cambridge_style_simple_vocabulary_list_detection():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 4,
+                "text": (
+                    "House and Home\n"
+                    "air conditioning\n"
+                    "alarm clock\n"
+                    "armchair\n"
+                    "bookcase\n"
+                    "washing machine\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "level": "B1",
+        },
+    )
+
+    words = [item["payload"]["word"] for item in items]
+    assert "air conditioning" in words
+    assert "alarm clock" in words
+    assert "armchair" in words
+    assert "washing machine" in words
+    assert all(item["payload"]["level"] == "B1" for item in items)
+
+
+def test_vocabulary_document_line_parses_ipa_pos_level_and_definition():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": "reliable /rɪˈlaɪəbl/ adjective B1 — able to be trusted\n",
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert len(items) == 1
+    item = items[0]["payload"]
+    assert item["word"] == "reliable"
+    assert item["ipa"] == "/rɪˈlaɪəbl/"
+    assert item["part_of_speech"] == "adjective"
+    assert item["level"] == "B1"
+    assert item["definition"] == "able to be trusted"
+
+
+def test_vocabulary_spreadsheet_accepts_common_dictionary_headers(tmp_path: Path):
+    source = tmp_path / "dictionary.csv"
+    source.write_text(
+        "term,meaning,pronunciation,type,cefr,example sentence,az\n"
+        "apple,a round fruit,/ˈæp.əl/,noun,A1,I ate an apple.,alma\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/csv")
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert len(items) == 1
+    payload = items[0]["payload"]
+    assert payload["word"] == "apple"
+    assert payload["definition"] == "a round fruit"
+    assert payload["ipa"] == "/ˈæp.əl/"
+    assert payload["part_of_speech"] == "noun"
+    assert payload["level"] == "A1"
+    assert payload["examples"] == [
+        {"sentence": "I ate an apple.", "translation": None}
+    ]
+    assert payload["translations"] == [
+        {"language": "az", "value": "alma"}
+    ]
