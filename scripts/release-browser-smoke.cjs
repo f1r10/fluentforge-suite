@@ -398,7 +398,10 @@ async function gotoHydrated(page, path) {
       .getByRole("heading", { name: "Release Section", level: 3 })
       .waitFor({ timeout: 20000 });
 
-    await page
+    const releaseSection = page
+      .getByRole("heading", { name: "Release Section", level: 3 })
+      .locator("xpath=ancestor::section[1]");
+    await releaseSection
       .getByRole("button", { name: "Add content", exact: true })
       .click();
     const examContentDialog = page
