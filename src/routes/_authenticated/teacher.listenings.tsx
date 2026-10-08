@@ -69,6 +69,9 @@ type EditorState = {
   allow_seek: boolean;
   allow_rewind: boolean;
   show_transcript: boolean;
+  dictation_enabled: boolean;
+  dictation_ignore_punctuation: boolean;
+  dictation_show_feedback: boolean;
   topicIds: string[];
   tags: string;
   sections: Section[];
@@ -89,6 +92,9 @@ const emptyEditor = (learningLanguage = ""): EditorState => ({
   allow_seek: true,
   allow_rewind: true,
   show_transcript: false,
+  dictation_enabled: false,
+  dictation_ignore_punctuation: true,
+  dictation_show_feedback: true,
   topicIds: [],
   tags: "",
   sections: [],
@@ -170,6 +176,9 @@ function ListeningsPage() {
         allow_seek: rules["allow_seek"] !== false,
         allow_rewind: rules["allow_rewind"] !== false,
         show_transcript: rules["show_transcript"] === true,
+        dictation_enabled: rules["dictation_enabled"] === true,
+        dictation_ignore_punctuation: rules["dictation_ignore_punctuation"] !== false,
+        dictation_show_feedback: rules["dictation_show_feedback"] !== false,
         topicIds: row.topicIds,
         tags: row.tags.join(", "),
         sections: row.sections.map((x) => ({
@@ -210,6 +219,9 @@ function ListeningsPage() {
             allow_seek: editor.allow_seek,
             allow_rewind: editor.allow_rewind,
             show_transcript: editor.show_transcript,
+            dictation_enabled: editor.dictation_enabled,
+            dictation_ignore_punctuation: editor.dictation_ignore_punctuation,
+            dictation_show_feedback: editor.dictation_show_feedback,
           },
           topicIds: editor.topicIds,
           tags: editor.tags.split(",").map((x) => x.trim()).filter(Boolean),
@@ -399,6 +411,9 @@ function ListeningsPage() {
               allow_seek: editor.allow_seek,
               allow_rewind: editor.allow_rewind,
               show_transcript: editor.show_transcript,
+            dictation_enabled: editor.dictation_enabled,
+            dictation_ignore_punctuation: editor.dictation_ignore_punctuation,
+            dictation_show_feedback: editor.dictation_show_feedback,
             },
             topicIds: editor.topicIds,
             tags: editor.tags
@@ -735,6 +750,13 @@ function ListeningsPage() {
                   <Check label={t("allow_seek")} checked={editor.allow_seek} onChange={(v) => setEditor({ ...editor, allow_seek: v })} />
                   <Check label={t("allow_rewind")} checked={editor.allow_rewind} onChange={(v) => setEditor({ ...editor, allow_rewind: v })} />
                   <Check label={t("show_transcript")} checked={editor.show_transcript} onChange={(v) => setEditor({ ...editor, show_transcript: v })} />
+                  <Check label={t("dictation")} checked={editor.dictation_enabled} onChange={(value) => setEditor({ ...editor, dictation_enabled: value, show_transcript: value ? false : editor.show_transcript })} />
+                  {editor.dictation_enabled && (
+                    <>
+                      <Check label={t("ignore_dictation_punctuation")} checked={editor.dictation_ignore_punctuation} onChange={(value) => setEditor({ ...editor, dictation_ignore_punctuation: value })} />
+                      <Check label={t("show_dictation_feedback")} checked={editor.dictation_show_feedback} onChange={(value) => setEditor({ ...editor, dictation_show_feedback: value })} />
+                    </>
+                  )}
                 </div>
               </section>
 

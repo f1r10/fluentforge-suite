@@ -345,6 +345,9 @@ export async function loadListeningPracticeData(
           allow_seek: rules["allow_seek"] !== false,
           allow_rewind: rules["allow_rewind"] !== false,
           show_transcript: rules["show_transcript"] === true,
+          dictation_enabled: rules["dictation_enabled"] === true && rules["show_transcript"] !== true,
+          dictation_ignore_punctuation: rules["dictation_ignore_punctuation"] !== false,
+          dictation_show_feedback: rules["dictation_show_feedback"] !== false,
         },
         media: media
           ? {

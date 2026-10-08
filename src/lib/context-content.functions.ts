@@ -371,6 +371,9 @@ export const saveListening = createServerFn({ method: "POST" })
             allow_seek: z.boolean().default(true),
             allow_rewind: z.boolean().default(true),
             show_transcript: z.boolean().default(false),
+            dictation_enabled: z.boolean().default(false),
+            dictation_ignore_punctuation: z.boolean().default(true),
+            dictation_show_feedback: z.boolean().default(true),
           })
           .default({
             max_plays: null,
@@ -378,12 +381,27 @@ export const saveListening = createServerFn({ method: "POST" })
             allow_seek: true,
             allow_rewind: true,
             show_transcript: false,
+            dictation_enabled: false,
+            dictation_ignore_punctuation: true,
+            dictation_show_feedback: true,
           }),
       })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { topicIds, tags, id: existingId, ...input } = data;
+    if (input.playback_rules.dictation_enabled) {
+      const count = (input.transcript ?? "").trim().split(/\s+/u).filter(Boolean).length;
+      if (
+        !input.media_id ||
+        !["manual", "imported"].includes(input.transcript_source ?? "") ||
+        count < 1 ||
+        count > 200 ||
+        input.playback_rules.show_transcript
+      ) {
+        throw new Error("Dictation requires linked audio, a teacher-provided 1–200 word transcript, and hidden transcript during practice.");
+      }
+    }
     const core = {
       title: input.title,
       media_id: input.media_id,

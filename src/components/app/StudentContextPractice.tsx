@@ -40,6 +40,9 @@ export type StudentListeningPractice = {
     allow_seek: boolean;
     allow_rewind: boolean;
     show_transcript: boolean;
+    dictation_enabled: boolean;
+    dictation_ignore_punctuation: boolean;
+    dictation_show_feedback: boolean;
   };
   media: {
     id: string;
