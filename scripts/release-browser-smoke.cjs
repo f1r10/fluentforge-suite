@@ -330,7 +330,7 @@ async function gotoHydrated(page, path) {
     const importedQuestionRow = contentDialog
       .getByText("Runtime PDF import works?", { exact: true })
       .locator("xpath=ancestor::li");
-    await importedQuestionRow.click();
+    await importedQuestionRow.getByRole("checkbox").click();
     await contentDialog
       .getByRole("button", { name: /^Add \(1\)$/ })
       .click();
@@ -366,6 +366,60 @@ async function gotoHydrated(page, path) {
       .getByText(student.username, { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
+
+    await gotoHydrated(page, "/teacher/exams");
+    await page
+      .getByRole("button", { name: "New exam", exact: true })
+      .click();
+    const examDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "New exam", exact: true }),
+      });
+    await examDialog.locator("input").first().fill("Release Exam");
+    await examDialog
+      .getByRole("button", { name: "Create", exact: true })
+      .click();
+    await expectPath(page, "**/teacher/exams/**", "exam workspace");
+
+    await page
+      .getByRole("button", { name: "Add section", exact: true })
+      .click();
+    const sectionDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", { name: "Add section", exact: true }),
+      });
+    await sectionDialog.locator("input").first().fill("Release Section");
+    await sectionDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await page
+      .getByRole("heading", { name: "Release Section", level: 3 })
+      .waitFor({ timeout: 20000 });
+
+    await page
+      .getByRole("button", { name: "Add content", exact: true })
+      .click();
+    const examContentDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Add exam content",
+          exact: true,
+        }),
+      });
+    const examQuestionRow = examContentDialog
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::li");
+    await examQuestionRow.click();
+    await examContentDialog
+      .getByRole("button", { name: /^Add \(1\)$/ })
+      .click();
+    await page
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] exam content can be selected by clicking the whole row");
 
     await gotoHydrated(page, "/teacher/vocabulary");
     await page.getByRole("button", { name: "New word", exact: true }).click();
