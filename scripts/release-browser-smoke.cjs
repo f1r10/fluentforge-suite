@@ -283,8 +283,8 @@ async function gotoHydrated(page, path) {
       .filter({ hasText: "releaseword" })
       .first();
     await vocabularyReviewItem.waitFor({ timeout: 20000 });
-    await vocabularyReviewItem
-      .getByRole("button", { name: "Approve", exact: true })
+    await vocabularyImportDialog
+      .getByRole("button", { name: /Approve all valid/ })
       .click();
     await vocabularyImportDialog
       .getByRole("button", { name: /Import approved/ })
@@ -330,7 +330,7 @@ async function gotoHydrated(page, path) {
     const importedQuestionRow = contentDialog
       .getByText("Runtime PDF import works?", { exact: true })
       .locator("xpath=ancestor::li");
-    await importedQuestionRow.getByRole("checkbox").click();
+    await importedQuestionRow.click();
     await contentDialog
       .getByRole("button", { name: /^Add \(1\)$/ })
       .click();
@@ -775,6 +775,7 @@ async function gotoHydrated(page, path) {
       ["/student/vocabulary", "Vocabulary"],
       ["/student/readings", "Readings"],
       ["/student/listenings", "Listenings"],
+      ["/student/mistakes", "My mistakes"],
       ["/student/practice", "Self-practice"],
     ];
     for (const [path, heading] of studentLibraryChecks) {
@@ -857,6 +858,35 @@ async function gotoHydrated(page, path) {
     console.log("[ok] student built a timed four-domain mock exam from Question Bank, Vocabulary, Reading and Listening");
 
     await studentContext.close();
+
+    const activityContext = await browser.newContext();
+    const activityPage = await activityContext.newPage();
+    activePage = activityPage;
+    await useEnglish(activityPage);
+    await gotoHydrated(activityPage, "/teacher-login");
+    await activityPage.locator("#u").fill(teacherUsername);
+    await activityPage.locator("#p").fill(teacherPassword);
+    await activityPage.locator('form button[type="submit"]').click();
+    await expectPath(activityPage, "**/teacher", "teacher activity relogin");
+    await gotoHydrated(activityPage, "/teacher/students");
+    await activityPage
+      .getByRole("link", {
+        name: student.firstName + " " + student.lastName,
+        exact: true,
+      })
+      .click();
+    await activityPage
+      .getByRole("heading", {
+        name: student.firstName + " " + student.lastName,
+        level: 1,
+      })
+      .waitFor({ timeout: 20000 });
+    await activityPage
+      .getByRole("heading", { name: "Login activity", level: 2 })
+      .waitFor({ timeout: 20000 });
+    await activityContext.close();
+    console.log("[ok] teacher can open a readable per-student activity profile");
+
     console.log("FluentForge release browser acceptance passed.");
   } catch (error) {
     console.error("FluentForge release browser acceptance failed:", error);
