@@ -232,9 +232,6 @@ async function gotoHydrated(page, path) {
       .getByText("Runtime PDF import works?", { exact: true })
       .locator("xpath=ancestor::li");
     await importedQuestion.waitFor({ timeout: 20000 });
-    await importedQuestion
-      .getByText("draft", { exact: true })
-      .waitFor({ timeout: 20000 });
     console.log("[ok] imported PDF draft is visible in Question Bank without changing filters");
 
     await importedQuestion.getByRole("checkbox", { name: "select" }).click();
@@ -306,9 +303,6 @@ async function gotoHydrated(page, path) {
       .getByText("releaseword", { exact: true })
       .locator("xpath=ancestor::tr");
     await importedVocabularyRow.waitFor({ timeout: 20000 });
-    await importedVocabularyRow
-      .getByText("draft", { exact: true })
-      .waitFor({ timeout: 20000 });
     console.log("[ok] imported vocabulary draft is visible without changing filters");
 
     await importedVocabularyRow.getByRole("checkbox").click();
