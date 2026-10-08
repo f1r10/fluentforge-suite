@@ -1174,3 +1174,45 @@ def test_real_oxford_abbreviated_wordlist_rows():
     assert payloads[2]["part_of_speech"] == "noun"
     assert payloads[3]["part_of_speech"] == "adjective"
     assert payloads[4]["part_of_speech"] == "preposition, adverb"
+
+
+def test_cambridge_parenthesized_pos_notation():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "complicated (adj)\n"
+                    "connect (v)\n"
+                    "control (n & v)\n"
+                    "could (mv)\n"
+                    "cross out (phr v)\n"
+                    "congratulations! (exclam)\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "level": "B1",
+        },
+    )
+
+    payloads = {item["payload"]["word"]: item["payload"] for item in items}
+    assert payloads["complicated"]["part_of_speech"] == "adjective"
+    assert payloads["connect"]["part_of_speech"] == "verb"
+    assert payloads["control"]["part_of_speech"] == "noun, verb"
+    assert payloads["could"]["part_of_speech"] == "modal verb"
+    assert payloads["cross out"]["part_of_speech"] == "phrasal verb"
+    assert payloads["congratulations!"]["part_of_speech"] == "exclamation"
+    assert all(item["level"] == "B1" for item in payloads.values())
