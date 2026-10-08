@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  approveAllReadyItems,
   approveHighConfidenceItems,
   commitDocumentImport,
   createSourceUploadSession,
@@ -774,6 +775,23 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
     }
   }
 
+  async function approveAllReady() {
+    setBusy(true);
+    try {
+      const result = await approveAllReadyItems({ data: { jobId: job.id } });
+      toast.success(
+        result.skipped
+          ? `${t("approved")}: ${result.approved} · ${t("needs_review")}: ${result.skipped}`
+          : `${t("approved")}: ${result.approved}`,
+      );
+      await refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function commit() {
     setBusy(true);
     try {
@@ -810,6 +828,7 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
             busy={busy}
             onRefresh={sync}
             onApproveHigh={approveHighConfidence}
+            onApproveAll={approveAllReady}
             onCommit={commit}
             onChanged={refetch}
           />
@@ -825,6 +844,7 @@ function ReviewWorkspace({
   busy,
   onRefresh,
   onApproveHigh,
+  onApproveAll,
   onCommit,
   onChanged,
 }: {
@@ -833,6 +853,7 @@ function ReviewWorkspace({
   busy: boolean;
   onRefresh: () => Promise<void>;
   onApproveHigh: () => Promise<void>;
+  onApproveAll: () => Promise<void>;
   onCommit: () => Promise<void>;
   onChanged: () => Promise<unknown>;
 }) {
@@ -922,6 +943,14 @@ function ReviewWorkspace({
                 {t("refresh")}
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || pending === 0}
+              onClick={onApproveAll}
+            >
+              {t("approve_all_ready")} ({pending - needsFix})
+            </Button>
             <Button size="sm" variant="outline" disabled={busy || data.items.length === 0} onClick={onApproveHigh}>
               {t("approve_high_confidence")}
             </Button>
