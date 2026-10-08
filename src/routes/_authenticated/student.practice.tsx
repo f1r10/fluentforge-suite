@@ -1107,9 +1107,9 @@ function VocabularyPoolCard({
     (row) =>
       (!pool.language || row.learning_language === pool.language) &&
       (!pool.level || row.level === pool.level) &&
-      row.translations.some(
-        (translation) =>
-          translation.language.toLowerCase() ===
+      row.translationLanguages.some(
+        (language) =>
+          language.toLowerCase() ===
           pool.translationLanguage.toLowerCase(),
       ),
   );
