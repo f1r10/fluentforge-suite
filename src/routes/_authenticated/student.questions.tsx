@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Filter, Play } from "lucide-react";
@@ -61,11 +61,19 @@ function StudentQuestionsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold">{t("browse_questions")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("question_bank_hint_student")}
-        </p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t("browse_questions")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("question_bank_hint_student")}
+          </p>
+        </div>
+        <Button asChild>
+          <Link to="/student/practice" search={{ focus: "questions" }}>
+            <Play className="h-4 w-4" />
+            {t("test_yourself")}
+          </Link>
+        </Button>
       </div>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_220px_140px]">
