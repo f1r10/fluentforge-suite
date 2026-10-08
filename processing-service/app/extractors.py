@@ -609,6 +609,53 @@ VOCAB_SYNONYM_HEADERS = {"synonyms", "synonym"}
 VOCAB_ANTONYM_HEADERS = {"antonyms", "antonym"}
 VOCAB_NOTES_HEADERS = {"notes", "note"}
 
+VOCAB_LANGUAGE_HEADER_ALIASES = {
+    "english": "en",
+    "ingilis": "en",
+    "ingiliscə": "en",
+    "ingilisce": "en",
+    "azerbaijani": "az",
+    "azerbaijan": "az",
+    "azərbaycan": "az",
+    "azerbaycanca": "az",
+    "azərbaycanca": "az",
+    "turkish": "tr",
+    "türkçe": "tr",
+    "turkce": "tr",
+    "russian": "ru",
+    "русский": "ru",
+    "рус": "ru",
+}
+
+
+def _translation_language_from_header(header: str) -> str | None:
+    direct = VOCAB_LANGUAGE_HEADER_ALIASES.get(header)
+    if direct:
+        return direct
+
+    match = re.fullmatch(
+        r"(?:translation|tercume|tərcümə|çeviri|перевод)_([a-z]{2,10})",
+        header,
+    )
+    if match:
+        return match.group(1)
+
+    for prefix in (
+        "translation_",
+        "tercume_",
+        "tərcümə_",
+        "çeviri_",
+        "перевод_",
+    ):
+        if header.startswith(prefix):
+            return VOCAB_LANGUAGE_HEADER_ALIASES.get(
+                header[len(prefix) :]
+            )
+
+    if re.fullmatch(r"[a-z]{2,3}", header):
+        return header
+    return None
+
 
 def _vocabulary_defaults(profile: dict[str, Any] | None) -> dict[str, Any]:
     profile = profile or {}
@@ -960,11 +1007,11 @@ def _vocabulary_from_rows(
     explicit_translation_columns: list[tuple[int, str]] = []
     if has_named_header:
         for index, header in enumerate(headers):
-            match = re.fullmatch(r"(?:translation|tercume|tərcümə|çeviri)_([a-z]{2,10})", header)
-            if match:
-                explicit_translation_columns.append((index, match.group(1)))
-            elif re.fullmatch(r"[a-z]{2,3}", header) and index != word_idx:
-                explicit_translation_columns.append((index, header))
+            if index == word_idx:
+                continue
+            language = _translation_language_from_header(header)
+            if language:
+                explicit_translation_columns.append((index, language))
 
     start_index = 1 if has_named_header else 0
 
