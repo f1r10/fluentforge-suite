@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ChevronRight, Headphones } from "lucide-react";
+import { ChevronRight, Headphones, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { listStudentListenings } from "@/lib/student-library.functions";
@@ -40,11 +40,19 @@ function StudentListeningsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold">{t("listening_library")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("listening_library_hint")}
-        </p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t("listening_library")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("listening_library_hint")}
+          </p>
+        </div>
+        <Button asChild>
+          <Link to="/student/practice" search={{ focus: "listenings" }}>
+            <Play className="h-4 w-4" />
+            {t("test_yourself")}
+          </Link>
+        </Button>
       </div>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_160px]">
