@@ -276,12 +276,9 @@ async function gotoHydrated(page, path) {
       .getByText(/^(needs_review|completed)$/)
       .waitFor({ timeout: 60000 });
     const vocabularyReviewItem = vocabularyImportDialog
-      .getByRole("article")
-      .filter({
-        has: vocabularyImportDialog.getByText("releaseword", {
-          exact: true,
-        }),
-      });
+      .locator("article")
+      .filter({ hasText: "releaseword" })
+      .first();
     await vocabularyReviewItem.waitFor({ timeout: 20000 });
     await vocabularyReviewItem
       .getByRole("button", { name: "Approve", exact: true })
