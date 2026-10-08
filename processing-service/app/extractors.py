@@ -318,11 +318,28 @@ def _extract_xls(path: Path) -> Extraction:
 
 def _extract_delimited(path: Path, delimiter: str) -> Extraction:
     raw = path.read_text("utf-8-sig", errors="replace")
-    rows = list(csv.reader(io.StringIO(raw), delimiter=delimiter))
-    rows = [[str(cell) for cell in row] for row in rows if any(str(cell).strip() for cell in row)]
+    chosen = delimiter
+    try:
+        dialect = csv.Sniffer().sniff(raw[:32_768], delimiters=",;\t|")
+        chosen = dialect.delimiter
+    except csv.Error:
+        chosen = delimiter
+
+    rows = list(csv.reader(io.StringIO(raw), delimiter=chosen))
+    rows = [
+        [str(cell) for cell in row]
+        for row in rows
+        if any(str(cell).strip() for cell in row)
+    ]
     name = path.stem
     text = "\n".join("\t".join(row) for row in rows)
-    return Extraction("delimited_native", [], [{"sheet": name, "rows": rows, "text": text}], text, {"rows": len(rows)})
+    return Extraction(
+        "delimited_native",
+        [],
+        [{"sheet": name, "rows": rows, "text": text}],
+        text,
+        {"rows": len(rows), "delimiter": chosen},
+    )
 
 
 def _extract_image(path: Path) -> Extraction:
@@ -776,7 +793,23 @@ def _vocabulary_from_text(
             }
         )
 
+    source_lines: list[str] = []
     for raw_line in text.splitlines():
+        segments = [raw_line]
+        if ";" in raw_line:
+            possible = [
+                part.strip()
+                for part in raw_line.split(";")
+                if part.strip()
+            ]
+            if len(possible) > 1 and all(
+                re.search(r"\t|\s+[—–-]\s+|\s*:\s+|,", part)
+                for part in possible
+            ):
+                segments = possible
+        source_lines.extend(segments)
+
+    for raw_line in source_lines:
         line = re.sub(
             r"^\s*(?:[-•*▪◦]|\d{1,4}[\.)])\s*",
             "",
@@ -785,9 +818,14 @@ def _vocabulary_from_text(
         if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
             continue
 
-        # Dictionary / teacher-list format:
-        # word<TAB>meaning, word — meaning, word - meaning, word: meaning.
-        parts = re.split(r"\t+|\s+[—–-]\s+|\s*:\s+", line, maxsplit=1)
+        # Dictionary / teacher-list / Quizlet formats:
+        # word<TAB>meaning, word — meaning, word - meaning, word: meaning,
+        # and simple term,definition rows.
+        parts = re.split(
+            r"\t+|\s+[—–-]\s+|\s*:\s+|\s*,\s*",
+            line,
+            maxsplit=1,
+        )
         if len(parts) == 2 and parts[0].strip() and parts[1].strip():
             word, ipa, pos, level = _parse_vocab_head(parts[0])
             meaning = parts[1].strip()
