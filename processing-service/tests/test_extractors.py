@@ -1128,3 +1128,49 @@ def test_named_language_vocabulary_columns(tmp_path: Path):
         {"language": "az", "value": "alma"},
         {"language": "ru", "value": "яблоко"},
     ]
+
+
+def test_real_oxford_abbreviated_wordlist_rows():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "a, an indefinite article A1\n"
+                    "abandon v. B2\n"
+                    "ability n. A2\n"
+                    "able adj. A2\n"
+                    "about prep., adv. A1\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    payloads = [item["payload"] for item in items]
+    assert [item["word"] for item in payloads] == [
+        "a, an",
+        "abandon",
+        "ability",
+        "able",
+        "about",
+    ]
+    assert payloads[0]["part_of_speech"] == "indefinite article"
+    assert payloads[0]["level"] == "A1"
+    assert payloads[1]["part_of_speech"] == "verb"
+    assert payloads[2]["part_of_speech"] == "noun"
+    assert payloads[3]["part_of_speech"] == "adjective"
+    assert payloads[4]["part_of_speech"] == "preposition, adverb"
