@@ -47,6 +47,9 @@ function StudentMistakesPage() {
   const [vocabulary, setVocabulary] = useState<VocabularyPracticeEntry | null>(
     null,
   );
+  const [vocabularySessionId, setVocabularySessionId] = useState(() =>
+    crypto.randomUUID(),
+  );
 
   const { data, isLoading } = useQuery({
     queryKey: ["my-mistakes"],
@@ -169,9 +172,10 @@ function StudentMistakesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        setVocabulary(entry as VocabularyPracticeEntry)
-                      }
+                      onClick={() => {
+                        setVocabularySessionId(crypto.randomUUID());
+                        setVocabulary(entry as VocabularyPracticeEntry);
+                      }}
                     >
                       <Play className="h-4 w-4" />
                       {t("practice_again")}
@@ -211,7 +215,7 @@ function StudentMistakesPage() {
             </DialogHeader>
             <VocabularyPracticeCard
               catalogId={null}
-              sessionId={crypto.randomUUID()}
+              sessionId={vocabularySessionId}
               entry={vocabulary}
               allEntries={
                 data.vocabulary as unknown as VocabularyPracticeEntry[]
