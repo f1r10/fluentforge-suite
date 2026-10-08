@@ -405,14 +405,114 @@ export const getMyMistakes = createServerFn({ method: "GET" })
       : { data: [], error: null };
     if (questionsResult.error) throw new Error(questionsResult.error.message);
 
+    const rawQuestions = (questionsResult.data ?? []) as Array<{
+      id: string;
+      question_type: string;
+      prompt: string;
+      instructions: string | null;
+      payload: unknown;
+      answer_key: unknown;
+      scoring: unknown;
+      grading_mode: string;
+      current_version: number;
+      learning_language: string | null;
+      level: string | null;
+      context_kind: "none" | "reading" | "listening";
+      reading_question_set_id: string | null;
+      listening_question_set_id: string | null;
+    }>;
+    const readingSetIds = [
+      ...new Set(
+        rawQuestions
+          .map((row) => row.reading_question_set_id)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const listeningSetIds = [
+      ...new Set(
+        rawQuestions
+          .map((row) => row.listening_question_set_id)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const [readingSetsResult, listeningSetsResult] = await Promise.all([
+      readingSetIds.length
+        ? admin
+            .from("reading_question_sets")
+            .select("id,reading_id,readings(title)")
+            .in("id", readingSetIds)
+        : Promise.resolve({ data: [], error: null }),
+      listeningSetIds.length
+        ? admin
+            .from("listening_question_sets")
+            .select("id,listening_id,listenings(title)")
+            .in("id", listeningSetIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (readingSetsResult.error) {
+      throw new Error(readingSetsResult.error.message);
+    }
+    if (listeningSetsResult.error) {
+      throw new Error(listeningSetsResult.error.message);
+    }
+
+    const readingSetMap = new Map(
+      (readingSetsResult.data ?? []).map((row) => [
+        row.id,
+        {
+          id: row.reading_id,
+          title:
+            (row.readings as unknown as { title: string } | null)?.title ??
+            "Reading",
+        },
+      ]),
+    );
+    const listeningSetMap = new Map(
+      (listeningSetsResult.data ?? []).map((row) => [
+        row.id,
+        {
+          id: row.listening_id,
+          title:
+            (row.listenings as unknown as { title: string } | null)?.title ??
+            "Listening",
+        },
+      ]),
+    );
+
     const { hydrateQuestionMedia } = await import("./media.server");
     const hydrated = await hydrateQuestionMedia(
       admin,
-      (questionsResult.data ?? []) as never[],
+      rawQuestions,
       60 * 60,
     );
     const questionById = new Map(
-      hydrated.map((row) => [row.id, publicPracticeQuestion(row as never)]),
+      hydrated.map((row) => [row.id, publicPracticeQuestion(row)]),
+    );
+    const contextByQuestion = new Map(
+      rawQuestions.map((row) => {
+        if (row.context_kind === "reading" && row.reading_question_set_id) {
+          const context = readingSetMap.get(row.reading_question_set_id);
+          return [
+            row.id,
+            context
+              ? { kind: "reading" as const, ...context }
+              : null,
+          ] as const;
+        }
+        if (
+          row.context_kind === "listening" &&
+          row.listening_question_set_id
+        ) {
+          const context = listeningSetMap.get(row.listening_question_set_id);
+          return [
+            row.id,
+            context
+              ? { kind: "listening" as const, ...context }
+              : null,
+          ] as const;
+        }
+        return [row.id, null] as const;
+      }),
     );
 
     const vocabularyIds = (vocabularyStateResult.data ?? []).map(
@@ -444,6 +544,7 @@ export const getMyMistakes = createServerFn({ method: "GET" })
                 previousResponse: outcome.response,
                 lastWrongAt: outcome.at,
                 source: outcome.source,
+                context: contextByQuestion.get(outcome.questionId) ?? null,
               },
             ]
           : [];
