@@ -1104,3 +1104,27 @@ def test_headerless_bilingual_spreadsheet_uses_profile_translation_language():
         [{"language": "az", "value": "alma"}],
         [{"language": "az", "value": "kitab"}],
     ]
+
+
+def test_named_language_vocabulary_columns(tmp_path: Path):
+    source = tmp_path / "dictionary.csv"
+    source.write_text(
+        "word,part_of_speech,cefr,Azərbaycanca,Russian\n"
+        "apple,noun,A1,alma,яблоко\n",
+        encoding="utf-8",
+    )
+
+    extraction = extract_document(source, source.name, "text/csv")
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+
+    assert len(items) == 1
+    assert items[0]["payload"]["translations"] == [
+        {"language": "az", "value": "alma"},
+        {"language": "ru", "value": "яблоко"},
+    ]
