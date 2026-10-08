@@ -681,10 +681,10 @@ def _infer_vocabulary_languages_from_text(
         "русский": "ru",
     }
     for raw_line in text.splitlines()[:40]:
-        cleaned = re.sub(r"^[#\\s:|;,\\-]+|[#\\s:|;,\\-]+$", "", raw_line)
+        cleaned = re.sub(r"^[#\s:|;,\-]+|[#\s:|;,\-]+$", "", raw_line)
         tokens = [
             re.sub(
-                r"[^\\wƏəĞğİıÖöŞşÇçÜüА-Яа-яЁё]+",
+                r"[^\wƏəĞğİıÖöŞşÇçÜüА-Яа-яЁё]+",
                 "",
                 token,
             ).casefold()
@@ -698,6 +698,7 @@ def _infer_vocabulary_languages_from_text(
                 "translation_language": languages[1],
             }
     return defaults
+
 
 def _vocabulary_defaults(profile: dict[str, Any] | None) -> dict[str, Any]:
     profile = profile or {}
