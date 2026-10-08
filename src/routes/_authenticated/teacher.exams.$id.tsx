@@ -863,14 +863,47 @@ function ContentPicker({
           <ul className="divide-y divide-border">
             {data.map((row) => {
               const key = `${row.entity_type}:${row.entity_id}`;
+              const toggle = () => {
+                if (row.inSection) return;
+                setSelected((current) =>
+                  current.includes(key)
+                    ? current.filter((value) => value !== key)
+                    : [...current, key],
+                );
+              };
               return (
-                <li key={key} className="flex items-start gap-3 p-3">
+                <li
+                  key={key}
+                  role={row.inSection ? undefined : "button"}
+                  tabIndex={row.inSection ? undefined : 0}
+                  className={
+                    "flex items-start gap-3 p-3 " +
+                    (row.inSection
+                      ? "opacity-70"
+                      : "cursor-pointer hover:bg-muted/40")
+                  }
+                  onClick={toggle}
+                  onKeyDown={(event) => {
+                    if (
+                      !row.inSection &&
+                      (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      toggle();
+                    }
+                  }}
+                >
                   <Checkbox
                     className="mt-0.5"
                     disabled={row.inSection}
                     checked={row.inSection || selected.includes(key)}
+                    onClick={(event) => event.stopPropagation()}
                     onCheckedChange={(checked) =>
-                      setSelected(checked ? [...selected, key] : selected.filter((value) => value !== key))
+                      setSelected(
+                        checked
+                          ? [...selected.filter((value) => value !== key), key]
+                          : selected.filter((value) => value !== key),
+                      )
                     }
                   />
                   <div className="min-w-0 flex-1">
