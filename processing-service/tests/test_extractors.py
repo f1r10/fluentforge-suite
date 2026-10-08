@@ -1043,3 +1043,64 @@ def test_anki_semicolon_delimited_vocabulary_csv(tmp_path: Path):
     ]
     assert items[0]["payload"]["part_of_speech"] == "noun"
     assert items[1]["payload"]["level"] == "B1"
+
+
+def test_bilingual_vocabulary_pair_profile_creates_translation():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [{"page": 1, "text": "apple — alma\nbook — kitab\n"}],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "translation_language": "az",
+        },
+    )
+
+    assert items[0]["payload"]["definition"] is None
+    assert items[0]["payload"]["translations"] == [
+        {"language": "az", "value": "alma"}
+    ]
+    assert items[1]["payload"]["translations"] == [
+        {"language": "az", "value": "kitab"}
+    ]
+
+
+def test_headerless_bilingual_spreadsheet_uses_profile_translation_language():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "xlsx_native",
+        [],
+        [
+            {
+                "sheet": "Words",
+                "rows": [["apple", "alma"], ["book", "kitab"]],
+                "text": "apple\talma\nbook\tkitab",
+            }
+        ],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "translation_language": "az",
+        },
+    )
+
+    assert [item["payload"]["translations"] for item in items] == [
+        [{"language": "az", "value": "alma"}],
+        [{"language": "az", "value": "kitab"}],
+    ]
