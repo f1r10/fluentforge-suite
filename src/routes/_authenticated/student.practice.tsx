@@ -118,6 +118,7 @@ function initialFilters(focus?: PracticeFocus): SelfPracticeGenerator {
       count: counts.vocabulary,
       direction: "word_to_translation",
       translationLanguage: "az",
+      topicIds: [],
     },
     readings: {
       ...emptyCommonPool,
@@ -1278,6 +1279,40 @@ function VocabularyPoolCard({
             onChange({ ...pool, specificIds })
           }
         />
+      )}
+
+      {pool.source !== "specific" && (
+        <details className="rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("advanced_filters")}
+          </summary>
+          <div className="mt-3">
+            <div className="mb-2 text-xs font-medium">{t("topics")}</div>
+            <div className="max-h-44 space-y-2 overflow-y-auto">
+              {flattenTopics(options.topics).map((topic) => (
+                <label
+                  key={topic.id}
+                  className="flex items-start gap-2 text-sm"
+                  style={{ paddingLeft: topic.depth * 14 }}
+                >
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={pool.topicIds.includes(topic.id)}
+                    onCheckedChange={(checked) =>
+                      onChange({
+                        ...pool,
+                        topicIds: checked
+                          ? [...pool.topicIds, topic.id]
+                          : pool.topicIds.filter((id) => id !== topic.id),
+                      })
+                    }
+                  />
+                  {topic.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        </details>
       )}
     </PoolCard>
   );
