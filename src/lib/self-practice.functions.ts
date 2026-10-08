@@ -844,11 +844,11 @@ async function selectVocabularyPracticeItems(
   if (pool.topicIds.length) {
     const { data: tagged, error: taggedError } = await admin
       .from("vocabulary_topics")
-      .select("vocabulary_id")
+      .select("entry_id")
       .in("topic_id", pool.topicIds);
     if (taggedError) throw new Error(taggedError.message);
     const taggedIds = [
-      ...new Set((tagged ?? []).map((row) => row.vocabulary_id)),
+      ...new Set((tagged ?? []).map((row) => row.entry_id)),
     ];
     if (!taggedIds.length) return [];
     allowedIds =
