@@ -37,7 +37,7 @@ const blockedExtensions = new Set([
 const imageExtensions = new Set(["jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "heic"]);
 const audioExtensions = new Set(["mp3", "wav", "m4a", "aac", "ogg", "flac", "opus", "weba"]);
 const videoExtensions = new Set(["mp4", "webm", "mov", "m4v", "mkv", "avi"]);
-const documentExtensions = new Set(["pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "rtf", "ppt", "pptx"]);
+const documentExtensions = new Set(["pdf", "epub", "doc", "docx", "xls", "xlsx", "csv", "txt", "rtf", "ppt", "pptx"]);
 
 function extension(filename: string) {
   const part = filename.trim().toLowerCase().split(".").pop();
