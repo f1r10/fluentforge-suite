@@ -820,6 +820,23 @@ function ReviewWorkspace({
       !item.created_entity_id,
   ).length;
   const rejected = data.items.filter((item) => item.decision === "rejected").length;
+  const extractedPreviewText = data.items
+    .map((item) => {
+      const payload = item.payload as Record<string, unknown>;
+      if (typeof payload["text"] === "string") return payload["text"];
+      if (typeof payload["body"] === "string") return payload["body"];
+      if (typeof payload["transcript"] === "string" && payload["transcript"]) {
+        return payload["transcript"];
+      }
+      if (typeof payload["prompt"] === "string") return payload["prompt"];
+      if (typeof payload["word"] === "string") return payload["word"];
+      if (typeof payload["title"] === "string") return payload["title"];
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 200_000);
+
   const visibleItems = data.items.filter((item) => {
     if (filter === "all") return true;
     if (filter === "pending") return item.decision === "pending";
@@ -842,7 +859,10 @@ function ReviewWorkspace({
           <div className="text-xs text-muted-foreground">{preview?.mimeType ?? "—"}</div>
         </div>
         <div className="h-full min-h-0 overflow-auto bg-muted/20 p-2">
-          <SourcePreview preview={preview} />
+          <SourcePreview
+            preview={preview}
+            fallbackText={extractedPreviewText}
+          />
         </div>
       </section>
 
@@ -1379,8 +1399,10 @@ function SimpleField({
 
 function SourcePreview({
   preview,
+  fallbackText,
 }: {
   preview: { url: string | null; mimeType: string | null; filename: string } | null;
+  fallbackText: string;
 }) {
   const { t } = useI18n();
   if (!preview) return <div className="p-8 text-center text-sm text-muted-foreground">…</div>;
@@ -1391,6 +1413,18 @@ function SourcePreview({
   }
   if (preview.mimeType?.startsWith("image/")) {
     return <img src={preview.url} alt="" className="mx-auto max-h-[60vh] max-w-full object-contain" />;
+  }
+  if (fallbackText.trim()) {
+    return (
+      <div className="min-h-full rounded bg-background p-4">
+        <div className="mb-3 text-xs font-medium text-muted-foreground">
+          {t("extracted_text_preview")}
+        </div>
+        <div className="whitespace-pre-wrap text-sm leading-6">
+          {fallbackText}
+        </div>
+      </div>
+    );
   }
   return <div className="p-8 text-center text-sm text-muted-foreground">{t("source_preview_not_available")}</div>;
 }
