@@ -10,26 +10,58 @@ import {
   type Scoring,
 } from "./grading";
 import { QUESTION_TYPES, TYPE_BY_ID } from "./question-types";
+import {
+  gradeVocabularyResponse,
+  initialVocabularyState,
+  nextVocabularyState,
+} from "./vocabulary-practice";
 
 type Admin = Awaited<ReturnType<typeof import("./security.server")["adminClient"]>>;
 
 const historyModeSchema = z.enum(["all", "mistakes", "unused"]);
+const poolSourceSchema = z.enum(["all", "catalog", "specific"]);
 
-const generatorSchema = z.object({
-  count: z.number().int().min(0).max(100).default(20),
-  readingCount: z.number().int().min(0).max(20).default(0),
-  listeningCount: z.number().int().min(0).max(20).default(0),
-  sessionMode: z.enum(["practice", "mock_exam"]).default("practice"),
-  durationMinutes: z.number().int().min(5).max(240).default(30),
+const commonPoolSchema = z.object({
+  source: poolSourceSchema.default("all"),
+  catalogId: z.string().uuid().nullable().default(null),
+  specificIds: z.array(z.string().uuid()).max(200).default([]),
   language: z.string().max(10).nullable().default(null),
   level: z.string().max(20).nullable().default(null),
+});
+
+const questionPoolSchema = commonPoolSchema.extend({
+  count: z.number().int().min(0).max(100).default(10),
   types: z.array(z.string().max(60)).max(50).default([]),
   topicIds: z.array(z.string().uuid()).max(100).default([]),
-  catalogId: z.string().uuid().nullable().default(null),
   sourceFileId: z.string().uuid().nullable().default(null),
   historyMode: historyModeSchema.default("all"),
   excludeAnswered: z.boolean().default(false),
+});
+
+const vocabularyPoolSchema = commonPoolSchema.extend({
+  count: z.number().int().min(0).max(100).default(0),
+  direction: z
+    .enum(["word_to_translation", "translation_to_word", "mixed"])
+    .default("word_to_translation"),
+  translationLanguage: z.string().trim().min(2).max(10).default("az"),
+});
+
+const readingPoolSchema = commonPoolSchema.extend({
+  count: z.number().int().min(0).max(20).default(0),
+});
+
+const listeningPoolSchema = commonPoolSchema.extend({
+  count: z.number().int().min(0).max(20).default(0),
+});
+
+const generatorSchema = z.object({
+  sessionMode: z.enum(["practice", "mock_exam"]).default("practice"),
+  durationMinutes: z.number().int().min(5).max(240).default(30),
   feedbackMode: z.enum(["instant", "end"]).default("instant"),
+  questions: questionPoolSchema,
+  vocabulary: vocabularyPoolSchema,
+  readings: readingPoolSchema,
+  listenings: listeningPoolSchema,
 });
 
 export type SelfPracticeGenerator = z.infer<typeof generatorSchema>;
@@ -59,6 +91,28 @@ const answerSchema = z.object({
   response: responseSchema,
   duration_ms: z.number().int().min(0).max(86_400_000).default(0),
 });
+
+const vocabularyAnswerSchema = z.object({
+  entryId: z.string().uuid(),
+  direction: z.enum(["word_to_translation", "translation_to_word"]),
+  targetLanguage: z.string().trim().min(2).max(10),
+  response: z.string().max(10_000),
+  duration_ms: z.number().int().min(0).max(86_400_000).default(0),
+});
+
+export type SelfPracticeVocabularyAnswer = z.infer<
+  typeof vocabularyAnswerSchema
+>;
+
+export type SelfPracticeVocabularyItem = {
+  entryId: string;
+  prompt: string;
+  direction: "word_to_translation" | "translation_to_word";
+  targetLanguage: string;
+  learningLanguage: string;
+  level: string | null;
+  partOfSpeech: string | null;
+};
 
 type LoadedQuestion = {
   id: string;
