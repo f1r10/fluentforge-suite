@@ -368,7 +368,11 @@ function ImportProfileDialog({
 
   async function save() {
     if (!name.trim()) return;
-    if (mappingEnabled && !mapping.columns.prompt.trim()) {
+    if (
+      mappingEnabled &&
+      ["auto", "questions", "mixed"].includes(expectedContent) &&
+      !mapping.columns.prompt.trim()
+    ) {
       toast.error(t("mapping_prompt_required"));
       return;
     }
@@ -391,7 +395,9 @@ function ImportProfileDialog({
             level: level || null,
             status,
             auto_approve_confidence: confidence,
-            spreadsheet_mapping: mappingEnabled
+            spreadsheet_mapping:
+              mappingEnabled &&
+              ["auto", "questions", "mixed"].includes(expectedContent)
               ? {
                   include_sheets: mapping.include_sheets
                     .split(",")
@@ -543,6 +549,7 @@ function ImportProfileDialog({
             />
           </label>
 
+          {["auto", "questions", "mixed"].includes(expectedContent) && (
           <section className="space-y-4 rounded-md border border-border p-4">
             <label className="flex items-start gap-2">
               <Checkbox
@@ -667,6 +674,7 @@ function ImportProfileDialog({
               </div>
             )}
           </section>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose} disabled={busy}>
