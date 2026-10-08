@@ -943,6 +943,10 @@ function QuestionPoolCard({
       (!pool.language || row.learning_language === pool.language) &&
       (!pool.level || row.level === pool.level),
   );
+  const catalogAvailable =
+    pool.source === "catalog" && pool.catalogId
+      ? candidates.filter((row) => row.catalogIds.includes(pool.catalogId!)).length
+      : null;
 
   return (
     <PoolCard
@@ -956,6 +960,7 @@ function QuestionPoolCard({
         languages={options.languages}
         onChange={onChange}
       />
+      <CatalogAvailability count={catalogAvailable} />
       {pool.source !== "specific" && (
         <Field label={t("question_count")}>
           <Input
@@ -995,6 +1000,7 @@ function QuestionPoolCard({
         />
       )}
 
+      {pool.source !== "specific" && (
       <details className="rounded-md border border-border p-3">
         <summary className="cursor-pointer text-sm font-medium">
           {t("advanced_filters")}
@@ -1089,6 +1095,7 @@ function QuestionPoolCard({
           </label>
         </div>
       </details>
+      )}
     </PoolCard>
   );
 }
@@ -1113,6 +1120,10 @@ function VocabularyPoolCard({
           pool.translationLanguage.toLowerCase(),
       ),
   );
+  const catalogAvailable =
+    pool.source === "catalog" && pool.catalogId
+      ? candidates.filter((row) => row.catalogIds.includes(pool.catalogId!)).length
+      : null;
 
   return (
     <PoolCard
@@ -1126,6 +1137,7 @@ function VocabularyPoolCard({
         languages={options.languages}
         onChange={onChange}
       />
+      <CatalogAvailability count={catalogAvailable} />
 
       {pool.source !== "specific" && (
         <Field label={t("vocabulary_count")}>
@@ -1239,6 +1251,10 @@ function ContextPoolCard({
       (!pool.language || row.learning_language === pool.language) &&
       (!pool.level || row.level === pool.level),
   );
+  const catalogAvailable =
+    pool.source === "catalog" && pool.catalogId
+      ? candidates.filter((row) => row.catalogIds.includes(pool.catalogId!)).length
+      : null;
 
   return (
     <PoolCard
@@ -1262,6 +1278,7 @@ function ContextPoolCard({
         languages={options.languages}
         onChange={onChange}
       />
+      <CatalogAvailability count={catalogAvailable} />
 
       {pool.source !== "specific" && (
         <Field
@@ -1409,6 +1426,29 @@ function PoolSourceFields<T extends {
           ))}
         </select>
       </Field>
+    </div>
+  );
+}
+
+function CatalogAvailability({
+  count,
+}: {
+  count: number | null;
+}) {
+  const { t } = useI18n();
+  if (count == null) return null;
+  return (
+    <div
+      className={
+        "rounded-md border px-3 py-2 text-xs " +
+        (count > 0
+          ? "border-border bg-muted/20 text-muted-foreground"
+          : "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100")
+      }
+    >
+      {count > 0
+        ? `${t("available_in_catalog")}: ${count}`
+        : t("no_active_content_in_catalog")}
     </div>
   );
 }
