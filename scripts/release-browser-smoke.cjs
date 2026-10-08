@@ -55,10 +55,19 @@ function minimalPngBuffer() {
 }
 
 function minimalPdfBuffer() {
-  return Buffer.from(
+  const buffer = Buffer.from(
     "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggMTI3ID4+CnN0cmVhbQpCVAovRjEgMTIgVGYKNzIgNzIwIFRkCigxLiBSdW50aW1lIFBERiBpbXBvcnQgd29ya3M/KSBUagowIC0yMCBUZAooQS4gWWVzKSBUagowIC0yMCBUZAooQi4gTm8pIFRqCjAgLTIwIFRkCihBbnN3ZXI6IDEgQSkgVGoKRVQKCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMzggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo1MTYKJSVFT0YK",
     "base64",
   );
+  // Keep the PDF byte length/xref offsets unchanged while deliberately
+  // removing the answer key. The review UI must repair this item before
+  // approval, which exercises the real teacher workflow.
+  const answer = Buffer.from("Answer: 1 A", "ascii");
+  const offset = buffer.indexOf(answer);
+  if (offset >= 0) {
+    Buffer.from("           ", "ascii").copy(buffer, offset);
+  }
+  return buffer;
 }
 
 async function useEnglish(page) {
@@ -170,7 +179,35 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] real PDF upload, storage finalize, extraction and review pipeline");
 
-    await importDialog.getByRole("button", { name: "Approve" }).first().click();
+    const reviewQuestion = importDialog
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::article");
+    await reviewQuestion
+      .getByText("Select the correct answer", { exact: true })
+      .waitFor({ timeout: 20000 });
+    const yesOption = reviewQuestion
+      .getByText("Yes", { exact: true })
+      .locator("xpath=ancestor::label");
+    await yesOption.getByRole("checkbox").click();
+    await reviewQuestion
+      .getByText("ready", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] teacher repaired a missing PDF answer through the simple review UI");
+
+    await reviewQuestion
+      .getByRole("button", { name: "Reject", exact: true })
+      .click();
+    await reviewQuestion
+      .getByText("rejected", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await reviewQuestion
+      .getByRole("button", { name: "Approve", exact: true })
+      .click();
+    await reviewQuestion
+      .getByText("approved", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] document review Reject and Approve actions both work");
+
     await importDialog
       .getByRole("button", { name: "Import approved" })
       .click();
