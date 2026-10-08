@@ -945,7 +945,14 @@ def _vocabulary_from_text(
         # term/definition parsing. This prevents entries such as
         # "a, an indefinite article A1" from being split into a fake definition.
         word, ipa, pos, level = _parse_vocab_head(line)
-        if (pos or level or ipa) and _looks_like_vocab_term(word):
+        has_definition_separator = bool(
+            re.search(r"\t+|\s+[—–-]\s+|\s*:\s+", line)
+        )
+        if (
+            (pos or level or ipa)
+            and not has_definition_separator
+            and _looks_like_vocab_term(word)
+        ):
             add(
                 word,
                 ipa=ipa,
