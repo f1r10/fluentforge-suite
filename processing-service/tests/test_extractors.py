@@ -1216,3 +1216,65 @@ def test_cambridge_parenthesized_pos_notation():
     assert payloads["cross out"]["part_of_speech"] == "phrasal verb"
     assert payloads["congratulations!"]["part_of_speech"] == "exclamation"
     assert all(item["level"] == "B1" for item in payloads.values())
+
+
+def test_numbered_bilingual_vocabulary_rows_strip_numbers_and_split_translation():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "# İngiliscə Azərbaycanca\n"
+                    "66 than daha çox\n"
+                    "67 like kimi\n"
+                    "68 other digərləri\n"
+                    "69 how Necə\n"
+                    "70 then sonra\n"
+                    "71 its onun\n"
+                    "72 our bizim\n"
+                    "73 look after qayğısına qalmaq\n"
+                ),
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "translation_language": "az",
+            "status": "draft",
+        },
+    )
+
+    payloads = [item["payload"] for item in items]
+    assert [item["word"] for item in payloads] == [
+        "than",
+        "like",
+        "other",
+        "how",
+        "then",
+        "its",
+        "our",
+        "look after",
+    ]
+    assert [item["translations"][0]["value"] for item in payloads] == [
+        "daha çox",
+        "kimi",
+        "digərləri",
+        "Necə",
+        "sonra",
+        "onun",
+        "bizim",
+        "qayğısına qalmaq",
+    ]
+    assert all(
+        item["translations"][0]["language"] == "az" for item in payloads
+    )
