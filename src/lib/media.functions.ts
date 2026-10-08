@@ -854,29 +854,41 @@ export const trashMedia = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const [questions, listenings, readings, vocabulary] = await Promise.all([
-      context.supabase
-        .from("questions")
-        .select("id", { count: "exact", head: true })
-        .eq("media_id", data.id)
-        .is("deleted_at", null),
-      context.supabase
-        .from("listenings")
-        .select("id", { count: "exact", head: true })
-        .eq("media_id", data.id)
-        .is("deleted_at", null),
-      context.supabase
-        .from("reading_media")
-        .select("reading_id", { count: "exact", head: true })
-        .eq("media_id", data.id),
-      context.supabase
-        .from("vocabulary_entries")
-        .select("id", { count: "exact", head: true })
-        .eq("audio_media_id", data.id)
-        .is("deleted_at", null),
-    ]);
+    const [questions, listenings, readings, vocabulary, libraryBooks] =
+      await Promise.all([
+        context.supabase
+          .from("questions")
+          .select("id", { count: "exact", head: true })
+          .eq("media_id", data.id)
+          .is("deleted_at", null),
+        context.supabase
+          .from("listenings")
+          .select("id", { count: "exact", head: true })
+          .eq("media_id", data.id)
+          .is("deleted_at", null),
+        context.supabase
+          .from("reading_media")
+          .select("reading_id", { count: "exact", head: true })
+          .eq("media_id", data.id),
+        context.supabase
+          .from("vocabulary_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("audio_media_id", data.id)
+          .is("deleted_at", null),
+        context.supabase
+          .from("library_books")
+          .select("id", { count: "exact", head: true })
+          .eq("media_id", data.id)
+          .is("deleted_at", null),
+      ]);
 
-    for (const result of [questions, listenings, readings, vocabulary]) {
+    for (const result of [
+      questions,
+      listenings,
+      readings,
+      vocabulary,
+      libraryBooks,
+    ]) {
       if (result.error) throw new Error(result.error.message);
     }
 
@@ -885,10 +897,11 @@ export const trashMedia = createServerFn({ method: "POST" })
       listenings: listenings.count ?? 0,
       readings: readings.count ?? 0,
       vocabulary: vocabulary.count ?? 0,
+      library: libraryBooks.count ?? 0,
     };
     if (Object.values(dependencies).some((count) => count > 0)) {
       throw new Error(
-        `Media is still in use (questions: ${dependencies.questions}, listenings: ${dependencies.listenings}, readings: ${dependencies.readings}, vocabulary: ${dependencies.vocabulary}).`,
+        `Media is still in use (questions: ${dependencies.questions}, listenings: ${dependencies.listenings}, readings: ${dependencies.readings}, vocabulary: ${dependencies.vocabulary}, library: ${dependencies.library}).`,
       );
     }
 
