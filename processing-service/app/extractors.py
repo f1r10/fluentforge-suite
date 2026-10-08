@@ -558,9 +558,30 @@ VOCAB_TRANSLATION_LANGUAGE_HEADERS = {
     "target_language",
     "translation_lang",
 }
-VOCAB_POS_HEADERS = {"part_of_speech", "pos", "word_type"}
-VOCAB_IPA_HEADERS = {"ipa", "phonetic", "pronunciation"}
-VOCAB_EXAMPLE_HEADERS = {"example", "example_sentence", "sentence"}
+VOCAB_POS_HEADERS = {
+    "part_of_speech",
+    "part_of_speech_pos",
+    "pos",
+    "word_type",
+    "type",
+    "qrammatik_nov",
+    "qrammatik_növ",
+}
+VOCAB_IPA_HEADERS = {
+    "ipa",
+    "phonetic",
+    "phonetics",
+    "pronunciation",
+    "transcription",
+    "transkripsiya",
+}
+VOCAB_EXAMPLE_HEADERS = {
+    "example",
+    "examples",
+    "example_sentence",
+    "sentence",
+    "sample_sentence",
+}
 VOCAB_EXAMPLE_TRANSLATION_HEADERS = {
     "example_translation",
     "sentence_translation",
@@ -596,6 +617,121 @@ def _split_vocab_values(value: str) -> list[str]:
     ]
 
 
+VOCAB_POS_ALIASES = {
+    "n": "noun",
+    "noun": "noun",
+    "v": "verb",
+    "verb": "verb",
+    "adj": "adjective",
+    "adjective": "adjective",
+    "adv": "adverb",
+    "adverb": "adverb",
+    "prep": "preposition",
+    "preposition": "preposition",
+    "pron": "pronoun",
+    "pronoun": "pronoun",
+    "conj": "conjunction",
+    "conjunction": "conjunction",
+    "det": "determiner",
+    "determiner": "determiner",
+    "exclam": "exclamation",
+    "exclamation": "exclamation",
+    "number": "number",
+    "modal verb": "modal verb",
+    "auxiliary verb": "auxiliary verb",
+    "phrasal verb": "phrasal verb",
+}
+
+VOCAB_LEVEL_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$", re.IGNORECASE)
+VOCAB_BOILERPLATE_RE = re.compile(
+    r"(?:https?://|www\.|©|copyright|page\s+\d+|vocabulary\s+list|"
+    r"word\s+list|table\s+of\s+contents|introduction|how\s+the\s+list)",
+    re.IGNORECASE,
+)
+
+
+def _clean_vocab_word(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.")
+
+
+def _vocabulary_payload(
+    *,
+    word: str,
+    defaults: dict[str, Any],
+    definition: str | None = None,
+    ipa: str | None = None,
+    part_of_speech: str | None = None,
+    level: str | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "word": word,
+        "learning_language": defaults["learning_language"],
+        "definition": definition or None,
+        "ipa": ipa or None,
+        "part_of_speech": part_of_speech or None,
+        "synonyms": [],
+        "antonyms": [],
+        "level": level or defaults["level"],
+        "notes": None,
+        "status": defaults["status"],
+        "translations": [],
+        "examples": [],
+        "tags": tags or [],
+    }
+
+
+def _parse_vocab_head(
+    value: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    value = _clean_vocab_word(value)
+    level: str | None = None
+    pos: str | None = None
+    ipa: str | None = None
+
+    level_match = re.search(r"\b(A1|A2|B1|B2|C1|C2)\s*$", value, re.IGNORECASE)
+    if level_match:
+        level = level_match.group(1).upper()
+        value = value[: level_match.start()].strip()
+
+    ipa_match = re.search(r"\s(/[^/]{1,120}/)\s*", value)
+    if ipa_match:
+        ipa = ipa_match.group(1)
+        value = f"{value[:ipa_match.start()]} {value[ipa_match.end():]}".strip()
+
+    pos_match = re.search(
+        r"(?:\s+|\()("
+        + "|".join(
+            sorted(
+                (re.escape(key) for key in VOCAB_POS_ALIASES),
+                key=len,
+                reverse=True,
+            )
+        )
+        + r")\)?\s*$",
+        value,
+        re.IGNORECASE,
+    )
+    if pos_match:
+        key = pos_match.group(1).casefold()
+        pos = VOCAB_POS_ALIASES.get(key)
+        value = value[: pos_match.start()].strip()
+
+    return _clean_vocab_word(value), ipa, pos, level
+
+
+def _looks_like_vocab_term(value: str) -> bool:
+    if not value or len(value) > 120 or VOCAB_BOILERPLATE_RE.search(value):
+        return False
+    if value.endswith((".", "?", "!", ";", ":")):
+        return False
+    if re.search(r"\b\d{3,4}\b", value):
+        return False
+    if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿƏəĞğİıÖöŞşÇçÜüА-Яа-я]", value):
+        return False
+    return len(value.split()) <= 8
+
+
 def _vocabulary_from_text(
     text: str,
     *,
@@ -604,51 +740,108 @@ def _vocabulary_from_text(
 ) -> list[dict[str, Any]]:
     defaults = _vocabulary_defaults(profile)
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
 
-    for raw_line in text.splitlines():
-        line = re.sub(r"^\s*(?:[-•*]|\d{1,4}[\.)])\s*", "", raw_line).strip()
-        if not line or len(line) > 2_500:
-            continue
-
-        parts = re.split(r"\t+|\s+[—–-]\s+", line, maxsplit=1)
-        if len(parts) != 2:
-            continue
-
-        word = parts[0].strip()
-        meaning = parts[1].strip()
-        if (
-            not word
-            or not meaning
-            or len(word) > 500
-            or len(word.split()) > 8
-            or len(meaning) > 10_000
-        ):
-            continue
-
+    def add(
+        word: str,
+        *,
+        definition: str | None = None,
+        ipa: str | None = None,
+        part_of_speech: str | None = None,
+        level: str | None = None,
+        confidence: float,
+    ) -> None:
+        clean = _clean_vocab_word(word)
+        if not _looks_like_vocab_term(clean):
+            return
+        key = clean.casefold()
+        if key in seen:
+            return
+        seen.add(key)
         out.append(
             {
                 "item_type": "vocabulary",
                 "page": page,
                 "sheet": None,
                 "crop": None,
-                "payload": {
-                    "word": word,
-                    "learning_language": defaults["learning_language"],
-                    "definition": meaning,
-                    "ipa": None,
-                    "part_of_speech": None,
-                    "synonyms": [],
-                    "antonyms": [],
-                    "level": defaults["level"],
-                    "notes": None,
-                    "status": defaults["status"],
-                    "translations": [],
-                    "examples": [],
-                    "tags": [],
-                },
-                "confidence": 0.72,
+                "payload": _vocabulary_payload(
+                    word=clean,
+                    defaults=defaults,
+                    definition=definition,
+                    ipa=ipa,
+                    part_of_speech=part_of_speech,
+                    level=level,
+                ),
+                "confidence": confidence,
             }
         )
+
+    for raw_line in text.splitlines():
+        line = re.sub(
+            r"^\s*(?:[-•*▪◦]|\d{1,4}[\.)])\s*",
+            "",
+            raw_line,
+        ).strip()
+        if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
+            continue
+
+        # Dictionary / teacher-list format:
+        # word<TAB>meaning, word — meaning, word - meaning, word: meaning.
+        parts = re.split(r"\t+|\s+[—–-]\s+|\s*:\s+", line, maxsplit=1)
+        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+            word, ipa, pos, level = _parse_vocab_head(parts[0])
+            meaning = parts[1].strip()
+            if (
+                _looks_like_vocab_term(word)
+                and len(meaning) <= 10_000
+                and not VOCAB_LEVEL_RE.fullmatch(meaning)
+            ):
+                add(
+                    word,
+                    definition=meaning,
+                    ipa=ipa,
+                    part_of_speech=pos,
+                    level=level,
+                    confidence=0.82 if (pos or level or ipa) else 0.76,
+                )
+                continue
+
+        # Oxford-style printable lists commonly expose: word + part of speech + CEFR.
+        word, ipa, pos, level = _parse_vocab_head(line)
+        if (pos or level or ipa) and _looks_like_vocab_term(word):
+            add(
+                word,
+                ipa=ipa,
+                part_of_speech=pos,
+                level=level,
+                confidence=0.9 if level and pos else 0.82,
+            )
+            continue
+
+        # Some PDF word lists are laid out in columns. Preserve independent terms
+        # split by wide whitespace instead of treating a whole row as one phrase.
+        columns = [
+            value.strip()
+            for value in re.split(r"\s{2,}", line)
+            if value.strip()
+        ]
+        if len(columns) >= 2 and all(_looks_like_vocab_term(value) for value in columns):
+            for value in columns:
+                column_word, column_ipa, column_pos, column_level = _parse_vocab_head(value)
+                add(
+                    column_word,
+                    ipa=column_ipa,
+                    part_of_speech=column_pos,
+                    level=column_level,
+                    confidence=0.68,
+                )
+            continue
+
+        # Explicit vocabulary imports may also be simple one-term-per-line lists
+        # such as Cambridge category word lists. These stay lower-confidence so
+        # the teacher reviews them before committing.
+        if _looks_like_vocab_term(line):
+            add(line, confidence=0.6)
 
     return out
 
