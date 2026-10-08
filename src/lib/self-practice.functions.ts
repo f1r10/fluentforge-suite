@@ -1157,13 +1157,31 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
       .object({
         sessionId: z.string().uuid(),
         answers: z.array(answerSchema).max(500),
+        vocabularyAnswers: z
+          .array(vocabularyAnswerSchema)
+          .max(500)
+          .default([]),
         filters: generatorSchema,
         practiceKind: z
           .enum(["self", "question_bank", "reading", "listening"])
           .default("self"),
         contextId: z.string().uuid().nullable().default(null),
-        alreadyLoggedQuestionIds: z.array(z.string().uuid()).max(500).default([]),
-        presentedQuestionIds: z.array(z.string().uuid()).max(500).default([]),
+        alreadyLoggedQuestionIds: z
+          .array(z.string().uuid())
+          .max(500)
+          .default([]),
+        alreadyLoggedVocabularyIds: z
+          .array(z.string().uuid())
+          .max(500)
+          .default([]),
+        presentedQuestionIds: z
+          .array(z.string().uuid())
+          .max(500)
+          .default([]),
+        presentedVocabularyIds: z
+          .array(z.string().uuid())
+          .max(500)
+          .default([]),
       })
       .parse(d),
   )
@@ -1172,18 +1190,38 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
 
-    const gradedWithPrivate = await gradeAnswers(admin, data.answers);
+    const [gradedWithPrivate, vocabularyWithPrivate] = await Promise.all([
+      gradeAnswers(admin, data.answers),
+      gradeVocabularyAnswers(admin, data.vocabularyAnswers),
+    ]);
+
     const alreadyLogged = new Set(data.alreadyLoggedQuestionIds);
     await logPracticeAnswers(
       admin,
       studentId,
       data.sessionId,
-      gradedWithPrivate.filter((result) => !alreadyLogged.has(result.question_id)),
+      gradedWithPrivate.filter(
+        (result) => !alreadyLogged.has(result.question_id),
+      ),
       data.practiceKind,
       data.contextId,
     );
 
-    const answeredIds = new Set(data.answers.map((answer) => answer.questionId));
+    const alreadyLoggedVocabulary = new Set(
+      data.alreadyLoggedVocabularyIds,
+    );
+    await logVocabularyPracticeAnswers(
+      admin,
+      studentId,
+      data.sessionId,
+      vocabularyWithPrivate.filter(
+        (result) => !alreadyLoggedVocabulary.has(result.entry_id),
+      ),
+    );
+
+    const answeredIds = new Set(
+      data.answers.map((answer) => answer.questionId),
+    );
     const skippedIds = [
       ...new Set(
         data.presentedQuestionIds.filter(
@@ -1192,39 +1230,94 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
       ),
     ];
     if (skippedIds.length) {
-      const skippedQuestions = await loadSelfPracticeQuestions(admin, skippedIds);
+      const skippedQuestions = await loadSelfPracticeQuestions(
+        admin,
+        skippedIds,
+      );
       if (skippedQuestions.size !== skippedIds.length) {
         throw new Error(
           "One or more skipped questions are not valid for self-practice.",
         );
       }
-      const { error: skipError } = await admin.from("activity_events").insert(
-        skippedIds.map((questionId) => ({
-          student_id: studentId,
-          category: "practice",
-          event_type: "practice_question_skipped",
-          entity_type: "question",
-          entity_id: questionId,
-          is_correct: null,
-          duration_ms: 0,
-          details: {
-            practice_kind: data.practiceKind,
-            context_id: data.contextId,
-            session_id: data.sessionId,
-          } as never,
-        })),
-      );
+      const { error: skipError } = await admin
+        .from("activity_events")
+        .insert(
+          skippedIds.map((questionId) => ({
+            student_id: studentId,
+            category: "practice",
+            event_type: "practice_question_skipped",
+            entity_type: "question",
+            entity_id: questionId,
+            is_correct: null,
+            duration_ms: 0,
+            details: {
+              practice_kind: data.practiceKind,
+              context_id: data.contextId,
+              session_id: data.sessionId,
+            } as never,
+          })),
+        );
       if (skipError) throw new Error(skipError.message);
     }
 
-    const results = gradedWithPrivate.map(({ response, duration_ms, ...result }) => result);
+    const vocabularyAnsweredIds = new Set(
+      data.vocabularyAnswers.map((answer) => answer.entryId),
+    );
+    const skippedVocabularyIds = [
+      ...new Set(
+        data.presentedVocabularyIds.filter(
+          (entryId) => !vocabularyAnsweredIds.has(entryId),
+        ),
+      ),
+    ];
+    if (skippedVocabularyIds.length) {
+      const { error: skipVocabularyError } = await admin
+        .from("activity_events")
+        .insert(
+          skippedVocabularyIds.map((entryId) => ({
+            student_id: studentId,
+            category: "practice",
+            event_type: "practice_vocabulary_skipped",
+            entity_type: "vocabulary",
+            entity_id: entryId,
+            is_correct: null,
+            duration_ms: 0,
+            details: {
+              practice_kind: "self",
+              session_id: data.sessionId,
+            } as never,
+          })),
+        );
+      if (skipVocabularyError) {
+        throw new Error(skipVocabularyError.message);
+      }
+    }
+
+    const results = gradedWithPrivate.map(
+      ({ response, duration_ms, ...result }) => result,
+    );
+    const vocabularyResults = vocabularyWithPrivate.map(
+      ({ response, duration_ms, ...result }) => result,
+    );
     const graded = results.filter((result) => result.score != null);
-    const score = graded.reduce((sum, result) => sum + (result.score ?? 0), 0);
-    const maxScore = graded.reduce((sum, result) => sum + result.max_score, 0);
+    const questionScore = graded.reduce(
+      (sum, result) => sum + (result.score ?? 0),
+      0,
+    );
+    const questionMaxScore = graded.reduce(
+      (sum, result) => sum + result.max_score,
+      0,
+    );
+    const vocabularyScore = vocabularyResults.filter(
+      (result) => result.correct,
+    ).length;
+    const vocabularyMaxScore = vocabularyResults.length;
+    const score = questionScore + vocabularyScore;
+    const maxScore = questionMaxScore + vocabularyMaxScore;
 
     const summary = {
-      answered: results.length,
-      graded: graded.length,
+      answered: results.length + vocabularyResults.length,
+      graded: graded.length + vocabularyResults.length,
       score,
       max_score: maxScore,
       accuracy: maxScore > 0 ? score / maxScore : null,
@@ -1241,12 +1334,13 @@ export const finishSelfPractice = createServerFn({ method: "POST" })
         context_id: data.contextId,
         session_id: data.sessionId,
         filters: data.filters,
+        vocabulary_answered: vocabularyResults.length,
         ...summary,
       } as never,
     });
     if (error) throw new Error(error.message);
 
-    return { results, summary };
+    return { results, vocabularyResults, summary };
   });
 
 export const getMyPracticeProgress = createServerFn({ method: "GET" })
