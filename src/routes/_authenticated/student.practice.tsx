@@ -3,6 +3,7 @@ import {
   Link,
   redirect,
 } from "@tanstack/react-router";
+import { z } from "zod";
 import {
   queryOptions,
   useQueryClient,
@@ -89,38 +90,55 @@ const emptyCommonPool = {
   level: null,
 };
 
-function initialFilters(): SelfPracticeGenerator {
+type PracticeFocus = "questions" | "vocabulary" | "readings" | "listenings";
+
+function initialFilters(focus?: PracticeFocus): SelfPracticeGenerator {
+  const counts = {
+    questions: focus && focus !== "questions" ? 0 : 10,
+    vocabulary: focus === "vocabulary" ? 10 : 0,
+    readings: focus === "readings" ? 1 : 0,
+    listenings: focus === "listenings" ? 1 : 0,
+  };
   return {
     sessionMode: "practice",
     durationMinutes: 30,
     feedbackMode: "instant",
     questions: {
       ...emptyCommonPool,
-      count: 10,
+      count: counts.questions,
       types: [],
       topicIds: [],
       sourceFileId: null,
+      difficulty: null,
       historyMode: "all",
       excludeAnswered: false,
     },
     vocabulary: {
       ...emptyCommonPool,
-      count: 0,
+      count: counts.vocabulary,
       direction: "word_to_translation",
       translationLanguage: "az",
     },
     readings: {
       ...emptyCommonPool,
-      count: 0,
+      count: counts.readings,
     },
     listenings: {
       ...emptyCommonPool,
-      count: 0,
+      count: counts.listenings,
     },
   };
 }
 
 export const Route = createFileRoute("/_authenticated/student/practice")({
+  validateSearch: (search) =>
+    z
+      .object({
+        focus: z
+          .enum(["questions", "vocabulary", "readings", "listenings"])
+          .optional(),
+      })
+      .parse(search),
   beforeLoad: async () => {
     const me = await getWhoAmI();
     if (me.role === "teacher") throw redirect({ to: "/teacher" });
@@ -144,9 +162,11 @@ function SelfPracticePage() {
   const { t } = useI18n();
   const qc = useQueryClient();
   const { data: options } = useSuspenseQuery(optionsQuery);
+  const { focus } = Route.useSearch();
 
-  const [filters, setFilters] =
-    useState<SelfPracticeGenerator>(initialFilters);
+  const [filters, setFilters] = useState<SelfPracticeGenerator>(() =>
+    initialFilters(focus),
+  );
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
@@ -1033,6 +1053,28 @@ function QuestionPoolCard({
               ))}
             </div>
           </div>
+
+          <Field label={t("difficulty")}>
+            <select
+              className={selectClass}
+              value={pool.difficulty ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...pool,
+                  difficulty: event.target.value
+                    ? Number(event.target.value)
+                    : null,
+                })
+              }
+            >
+              <option value="">{t("all")}</option>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </Field>
 
           <div>
             <div className="mb-2 text-xs font-medium">{t("topics")}</div>
