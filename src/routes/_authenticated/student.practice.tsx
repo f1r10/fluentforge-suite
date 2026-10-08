@@ -1423,18 +1423,35 @@ function SpecificPicker({
   onChange: (ids: string[]) => void;
 }) {
   const { t } = useI18n();
+  const [search, setSearch] = useState("");
+  const needle = search.trim().toLocaleLowerCase();
+  const visible = needle
+    ? rows.filter(
+        (row) =>
+          row.label.toLocaleLowerCase().includes(needle) ||
+          row.meta.toLocaleLowerCase().includes(needle),
+      )
+    : rows;
+
   return (
     <div className="rounded-md border border-border">
-      <div className="border-b border-border px-3 py-2 text-xs font-medium">
-        {t("selected_count")}: {selected.length}
+      <div className="space-y-2 border-b border-border p-2">
+        <div className="px-1 text-xs font-medium">
+          {t("selected_count")}: {selected.length}
+        </div>
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("search")}
+        />
       </div>
       <div className="max-h-52 space-y-1 overflow-y-auto p-2">
-        {rows.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="p-3 text-sm text-muted-foreground">
-            {t("no_active_content")}
+            {rows.length === 0 ? t("no_active_content") : t("no_results")}
           </div>
         ) : (
-          rows.map((row) => (
+          visible.map((row) => (
             <label
               key={row.id}
               className="flex cursor-pointer items-start gap-2 rounded px-2 py-2 hover:bg-muted/40"
