@@ -657,6 +657,48 @@ def _translation_language_from_header(header: str) -> str | None:
     return None
 
 
+def _infer_vocabulary_languages_from_text(
+    text: str,
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    if defaults.get("translation_language"):
+        return defaults
+
+    aliases = {
+        "english": "en",
+        "ingilis": "en",
+        "ingilisce": "en",
+        "ingiliscə": "en",
+        "azerbaijani": "az",
+        "azerbaijan": "az",
+        "azerbaycanca": "az",
+        "azərbaycanca": "az",
+        "azərbaycan": "az",
+        "turkish": "tr",
+        "turkce": "tr",
+        "türkçe": "tr",
+        "russian": "ru",
+        "русский": "ru",
+    }
+    for raw_line in text.splitlines()[:40]:
+        cleaned = re.sub(r"^[#\\s:|;,\\-]+|[#\\s:|;,\\-]+$", "", raw_line)
+        tokens = [
+            re.sub(
+                r"[^\\wƏəĞğİıÖöŞşÇçÜüА-Яа-яЁё]+",
+                "",
+                token,
+            ).casefold()
+            for token in cleaned.split()
+        ]
+        languages = [aliases[token] for token in tokens if token in aliases]
+        if len(languages) >= 2 and languages[0] != languages[1]:
+            return {
+                **defaults,
+                "learning_language": languages[0],
+                "translation_language": languages[1],
+            }
+    return defaults
+
 def _vocabulary_defaults(profile: dict[str, Any] | None) -> dict[str, Any]:
     profile = profile or {}
     learning_language = str(profile.get("learning_language") or "en").strip().lower()
@@ -939,7 +981,10 @@ def _vocabulary_from_text(
     page: int | None,
     profile: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    defaults = _vocabulary_defaults(profile)
+    defaults = _infer_vocabulary_languages_from_text(
+        text,
+        _vocabulary_defaults(profile),
+    )
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
