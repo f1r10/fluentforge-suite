@@ -8,6 +8,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
+  BookMarked,
   BookOpen,
   BookType,
   ClipboardList,
@@ -44,6 +45,7 @@ const nav = [
   { to: "/student/readings" as const, key: "reading_library", icon: BookOpen },
   { to: "/student/listenings" as const, key: "listening_library", icon: Headphones },
   { to: "/student/catalogs" as const, key: "my_catalogs", icon: FolderOpen },
+  { to: "/student/library" as const, key: "library", icon: BookMarked },
   { to: "/student/practice" as const, key: "self_practice", icon: Dumbbell },
   { to: "/student/exams" as const, key: "exams", icon: ClipboardList },
   { to: "/student/notifications" as const, key: "notifications", icon: Bell },
