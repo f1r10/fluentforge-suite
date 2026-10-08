@@ -760,8 +760,8 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="max-h-[95vh] max-w-[96vw] overflow-hidden xl:max-w-7xl">
-        <DialogHeader><DialogTitle>{t("document_import_review")}</DialogTitle></DialogHeader>
+      <DialogContent className="flex h-[94vh] max-h-[94vh] max-w-[96vw] flex-col overflow-hidden xl:max-w-7xl">
+        <DialogHeader className="shrink-0"><DialogTitle>{t("document_import_review")}</DialogTitle></DialogHeader>
         {isLoading || !data ? (
           <div className="py-12 text-center text-sm text-muted-foreground">…</div>
         ) : (
@@ -835,13 +835,13 @@ function ReviewWorkspace({
   });
 
   return (
-    <div className="grid min-h-[70vh] gap-4 overflow-hidden lg:grid-cols-[1fr_1.2fr]">
+    <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[1fr_1.2fr]">
       <section className="min-h-0 overflow-hidden rounded-md border border-border">
         <div className="border-b border-border p-3">
           <div className="font-medium">{preview?.filename ?? t("source")}</div>
           <div className="text-xs text-muted-foreground">{preview?.mimeType ?? "—"}</div>
         </div>
-        <div className="h-[64vh] overflow-auto bg-muted/20 p-2">
+        <div className="h-full min-h-0 overflow-auto bg-muted/20 p-2">
           <SourcePreview preview={preview} />
         </div>
       </section>
@@ -901,7 +901,7 @@ function ReviewWorkspace({
           ))}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1">
           {data.items.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
               {data.job.status === "queued" || data.job.status === "processing"
@@ -936,8 +936,16 @@ function ImportItemCard({
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
-  const [json, setJson] = useState(() => JSON.stringify(item.payload, null, 2));
+  const [draft, setDraft] = useState<Record<string, unknown>>(
+    () => structuredClone(item.payload as Record<string, unknown>),
+  );
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(structuredClone(item.payload as Record<string, unknown>));
+    }
+  }, [item.payload, editing]);
 
   const payload = item.payload as Record<string, unknown>;
   const questionPayload =
@@ -966,6 +974,7 @@ function ImportItemCard({
   const correct = Array.isArray(answerKey?.["correct"])
     ? (answerKey["correct"] as unknown[]).map(String).filter(Boolean)
     : [];
+  const multiple = payload["question_type"] === "multiple_choice";
   const title =
     item.item_type === "question" && typeof payload["prompt"] === "string"
       ? payload["prompt"]
@@ -984,8 +993,12 @@ function ImportItemCard({
   ) {
     setBusy(true);
     try {
-      await updateImportItem({ data: { id: item.id, decision, payload: nextPayload } });
+      await updateImportItem({
+        data: { id: item.id, decision, payload: nextPayload },
+      });
       await onChanged();
+      if (decision === "approved") toast.success(t("approved"));
+      if (decision === "rejected") toast.success(t("rejected"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -993,30 +1006,51 @@ function ImportItemCard({
     }
   }
 
-  async function chooseCorrectAnswer(optionId: string) {
+  async function setCorrectAnswer(optionId: string, checked: boolean) {
+    const current = new Set(correct);
+    if (multiple) {
+      if (checked) current.add(optionId);
+      else current.delete(optionId);
+    } else {
+      current.clear();
+      if (checked) current.add(optionId);
+    }
     const nextPayload = {
       ...payload,
       answer_key: {
         ...(answerKey ?? {}),
-        correct: [optionId],
+        correct: [...current],
       },
     };
-    setJson(JSON.stringify(nextPayload, null, 2));
-    await update("approved", nextPayload);
+    await update("pending", nextPayload);
   }
 
-  async function saveJson() {
-    try {
-      const parsed = JSON.parse(json) as Record<string, unknown>;
-      await update(item.decision as "pending" | "approved" | "rejected", parsed);
-      setEditing(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("invalid_json"));
-    }
+  async function saveSimpleEdit() {
+    await update("pending", draft);
+    setEditing(false);
+  }
+
+  function patchDraft(key: string, value: unknown) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function patchQuestionOption(index: number, text: string) {
+    setDraft((current) => {
+      const nested =
+        current["payload"] && typeof current["payload"] === "object"
+          ? { ...(current["payload"] as Record<string, unknown>) }
+          : {};
+      const nextOptions = Array.isArray(nested["options"])
+        ? [...(nested["options"] as Array<Record<string, unknown>>)]
+        : [];
+      nextOptions[index] = { ...(nextOptions[index] ?? {}), text };
+      nested["options"] = nextOptions;
+      return { ...current, payload: nested };
+    });
   }
 
   return (
-    <article className="space-y-2 p-3">
+    <article className="space-y-3 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -1032,7 +1066,9 @@ function ImportItemCard({
               </span>
             )}
           </div>
-          <div className="mt-1 whitespace-pre-wrap text-sm">{String(title ?? "—")}</div>
+          <div className="mt-1 whitespace-pre-wrap text-sm font-medium">
+            {String(title ?? "—")}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <Status value={item.decision} />
@@ -1040,81 +1076,304 @@ function ImportItemCard({
         </div>
       </div>
 
-      {item.validation.message && (
-        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          {item.validation.message}
+      {item.validation.state === "needs_fix" && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          {item.item_type === "question" && options.length > 0 && correct.length === 0
+            ? t("select_correct_answer_before_approve")
+            : item.validation.message}
         </div>
       )}
 
       {item.item_type === "question" && options.length > 0 && !editing && (
-        <div className="space-y-1 rounded-md border border-border bg-muted/20 p-3 text-sm">
-          {options.map((option) => (
-            <div key={option.id} className="flex gap-2">
-              <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
-              <span className="flex-1">{option.text}</span>
-              {correct.includes(option.id) ? (
-                <span className="text-xs font-medium">{t("correct_answer")}</span>
-              ) : (
-                payload["question_type"] === "single_choice" &&
-                item.validation.state === "needs_fix" && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => chooseCorrectAnswer(option.id)}
-                  >
-                    {t("correct")}
-                  </Button>
-                )
-              )}
-            </div>
-          ))}
-          {correct.length === 0 && (
-            <div className="pt-1 text-xs text-muted-foreground">
-              {t("correct_answer")}: —
-            </div>
-          )}
+        <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-sm">
+          <div className="text-xs font-medium text-muted-foreground">
+            {multiple
+              ? t("select_all_correct_answers")
+              : t("select_correct_answer")}
+          </div>
+          {options.map((option) => {
+            const checked = correct.includes(option.id);
+            return (
+              <label
+                key={option.id}
+                className="flex cursor-pointer items-start gap-3 rounded-md border border-transparent px-2 py-2 hover:border-border hover:bg-background"
+              >
+                <Checkbox
+                  className="mt-0.5"
+                  checked={checked}
+                  disabled={busy}
+                  onCheckedChange={(value) =>
+                    void setCorrectAnswer(option.id, !!value)
+                  }
+                />
+                <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
+                <span className="flex-1">{option.text}</span>
+                {checked && (
+                  <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    {t("correct_answer")}
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
       )}
 
       {editing ? (
-        <div className="space-y-2">
-          <Textarea rows={12} className="font-mono text-xs" value={json} onChange={(event) => setJson(event.target.value)} />
-          <div className="flex gap-2">
-            <Button size="sm" disabled={busy} onClick={saveJson}>{t("save")}</Button>
-            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>{t("cancel")}</Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant={item.decision === "approved" ? "default" : "outline"}
-            disabled={
-              busy ||
-              !!item.duplicate_of ||
-              !!item.created_entity_id ||
-              item.validation.state !== "ready"
-            }
-            onClick={() => update("approved")}
-          >
-            {t("approve")}
-          </Button>
-          <Button
-            size="sm"
-            variant={item.decision === "rejected" ? "default" : "outline"}
-            disabled={busy}
-            onClick={() => update("rejected")}
-          >
-            {t("reject")}
-          </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
-            {t("edit")}
-          </Button>
-        </div>
-      )}
+        <SimpleImportItemEditor
+          itemType={item.item_type}
+          draft={draft}
+          onPatch={patchDraft}
+          onPatchQuestionOption={patchQuestionOption}
+        />
+      ) : null}
+
+      <div className="flex flex-wrap gap-2 border-t border-border pt-2">
+        {!editing ? (
+          <>
+            <Button
+              size="sm"
+              variant={item.decision === "approved" ? "default" : "outline"}
+              disabled={
+                busy ||
+                !!item.duplicate_of ||
+                !!item.created_entity_id ||
+                item.validation.state !== "ready"
+              }
+              onClick={() => update("approved")}
+            >
+              {t("approve")}
+            </Button>
+            <Button
+              size="sm"
+              variant={item.decision === "rejected" ? "default" : "outline"}
+              disabled={busy || !!item.created_entity_id}
+              onClick={() => update("rejected")}
+            >
+              {t("reject")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || !!item.created_entity_id}
+              onClick={() => setEditing(true)}
+            >
+              {t("edit")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" disabled={busy} onClick={saveSimpleEdit}>
+              {t("save")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setDraft(
+                  structuredClone(item.payload as Record<string, unknown>),
+                );
+                setEditing(false);
+              }}
+            >
+              {t("cancel")}
+            </Button>
+          </>
+        )}
+      </div>
     </article>
+  );
+}
+
+function SimpleImportItemEditor({
+  itemType,
+  draft,
+  onPatch,
+  onPatchQuestionOption,
+}: {
+  itemType: string;
+  draft: Record<string, unknown>;
+  onPatch: (key: string, value: unknown) => void;
+  onPatchQuestionOption: (index: number, text: string) => void;
+}) {
+  const { t } = useI18n();
+  const inputClass =
+    "h-9 w-full rounded-md border border-input bg-background px-3 text-sm";
+  const areaClass =
+    "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
+
+  if (itemType === "question") {
+    const nested =
+      draft["payload"] && typeof draft["payload"] === "object"
+        ? (draft["payload"] as Record<string, unknown>)
+        : {};
+    const options = Array.isArray(nested["options"])
+      ? (nested["options"] as Array<Record<string, unknown>>)
+      : [];
+    return (
+      <div className="space-y-3 rounded-md border border-border bg-background p-3">
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">{t("question")}</span>
+          <Textarea
+            rows={3}
+            value={String(draft["prompt"] ?? "")}
+            onChange={(event) => onPatch("prompt", event.target.value)}
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">{t("instructions")}</span>
+          <Textarea
+            rows={2}
+            value={String(draft["instructions"] ?? "")}
+            onChange={(event) =>
+              onPatch("instructions", event.target.value || null)
+            }
+          />
+        </label>
+        {options.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium">{t("options")}</div>
+            {options.map((option, index) => (
+              <label key={String(option["id"] ?? index)} className="grid grid-cols-[32px_1fr] items-center gap-2">
+                <strong className="text-sm uppercase">
+                  {String(option["id"] ?? index + 1)}
+                </strong>
+                <input
+                  className={inputClass}
+                  value={String(option["text"] ?? "")}
+                  onChange={(event) =>
+                    onPatchQuestionOption(index, event.target.value)
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">{t("explanation")}</span>
+          <Textarea
+            rows={2}
+            value={String(draft["explanation"] ?? "")}
+            onChange={(event) =>
+              onPatch("explanation", event.target.value || null)
+            }
+          />
+        </label>
+      </div>
+    );
+  }
+
+  if (itemType === "vocabulary") {
+    return (
+      <div className="grid gap-3 rounded-md border border-border bg-background p-3 sm:grid-cols-2">
+        <SimpleField label={t("word")}>
+          <input
+            className={inputClass}
+            value={String(draft["word"] ?? "")}
+            onChange={(event) => onPatch("word", event.target.value)}
+          />
+        </SimpleField>
+        <SimpleField label={t("part_of_speech")}>
+          <input
+            className={inputClass}
+            value={String(draft["part_of_speech"] ?? "")}
+            onChange={(event) =>
+              onPatch("part_of_speech", event.target.value || null)
+            }
+          />
+        </SimpleField>
+        <div className="sm:col-span-2">
+          <SimpleField label={t("definition")}>
+            <Textarea
+              rows={3}
+              value={String(draft["definition"] ?? "")}
+              onChange={(event) =>
+                onPatch("definition", event.target.value || null)
+              }
+            />
+          </SimpleField>
+        </div>
+      </div>
+    );
+  }
+
+  if (itemType === "reading") {
+    return (
+      <div className="space-y-3 rounded-md border border-border bg-background p-3">
+        <SimpleField label={t("title")}>
+          <input
+            className={inputClass}
+            value={String(draft["title"] ?? "")}
+            onChange={(event) => onPatch("title", event.target.value)}
+          />
+        </SimpleField>
+        <SimpleField label={t("passage")}>
+          <textarea
+            className={areaClass}
+            rows={10}
+            value={String(draft["body"] ?? "")}
+            onChange={(event) => onPatch("body", event.target.value)}
+          />
+        </SimpleField>
+      </div>
+    );
+  }
+
+  if (itemType === "listening") {
+    return (
+      <div className="space-y-3 rounded-md border border-border bg-background p-3">
+        <SimpleField label={t("title")}>
+          <input
+            className={inputClass}
+            value={String(draft["title"] ?? "")}
+            onChange={(event) => onPatch("title", event.target.value)}
+          />
+        </SimpleField>
+        <SimpleField label={t("transcript")}>
+          <textarea
+            className={areaClass}
+            rows={10}
+            value={String(draft["transcript"] ?? "")}
+            onChange={(event) => onPatch("transcript", event.target.value)}
+          />
+        </SimpleField>
+      </div>
+    );
+  }
+
+  if (itemType === "raw_text") {
+    return (
+      <SimpleField label={t("text")}>
+        <textarea
+          className={areaClass}
+          rows={10}
+          value={String(draft["text"] ?? "")}
+          onChange={(event) => onPatch("text", event.target.value)}
+        />
+      </SimpleField>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+      {t("simple_editor_not_available")}
+    </div>
+  );
+}
+
+function SimpleField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium">{label}</span>
+      {children}
+    </label>
   );
 }
 
