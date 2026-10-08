@@ -501,6 +501,70 @@ def test_checkbox_pdf_options_and_true_false_are_reconstructed():
     ]
 
 
+def test_numbered_question_without_space_after_period_is_detected():
+    from app.extractors import Extraction
+
+    text = (
+        "12. Choose the correct answer.\n"
+        "A) apple B) banana\n"
+        "13.Choose the uncountable nouns.\n"
+        "A) water B) pencil\n"
+    )
+    extraction = Extraction("native_text", [{"page": 1, "text": text}], [], text, {})
+    questions = [
+        item["payload"]
+        for item in detect_candidates(extraction, profile={"expected_content": "questions"})
+        if item["item_type"] == "question"
+    ]
+
+    assert len(questions) == 2
+    assert questions[0]["prompt"] == "Choose the correct answer."
+    assert questions[1]["prompt"] == "Choose the uncountable nouns."
+    assert [opt["text"] for opt in questions[1]["payload"]["options"]] == ["water", "pencil"]
+
+
+def test_numbered_question_glued_to_prior_option_is_split():
+    from app.extractors import Extraction
+
+    text = (
+        "12. Choose the correct answer.\n"
+        "A) apple B) banana 13.Choose the uncountable nouns.\n"
+        "A) water B) pencil\n"
+    )
+    extraction = Extraction("native_text", [{"page": 1, "text": text}], [], text, {})
+    questions = [
+        item["payload"]
+        for item in detect_candidates(extraction, profile={"expected_content": "questions"})
+        if item["item_type"] == "question"
+    ]
+
+    assert len(questions) == 2
+    assert [opt["text"] for opt in questions[0]["payload"]["options"]] == ["apple", "banana"]
+    assert questions[1]["prompt"] == "Choose the uncountable nouns."
+    assert [opt["text"] for opt in questions[1]["payload"]["options"]] == ["water", "pencil"]
+
+
+def test_numbered_statements_inside_prompt_are_not_split_as_new_questions():
+    from app.extractors import Extraction
+
+    text = (
+        "7. Choose the correct statements.\n"
+        "1. Which cities are in Europe?\n"
+        "2. Choose the countries that apply.\n"
+        "A) 1 B) 2\n"
+    )
+    extraction = Extraction("native_text", [{"page": 1, "text": text}], [], text, {})
+    questions = [
+        item["payload"]
+        for item in detect_candidates(extraction, profile={"expected_content": "questions"})
+        if item["item_type"] == "question"
+    ]
+
+    assert len(questions) == 1
+    assert "1. Which cities are in Europe?" in questions[0]["prompt"]
+    assert "2. Choose the countries that apply." in questions[0]["prompt"]
+
+
 def test_number_on_own_line_and_nested_numbered_statements_stay_one_question():
     from app.extractors import Extraction
 

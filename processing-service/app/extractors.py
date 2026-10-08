@@ -27,7 +27,7 @@ class Extraction:
     stats: dict[str, Any]
 
 
-QUESTION_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s+(.+?)\s*$")
+QUESTION_RE = re.compile(r"^\s*(\d{1,4})[\.)](?:\s+|(?=[A-Z]))(.+?)\s*$")
 QUESTION_NUMBER_ONLY_RE = re.compile(r"^\s*(\d{1,4})[\.)]\s*$")
 OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.)]\s+(.+?)\s*$")
 INLINE_OPTION_RE = re.compile(
@@ -1843,14 +1843,48 @@ def _is_section_boundary(line: str) -> bool:
     )
 
 
+def _split_concatenated_question_lines(lines: list[str]) -> list[str]:
+    # PDF text extraction sometimes glues the next numbered question to the
+    # final option of the preceding question, e.g. "B) book 13.Choose ...".
+    # Do not split numbered statements in the prompt: only split when an
+    # earlier A-H option marker exists on the *same* source line.
+    question_start = re.compile(
+        r"(?<!\\w)\\d{1,4}[\\.)]\\s*(?=(?:Choose|Select|Which|What|When|Where|"
+        r"Who|Why|How|Complete|Fill|Identify|Find|Match|Arrange|Write|"
+        r"Is|Are|Do|Does|Did|Can|Could|Should|Would)\\b)",
+        re.IGNORECASE,
+    )
+    option_start = re.compile(r"(?<!\\w)[A-Ha-h][\\.)]\\s*\\S")
+    out: list[str] = []
+    for line in lines:
+        split_at = [
+            match.start()
+            for match in question_start.finditer(line)
+            if match.start() > 0 and option_start.search(line[:match.start()])
+        ]
+        if not split_at:
+            out.append(line)
+            continue
+        start = 0
+        for end in split_at:
+            segment = line[start:end].strip()
+            if segment:
+                out.append(segment)
+            start = end
+        remaining = line[start:].strip()
+        if remaining:
+            out.append(remaining)
+    return out
+
+
 def _questions_from_text(
     text: str,
     page: int | None,
     question_crops: dict[str, dict[str, float]] | None = None,
     global_answers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    lines = _join_wrapped_option_lines(
-        [line.rstrip() for line in text.splitlines()]
+    lines = _split_concatenated_question_lines(
+        _join_wrapped_option_lines([line.rstrip() for line in text.splitlines()])
     )
     questions: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
