@@ -197,19 +197,25 @@ async function gotoHydrated(page, path) {
     await reviewQuestion
       .getByRole("button", { name: "Reject", exact: true })
       .click();
-    await reviewQuestion
+    await importDialog
+      .getByRole("button", { name: /^Rejected \(1\)$/ })
+      .click();
+    const rejectedQuestion = importDialog
+      .getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::article");
+    await rejectedQuestion
       .getByText("rejected", { exact: true })
       .waitFor({ timeout: 20000 });
-    await reviewQuestion
+    await rejectedQuestion
       .getByRole("button", { name: "Approve", exact: true })
       .click();
-    await reviewQuestion
-      .getByText("approved", { exact: true })
+    await importDialog
+      .getByRole("button", { name: /Import approved \(1\)/ })
       .waitFor({ timeout: 20000 });
     console.log("[ok] document review Reject and Approve actions both work");
 
     await importDialog
-      .getByRole("button", { name: "Import approved" })
+      .getByRole("button", { name: /Import approved \(1\)/ })
       .click();
     await importDialog
       .getByText("completed", { exact: true })
