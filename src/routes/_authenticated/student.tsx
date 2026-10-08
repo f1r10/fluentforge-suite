@@ -18,6 +18,7 @@ import {
   Headphones,
   Home,
   LogOut,
+  RotateCcw,
 } from "lucide-react";
 import { getWhoAmI } from "@/lib/teacher.functions";
 import { setMyLanguage } from "@/lib/student.functions";
@@ -46,6 +47,7 @@ const nav = [
   { to: "/student/listenings" as const, key: "listening_library", icon: Headphones },
   { to: "/student/catalogs" as const, key: "my_catalogs", icon: FolderOpen },
   { to: "/student/library" as const, key: "library", icon: BookMarked },
+  { to: "/student/mistakes" as const, key: "my_mistakes", icon: RotateCcw },
   { to: "/student/practice" as const, key: "self_practice", icon: Dumbbell },
   { to: "/student/exams" as const, key: "exams", icon: ClipboardList },
   { to: "/student/notifications" as const, key: "notifications", icon: Bell },
