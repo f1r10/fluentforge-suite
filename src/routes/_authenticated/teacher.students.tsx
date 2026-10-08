@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -84,7 +84,15 @@ function StudentsPage() {
             {data?.rows.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">{t("no_results")}</td></tr>}
             {data?.rows.map((r) => (
               <tr key={r.id}>
-                <td className="px-3 py-2 font-medium">{r.first_name} {r.last_name}</td>
+                <td className="px-3 py-2 font-medium">
+                  <Link
+                    to="/teacher/student/$id"
+                    params={{ id: r.id }}
+                    className="hover:underline"
+                  >
+                    {r.first_name} {r.last_name}
+                  </Link>
+                </td>
                 <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{r.username}</td>
                 <td className="hidden px-3 py-2 md:table-cell">{r.groups.map((g) => g.name).join(", ")}</td>
                 <td className="px-3 py-2"><StatusLabel status={r.status} /></td>
@@ -93,6 +101,11 @@ function StudentsPage() {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem asChild>
+                        <Link to="/teacher/student/$id" params={{ id: r.id }}>
+                          {t("student_activity")}
+                        </Link>
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setEditing(r)}>{t("edit")}</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setNotesFor(r)}>
                         <StickyNote className="mr-2 h-4 w-4" />
