@@ -421,16 +421,12 @@ async function gotoHydrated(page, path) {
       .getByRole("button", { name: "Save", exact: true })
       .last()
       .click();
-    await page.keyboard.press("Escape");
-    await page
-      .getByText("Release Reading", { exact: true })
+    await readingDialog
+      .getByRole("button", { name: "Preview", exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] novice Reading flow created a contextual question without question-set setup");
 
-    const readingRow = page
-      .getByText("Release Reading", { exact: true })
-      .locator("xpath=ancestor::tr");
-    await readingRow
+    await readingDialog
       .getByRole("button", { name: "Preview", exact: true })
       .click();
     const readingPreviewDialog = page
@@ -449,7 +445,17 @@ async function gotoHydrated(page, path) {
         exact: true,
       })
       .waitFor({ timeout: 20000 });
-    await page.keyboard.press("Escape");
+    await readingPreviewDialog
+      .getByRole("button", { name: "Close" })
+      .click()
+      .catch(async () => {
+        await page.keyboard.press("Escape");
+      });
+    await readingPreviewDialog.waitFor({ state: "hidden", timeout: 20000 });
+    await readingDialog
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await readingDialog.waitFor({ state: "hidden", timeout: 20000 });
     console.log("[ok] teacher previewed Reading activity and contextual questions as a whole");
 
     await gotoHydrated(page, "/teacher/listenings");
@@ -519,16 +525,12 @@ async function gotoHydrated(page, path) {
       .getByRole("button", { name: "Save", exact: true })
       .last()
       .click();
-    await page.keyboard.press("Escape");
-    await page
-      .getByText("Release Listening", { exact: true })
+    await listeningDialog
+      .getByRole("button", { name: "Preview", exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] novice Listening flow saved media and contextual question without set/section setup");
 
-    const listeningRow = page
-      .getByText("Release Listening", { exact: true })
-      .locator("xpath=ancestor::tr");
-    await listeningRow
+    await listeningDialog
       .getByRole("button", { name: "Preview", exact: true })
       .click();
     const listeningPreviewDialog = page
@@ -540,7 +542,17 @@ async function gotoHydrated(page, path) {
       .getByText("The listening activity is available.", { exact: true })
       .waitFor({ timeout: 20000 });
     await listeningPreviewDialog.locator("audio").waitFor({ timeout: 20000 });
-    await page.keyboard.press("Escape");
+    await listeningPreviewDialog
+      .getByRole("button", { name: "Close" })
+      .click()
+      .catch(async () => {
+        await page.keyboard.press("Escape");
+      });
+    await listeningPreviewDialog.waitFor({ state: "hidden", timeout: 20000 });
+    await listeningDialog
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await listeningDialog.waitFor({ state: "hidden", timeout: 20000 });
     console.log("[ok] teacher previewed Listening activity, media and questions as a whole");
 
     await gotoHydrated(page, "/teacher/exports");
