@@ -103,23 +103,6 @@ export const submitListeningDictation = createServerFn({ method: "POST" })
       throw new Error(insertedError.message);
     }
 
-    const { error: eventError } = await admin.from("activity_events").insert({
-      student_id: studentId,
-      category: "practice",
-      event_type: "dictation_answer",
-      entity_type: "listening",
-      entity_id: listening.id,
-      is_correct: grade.scorePercent === 100,
-      response: { value: data.response } as never,
-      duration_ms: data.durationMs,
-      details: {
-        attempt_id: data.attemptId,
-        score: grade.scorePercent,
-        error_count: grade.errorCount,
-        expected_words: grade.expectedWords,
-      } as never,
-    });
-    if (eventError) throw new Error(eventError.message);
     return {
       scorePercent: grade.scorePercent,
       errorCount: grade.errorCount,
