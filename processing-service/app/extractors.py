@@ -723,13 +723,75 @@ VOCAB_POS_ALIASES = {
 VOCAB_LEVEL_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$", re.IGNORECASE)
 VOCAB_BOILERPLATE_RE = re.compile(
     r"(?:https?://|www\.|©|copyright|page\s+\d+|vocabulary\s+list|"
-    r"word\s+list|table\s+of\s+contents|introduction|how\s+the\s+list)",
+    r"word\s+list|table\s+of\s+contents|introduction|how\s+the\s+list|"
+    r"^\s*#?\s*(?:english|ingilis(?:cə|ce)?|azərbaycanca|azerbaycanca)"
+    r"\s+(?:azerbaijani|azərbaycanca|azerbaycanca|english|ingilis(?:cə|ce)?)\s*$)",
     re.IGNORECASE,
 )
 
 
 def _clean_vocab_word(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" \t—–-:;,.")
+
+
+def _strip_vocab_row_number(value: str) -> tuple[str, bool]:
+    """Strip common numbered-list prefixes without treating the number as a word."""
+    match = re.match(
+        r"^\s*(?:#\s*)?(\d{1,4})(?:\s*[\.)-]\s*|\s+)(.+?)\s*$",
+        value,
+    )
+    if not match:
+        return value.strip(), False
+    return match.group(2).strip(), True
+
+
+def _split_numbered_bilingual_vocab(
+    value: str,
+    *,
+    learning_language: str,
+    translation_language: str | None,
+) -> tuple[str, str] | None:
+    """
+    Handle teacher word lists such as:
+      66 than daha çox
+      67 like kimi
+      71 its onun
+    When a translation language is configured, numbered glossary rows are
+    treated as bilingual rows rather than one long headword.
+    """
+    if not translation_language:
+        return None
+    tokens = value.split()
+    if len(tokens) < 2:
+        return None
+
+    target_specific: dict[str, re.Pattern[str]] = {
+        "az": re.compile(r"[əƏğĞıİöÖşŞçÇüÜ]"),
+        "tr": re.compile(r"[ğĞıİöÖşŞçÇüÜ]"),
+        "ru": re.compile(r"[А-Яа-яЁё]"),
+    }
+    target_re = target_specific.get(translation_language)
+    if target_re:
+        for index, token in enumerate(tokens[1:], start=1):
+            if target_re.search(token):
+                head = " ".join(tokens[:index]).strip()
+                meaning = " ".join(tokens[index:]).strip()
+                if head and meaning:
+                    return head, meaning
+
+    # Preserve common English multi-word headwords/phrasal verbs when the
+    # target text does not contain language-specific characters.
+    if learning_language == "en" and len(tokens) >= 3:
+        particles = {
+            "after", "away", "back", "down", "for", "in", "into", "off",
+            "on", "out", "over", "through", "to", "up", "with",
+        }
+        if tokens[1].casefold() in particles:
+            return " ".join(tokens[:2]), " ".join(tokens[2:])
+        if tokens[0].casefold() in {"a", "an", "the"}:
+            return " ".join(tokens[:2]), " ".join(tokens[2:])
+
+    return tokens[0], " ".join(tokens[1:])
 
 
 def _vocabulary_payload(
@@ -933,13 +995,30 @@ def _vocabulary_from_text(
         source_lines.extend(segments)
 
     for raw_line in source_lines:
-        line = re.sub(
-            r"^\s*(?:[-•*▪◦]|\d{1,4}[\.)])\s*",
-            "",
-            raw_line,
-        ).strip()
+        line = re.sub(r"^\s*[-•*▪◦]\s*", "", raw_line).strip()
+        line, had_row_number = _strip_vocab_row_number(line)
         if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
             continue
+
+        if had_row_number:
+            bilingual = _split_numbered_bilingual_vocab(
+                line,
+                learning_language=defaults["learning_language"],
+                translation_language=defaults.get("translation_language"),
+            )
+            if bilingual:
+                word, meaning = bilingual
+                add(
+                    word,
+                    translations=[
+                        {
+                            "language": str(defaults["translation_language"]),
+                            "value": meaning,
+                        }
+                    ],
+                    confidence=0.94,
+                )
+                continue
 
         # Recognize dictionary word-list metadata before comma-based
         # term/definition parsing. This prevents entries such as
