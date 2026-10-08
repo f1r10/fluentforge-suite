@@ -45,6 +45,7 @@ const vocabularyPoolSchema = commonPoolSchema.extend({
     .enum(["word_to_translation", "translation_to_word", "mixed"])
     .default("word_to_translation"),
   translationLanguage: z.string().trim().min(2).max(10).default("az"),
+  topicIds: z.array(z.string().uuid()).max(100).default([]),
 });
 
 const readingPoolSchema = commonPoolSchema.extend({
@@ -838,6 +839,23 @@ async function selectVocabularyPracticeItems(
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
     return [];
+  }
+
+  if (pool.topicIds.length) {
+    const { data: tagged, error: taggedError } = await admin
+      .from("vocabulary_topics")
+      .select("vocabulary_id")
+      .in("topic_id", pool.topicIds);
+    if (taggedError) throw new Error(taggedError.message);
+    const taggedIds = [
+      ...new Set((tagged ?? []).map((row) => row.vocabulary_id)),
+    ];
+    if (!taggedIds.length) return [];
+    allowedIds =
+      allowedIds == null
+        ? taggedIds
+        : allowedIds.filter((id) => taggedIds.includes(id));
+    if (!allowedIds.length) return [];
   }
 
   let query = admin
