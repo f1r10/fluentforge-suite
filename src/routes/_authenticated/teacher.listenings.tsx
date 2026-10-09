@@ -37,6 +37,8 @@ import {
   type StudentListeningPractice,
 } from "@/components/app/StudentContextPractice";
 import { MediaUploadButton } from "@/components/app/MediaUploadButton";
+import { addCatalogItems } from "@/lib/catalog.functions";
+import { CatalogTargetSelect } from "@/components/app/CatalogTargetSelect";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -118,6 +120,7 @@ function ListeningsPage() {
   const [status, setStatus] = useState<Status>("active");
   const [page, setPage] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<
     Awaited<ReturnType<typeof getListeningStudentPreview>> | null
@@ -142,6 +145,7 @@ function ListeningsPage() {
 
   async function openEdit(id: string) {
     setAutoCreateSetId(null);
+    setCatalogTarget("");
     setQuestionCreateRequest(0);
     try {
       const [row, transcriptionJob] = await Promise.all([
@@ -259,6 +263,21 @@ function ListeningsPage() {
             sort_order: i,
           },
         });
+      }
+
+      if (catalogTarget) {
+        await addCatalogItems({
+          data: {
+            catalogId: catalogTarget,
+            items: [
+              {
+                entity_type: "listening",
+                entity_id: saved.id,
+              },
+            ],
+          },
+        });
+        await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
       }
 
       await qc.invalidateQueries({ queryKey: ["listenings"] });
@@ -884,6 +903,11 @@ function ListeningsPage() {
                 ))}
               </section>
 
+              <CatalogTargetSelect
+                value={catalogTarget}
+                onChange={setCatalogTarget}
+              />
+
               <DialogFooter>
                 {editor.id && (
                   <Button
@@ -896,7 +920,16 @@ function ListeningsPage() {
                     {t("preview")}
                   </Button>
                 )}
-                <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditor(null);
+                    setCatalogTarget("");
+                  }}
+                >
+                  {t("cancel")}
+                </Button>
                 <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
             </div>
