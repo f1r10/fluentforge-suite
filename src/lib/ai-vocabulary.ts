@@ -29,6 +29,15 @@ const sourceSchema = z.object({
 });
 
 const vocabularySuggestionSchema = z.object({
+  level: z.enum(["A1", "A2", "B1", "B2", "C1", "C2"]).nullable().default(null),
+  level_estimate: z
+    .object({
+      source: z.string().trim().min(1).max(120),
+      confidence: z.number().finite().min(0).max(1),
+      frequency_per_million: z.number().finite().min(0).nullable().default(null),
+    })
+    .nullable()
+    .default(null),
   definition: z.string().trim().max(10_000).nullable().default(null),
   ipa: z.string().trim().max(500).nullable().default(null),
   part_of_speech: z.string().trim().max(100).nullable().default(null),
@@ -58,6 +67,7 @@ export type VocabularyEnrichmentInput = {
     definition?: string | null;
     ipa?: string | null;
     partOfSpeech?: string | null;
+    level?: string | null;
     translations?: Array<{ language: string; value: string }>;
   };
 };
@@ -69,7 +79,8 @@ export function buildVocabularyEnrichmentMessages(
     "You assist a language teacher with vocabulary metadata.",
     "Your output is only a suggestion and must be reviewed by the teacher.",
     "Return exactly one JSON object and no markdown.",
-    "Keys: definition, ipa, part_of_speech, synonyms, antonyms, translations, examples, confidence, notes.",
+    "Keys: level, definition, ipa, part_of_speech, synonyms, antonyms, translations, examples, confidence, notes.",
+    "level must be one of A1, A2, B1, B2, C1, C2 or null. Estimate CEFR conservatively from common learner usage, not just word length.",
     "definition, ipa and part_of_speech may be null when uncertain.",
     "synonyms and antonyms are arrays of strings.",
     "translations is an array of objects with language and value.",
