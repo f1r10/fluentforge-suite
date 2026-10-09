@@ -942,11 +942,19 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     );
     const readingContexts = new Map<
       string,
-      { readingId: string; questionSetId: string }
+      {
+        readingId: string;
+        questionSetId: string;
+        status: "draft" | "active";
+      }
     >();
     const listeningContexts = new Map<
       string,
-      { listeningId: string; questionSetId: string }
+      {
+        listeningId: string;
+        questionSetId: string;
+        status: "draft" | "active";
+      }
     >();
 
     let importedQuestions = 0;
@@ -1038,6 +1046,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       readingContexts.set(raw.source_ref, {
         readingId,
         questionSetId,
+        status: raw.status,
       });
     }
 
@@ -1131,6 +1140,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       listeningContexts.set(raw.source_ref, {
         listeningId,
         questionSetId,
+        status: raw.status,
       });
     }
 
@@ -1301,7 +1311,10 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         .from("questions")
         .insert({
           ...fields,
-          status: fields.status,
+          status:
+            readingContext?.status ??
+            listeningContext?.status ??
+            fields.status,
           current_version: 1,
           context_kind: readingContext
             ? "reading"
