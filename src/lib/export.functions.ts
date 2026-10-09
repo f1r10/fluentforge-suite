@@ -1537,17 +1537,6 @@ function formatPdfValue(value: unknown) {
   }
 }
 
-function toSheetRow(row: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(row).map(([key, value]) => [
-      key,
-      value != null && typeof value === "object"
-        ? JSON.stringify(value)
-        : value ?? "",
-    ]),
-  );
-}
-
 function safeSheetName(name: string, existing: string[]) {
   const base =
     name
