@@ -21,9 +21,9 @@ export const examSettingsSchema = z.object({
   max_tab_switches: z.number().int().min(0).max(1_000).nullable().default(null),
   full_duration_after_start: z.boolean().default(true),
   auto_submit: z.literal(true).default(true),
-  result_release: resultReleaseSchema.default("after_close"),
-  answer_visibility: visibilitySchema.default("after_close"),
-  explanation_visibility: visibilitySchema.default("after_close"),
+  result_release: resultReleaseSchema.default("after_approval"),
+  answer_visibility: visibilitySchema.default("after_approval"),
+  explanation_visibility: visibilitySchema.default("after_approval"),
 });
 
 export type ExamSettings = z.infer<typeof examSettingsSchema>;
@@ -1305,9 +1305,9 @@ export const publishExam = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ examId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const exam = await ensureDraftExam(context.supabase, data.examId);
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
+    const exam = await ensureDraftExam(admin, data.examId);
 
     if (exam.available_until && new Date(exam.available_until).getTime() <= Date.now()) {
       throw new Error("The exam close time is already in the past.");
