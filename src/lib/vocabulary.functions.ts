@@ -590,46 +590,18 @@ async function resolveStoredVocabularyDictionary(
   );
   const cleaned = cleanVocabularyLookupWord(word);
 
-  try {
-    return {
-      lookupWord: cleaned,
-      recoveredTail: null as string | null,
-      suggestion: await fetchBestDictionaryVocabularySuggestion(cleaned, {
-        language,
-        targetLanguages,
-      }),
-    };
-  } catch (initialError) {
-    const tokens = cleaned.split(/\s+/).filter(Boolean);
-    if (language === "en" && tokens.length > 1) {
-      // Older imports could persist "headword + translation" in the word
-      // field. Recover the longest plausible English headword by validating
-      // prefixes against the dictionary. This also keeps phrasal verbs such
-      // as "look after" intact instead of truncating them to one token.
-      for (
-        let size = Math.min(4, tokens.length - 1);
-        size >= 1;
-        size -= 1
-      ) {
-        const candidate = tokens.slice(0, size).join(" ");
-        try {
-          const suggestion =
-            await fetchBestDictionaryVocabularySuggestion(candidate, {
-              language,
-              targetLanguages,
-            });
-          return {
-            lookupWord: candidate,
-            recoveredTail: tokens.slice(size).join(" ").trim() || null,
-            suggestion,
-          };
-        } catch {
-          // Try the next shorter prefix.
-        }
-      }
-    }
-    throw initialError;
-  }
+  // Enrichment is metadata-only. Never shorten or rewrite a stored headword
+  // just because an external dictionary cannot resolve the full phrase.
+  // Legitimate expressions such as "in accordance with sth", phrasal verbs,
+  // idioms and teacher-entered multiword terms must remain intact.
+  return {
+    lookupWord: cleaned,
+    recoveredTail: null as string | null,
+    suggestion: await fetchBestDictionaryVocabularySuggestion(cleaned, {
+      language,
+      targetLanguages,
+    }),
+  };
 }
 
 export const autoFillMissingVocabularyLevels = createServerFn({
@@ -976,7 +948,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
     );
     const aiStatus = getAiProviderStatus();
 
-    const [entriesResult, languagesResult, interfaceResult] =
+    const [entriesResult, languagesResult] =
       await Promise.all([
         admin
           .from("vocabulary_entries")
@@ -990,31 +962,14 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
           .select("code")
           .eq("is_translation", true)
           .order("sort_order"),
-        admin
-          .from("system_settings")
-          .select("value")
-          .eq("key", "interface")
-          .maybeSingle(),
       ]);
     if (entriesResult.error) throw new Error(entriesResult.error.message);
     if (languagesResult.error) throw new Error(languagesResult.error.message);
-    if (interfaceResult.error) throw new Error(interfaceResult.error.message);
 
     const targetLanguageCodes = (languagesResult.data ?? []).map((row) =>
       String(row.code).toLowerCase(),
     );
-    const interfaceSettings =
-      interfaceResult.data?.value &&
-      typeof interfaceResult.data.value === "object"
-        ? (interfaceResult.data.value as Record<string, unknown>)
-        : {};
-    const defaultTranslationLanguage =
-      typeof interfaceSettings["default_language"] === "string" &&
-      targetLanguageCodes.includes(
-        String(interfaceSettings["default_language"]).toLowerCase(),
-      )
-        ? String(interfaceSettings["default_language"]).toLowerCase()
-        : null;
+
     const failures: Array<{ id: string; word: string; error: string }> = [];
     const providerCounts: Record<string, number> = {};
     let updated = 0;
@@ -1061,7 +1016,6 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
             let dictionarySuggestion = null;
             let dictionaryError: unknown = null;
             let resolvedLookupWord = lookupWord;
-            let recoveredTail: string | null = null;
             try {
               const resolved =
                 await resolveStoredVocabularyDictionary(
@@ -1071,7 +1025,6 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                 );
               dictionarySuggestion = resolved.suggestion;
               resolvedLookupWord = resolved.lookupWord;
-              recoveredTail = resolved.recoveredTail;
             } catch (error) {
               dictionaryError = error;
             }
@@ -1121,9 +1074,6 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                 ? (row.provenance as Record<string, unknown>)
                 : {};
             const patch = {
-              ...(resolvedLookupWord !== row.word
-                ? { word: resolvedLookupWord }
-                : {}),
               definition:
                 data.overwrite || !row.definition?.trim()
                   ? suggestion.definition ?? row.definition
@@ -1158,12 +1108,6 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                   suggestion,
                   resolvedLookupWord,
                 ),
-                ...(recoveredTail
-                  ? {
-                      recovered_import_tail: recoveredTail,
-                      recovered_at: new Date().toISOString(),
-                    }
-                  : {}),
               } as never,
               updated_at: new Date().toISOString(),
             };
@@ -1181,26 +1125,6 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                 item,
               ]),
             );
-            if (
-              recoveredTail &&
-              row.vocabulary_translations.length === 0 &&
-              defaultTranslationLanguage
-            ) {
-              const { error } = await admin
-                .from("vocabulary_translations")
-                .insert({
-                  entry_id: row.id,
-                  language: defaultTranslationLanguage,
-                  value: recoveredTail,
-                });
-              if (error) throw new Error(error.message);
-              translationByLanguage.set(defaultTranslationLanguage, {
-                id: "",
-                language: defaultTranslationLanguage,
-                value: recoveredTail,
-              });
-            }
-
             for (const incoming of suggestion.translations) {
               const language = incoming.language.toLowerCase();
               const current = translationByLanguage.get(language);
