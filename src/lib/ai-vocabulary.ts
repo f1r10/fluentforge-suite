@@ -10,6 +10,24 @@ const exampleSchema = z.object({
   translation: z.string().trim().max(5_000).nullable().default(null),
 });
 
+const pronunciationSchema = z.object({
+  ipa: z.string().trim().max(500).nullable().default(null),
+  audio: z.string().url().nullable().default(null),
+  region: z.string().trim().max(80).nullable().default(null),
+  tags: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+});
+
+const wordFormSchema = z.object({
+  form: z.string().trim().min(1).max(500),
+  tags: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+});
+
+const sourceSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  url: z.string().url().nullable().default(null),
+  license: z.string().trim().max(120).nullable().default(null),
+});
+
 const vocabularySuggestionSchema = z.object({
   definition: z.string().trim().max(10_000).nullable().default(null),
   ipa: z.string().trim().max(500).nullable().default(null),
@@ -18,13 +36,16 @@ const vocabularySuggestionSchema = z.object({
   antonyms: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
   translations: z.array(translationSchema).max(20).default([]),
   examples: z.array(exampleSchema).max(10).default([]),
+  pronunciations: z.array(pronunciationSchema).max(30).default([]),
+  forms: z.array(wordFormSchema).max(100).default([]),
+  source: sourceSchema.nullable().default(null),
   confidence: z.number().finite().min(0).max(1),
   notes: z.string().trim().max(2_000).default(""),
 });
 
 export type VocabularyEnrichmentSuggestion =
   z.infer<typeof vocabularySuggestionSchema> & {
-    provider: "local" | "gemini" | "dictionary";
+    provider: "local" | "gemini" | "dictionary" | "wiktapi";
     model: string;
     generated_at: string;
   };
