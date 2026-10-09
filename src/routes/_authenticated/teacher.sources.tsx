@@ -59,6 +59,10 @@ function SourcesPage() {
     routeTarget ?? "auto",
   );
   const [profileOpen, setProfileOpen] = useState(false);
+  const [quickLearningLanguage, setQuickLearningLanguage] = useState("en");
+  const [quickTranslationLanguage, setQuickTranslationLanguage] = useState(
+    lang === "en" ? "az" : lang,
+  );
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
 
@@ -140,6 +144,14 @@ function SourcesPage() {
           mode: "review",
           profileId: profileId || null,
           expectedContent,
+          learningLanguage:
+            expectedContent === "vocabulary" && !profileId
+              ? quickLearningLanguage
+              : null,
+          translationLanguage:
+            expectedContent === "vocabulary" && !profileId
+              ? quickTranslationLanguage
+              : null,
         },
       });
 
@@ -212,12 +224,64 @@ function SourcesPage() {
               if (file) void upload(file);
             }}
           />
-          <Button disabled={uploading} onClick={() => fileInput.current?.click()}>
+          <Button
+            disabled={
+              uploading ||
+              (expectedContent === "vocabulary" &&
+                !profileId &&
+                quickLearningLanguage === quickTranslationLanguage)
+            }
+            onClick={() => fileInput.current?.click()}
+          >
             <Upload className="h-4 w-4" />
             {uploading ? t("uploading") : t("upload_source")}
           </Button>
         </div>
       </div>
+
+      {expectedContent === "vocabulary" && !profileId && (
+        <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+          <div>
+            <div className="text-sm font-medium">{t("vocabulary_pair_language")}</div>
+            <p className="text-xs text-muted-foreground">
+              {t("vocabulary_pair_language_hint")}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="space-y-1 text-xs text-muted-foreground">
+              <span>{t("learning_language")}</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                value={quickLearningLanguage}
+                onChange={(event) => setQuickLearningLanguage(event.target.value)}
+              >
+                <option value="en">English</option>
+                <option value="az">Azərbaycanca</option>
+                <option value="ru">Русский</option>
+                <option value="tr">Türkçe</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-xs text-muted-foreground">
+              <span>{t("translations")}</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                value={quickTranslationLanguage}
+                onChange={(event) => setQuickTranslationLanguage(event.target.value)}
+              >
+                <option value="az">Azərbaycanca</option>
+                <option value="en">English</option>
+                <option value="ru">Русский</option>
+                <option value="tr">Türkçe</option>
+              </select>
+            </label>
+          </div>
+          {quickLearningLanguage === quickTranslationLanguage && (
+            <p className="text-xs text-destructive">
+              Learning and translation languages must be different.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
         {t("document_import_pipeline_hint")}
