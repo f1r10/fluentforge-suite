@@ -24,6 +24,8 @@ import { topicOptions } from "@/components/app/topics";
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
 import { ContextQuestionSetManager } from "@/components/app/ContextQuestionSetManager";
+import { addCatalogItems } from "@/lib/catalog.functions";
+import { CatalogTargetSelect } from "@/components/app/CatalogTargetSelect";
 import {
   ContextActivityStudentPreview,
   type StudentReadingPractice,
@@ -76,6 +78,7 @@ function ReadingsPage() {
   const [status, setStatus] = useState<Status>("active");
   const [page, setPage] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<
     Awaited<ReturnType<typeof getReadingStudentPreview>> | null
@@ -97,6 +100,7 @@ function ReadingsPage() {
 
   async function openEdit(id: string) {
     setAutoCreateSetId(null);
+    setCatalogTarget("");
     setQuestionCreateRequest(0);
     try {
       const row = await getReading({ data: { id } });
@@ -152,6 +156,21 @@ function ReadingsPage() {
             sort_order: i,
           },
         });
+      }
+
+      if (catalogTarget) {
+        await addCatalogItems({
+          data: {
+            catalogId: catalogTarget,
+            items: [
+              {
+                entity_type: "reading",
+                entity_id: saved.id,
+              },
+            ],
+          },
+        });
+        await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
       }
 
       await qc.invalidateQueries({ queryKey: ["readings"] });
@@ -548,6 +567,11 @@ function ReadingsPage() {
                 ))}
               </section>
 
+              <CatalogTargetSelect
+                value={catalogTarget}
+                onChange={setCatalogTarget}
+              />
+
               <DialogFooter>
                 {editor.id && (
                   <Button
@@ -560,7 +584,16 @@ function ReadingsPage() {
                     {t("preview")}
                   </Button>
                 )}
-                <Button type="button" variant="outline" onClick={() => setEditor(null)}>{t("cancel")}</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditor(null);
+                    setCatalogTarget("");
+                  }}
+                >
+                  {t("cancel")}
+                </Button>
                 <Button type="button" disabled={busy} onClick={() => void save()}>{t("save")}</Button>
               </DialogFooter>
             </div>
