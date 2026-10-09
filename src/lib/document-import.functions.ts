@@ -483,6 +483,8 @@ export const startDocumentImport = createServerFn({ method: "POST" })
         expectedContent: z
           .enum(["auto", "questions", "vocabulary", "readings", "listenings", "mixed"])
           .default("auto"),
+        learningLanguage: z.string().trim().min(2).max(10).nullable().default(null),
+        translationLanguage: z.string().trim().min(2).max(10).nullable().default(null),
       })
       .parse(d),
   )
@@ -501,9 +503,21 @@ export const startDocumentImport = createServerFn({ method: "POST" })
     }
 
     let profile: Record<string, unknown> | null =
-      data.expectedContent === "auto"
+      data.expectedContent === "auto" &&
+      !data.learningLanguage &&
+      !data.translationLanguage
         ? null
-        : { expected_content: data.expectedContent };
+        : {
+            ...(data.expectedContent === "auto"
+              ? {}
+              : { expected_content: data.expectedContent }),
+            ...(data.learningLanguage
+              ? { learning_language: data.learningLanguage.toLowerCase() }
+              : {}),
+            ...(data.translationLanguage
+              ? { translation_language: data.translationLanguage.toLowerCase() }
+              : {}),
+          };
     if (data.profileId) {
       const { data: profileRow, error: profileError } = await admin
         .from("import_profiles")
