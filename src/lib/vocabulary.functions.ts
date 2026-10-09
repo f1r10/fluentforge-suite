@@ -235,7 +235,7 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
             provenance: {
               ...currentProvenance,
               dictionary: data.enrichment_metadata,
-            },
+            } as never,
           }
         : {}),
     };
@@ -742,7 +742,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                   suggestion,
                   lookupWord,
                 ),
-              },
+              } as never,
               updated_at: new Date().toISOString(),
             };
 
