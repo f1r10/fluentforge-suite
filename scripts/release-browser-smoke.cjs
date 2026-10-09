@@ -96,6 +96,14 @@ async function gotoHydrated(page, path) {
     const teacherContext = await browser.newContext();
     const page = await teacherContext.newPage();
     activePage = page;
+    page.on("pageerror", (error) => {
+      console.error("[browser pageerror]", error?.stack || error?.message || String(error));
+    });
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        console.error("[browser console.error]", message.text());
+      }
+    });
     await useEnglish(page);
 
     await gotoHydrated(page, "/setup");
