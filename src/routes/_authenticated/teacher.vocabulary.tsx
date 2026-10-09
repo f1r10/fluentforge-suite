@@ -266,6 +266,7 @@ function VocabularyPage() {
             definition: editor.definition || null,
             ipa: editor.ipa || null,
             partOfSpeech: editor.part_of_speech || null,
+            level: editor.level || null,
             translations: editor.translations.filter(
               (item) => item.language.trim() && item.value.trim(),
             ),
@@ -338,6 +339,7 @@ function VocabularyPage() {
           current.part_of_speech ||
           suggestion.part_of_speech ||
           "",
+        level: current.level || suggestion.level || "",
         synonyms: mergeWords(
           current.synonyms,
           suggestion.synonyms,
@@ -353,6 +355,7 @@ function VocabularyPage() {
           model: suggestion.model,
           fetched_at: suggestion.generated_at,
           lookup_word: current.word.trim(),
+          level_estimate: suggestion.level_estimate,
           source: suggestion.source,
           pronunciations: suggestion.pronunciations,
           forms: suggestion.forms,
@@ -677,6 +680,19 @@ function VocabularyPage() {
                     <dt className="text-xs text-muted-foreground">IPA / POS</dt>
                     <dd>
                       {enrichment.ipa || "—"} · {enrichment.part_of_speech || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("level")}
+                    </dt>
+                    <dd>
+                      {enrichment.level || "—"}
+                      {enrichment.level_estimate
+                        ? ` · auto ${Math.round(
+                            enrichment.level_estimate.confidence * 100,
+                          )}%`
+                        : ""}
                     </dd>
                   </div>
                   <div>
