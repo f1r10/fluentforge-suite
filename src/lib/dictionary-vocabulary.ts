@@ -385,9 +385,12 @@ export async function fetchWiktApiVocabularySuggestion(
   const timeout = setTimeout(() => controller.abort(), 8_000);
   const language = normalizeLanguage(options.language ?? "en") || "en";
   const edition = "en";
+  const wiktApiBase = (
+    process.env["WIKTAPI_BASE_URL"] ?? "https://api.wiktapi.dev"
+  ).replace(/\/+$/, "");
   const encodedWord = encodeURIComponent(word.trim());
   const query = `?lang=${encodeURIComponent(language)}`;
-  const base = `https://api.wiktapi.dev/v1/${edition}/word/${encodedWord}`;
+  const base = `${wiktApiBase}/v1/${edition}/word/${encodedWord}`;
 
   try {
     // WiktAPI's full-entry endpoint intentionally omits POS/lang_code while
