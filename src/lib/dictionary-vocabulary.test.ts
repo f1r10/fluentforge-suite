@@ -169,6 +169,17 @@ describe("WiktAPI vocabulary enrichment", () => {
     };
 
     const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("api.datamuse.com")) {
+        return new Response(
+          JSON.stringify([
+            { word: "improve", tags: ["f:12.5"] },
+          ]),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
       expect(url).toContain("api.wiktapi.dev");
       return new Response(
         JSON.stringify(
@@ -189,8 +200,13 @@ describe("WiktAPI vocabulary enrichment", () => {
       fetcher as typeof fetch,
     );
 
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     expect(result.provider).toBe("wiktapi");
+    expect(result.level).toBe("B1");
+    expect(result.level_estimate).toMatchObject({
+      source: "Datamuse frequency heuristic",
+      frequency_per_million: 12.5,
+    });
     expect(result.part_of_speech).toBe("verb");
     expect(result.translations[0]?.value).toBe("yaxşılaşdırmaq");
   });
