@@ -116,6 +116,7 @@ function initialFilters(focus?: PracticeFocus): SelfPracticeGenerator {
     vocabulary: {
       ...emptyCommonPool,
       count: counts.vocabulary,
+      partOfSpeech: null,
       direction: "word_to_translation",
       translationLanguage: "az",
       topicIds: [],
@@ -1172,6 +1173,8 @@ function VocabularyPoolCard({
     (row) =>
       (!pool.language || row.learning_language === pool.language) &&
       (!pool.level || row.level === pool.level) &&
+      (!pool.partOfSpeech ||
+        row.part_of_speech === pool.partOfSpeech) &&
       row.translationLanguages.some(
         (language) =>
           language.toLowerCase() ===
@@ -1256,6 +1259,26 @@ function VocabularyPoolCard({
           ).map((language) => (
             <option key={language} value={language}>
               {language}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label={t("part_of_speech")}>
+        <select
+          className={selectClass}
+          value={pool.partOfSpeech ?? ""}
+          onChange={(event) =>
+            onChange({
+              ...pool,
+              partOfSpeech: event.target.value || null,
+            })
+          }
+        >
+          <option value="">{t("all")}</option>
+          {options.partsOfSpeech.map((part) => (
+            <option key={part} value={part}>
+              {part}
             </option>
           ))}
         </select>
