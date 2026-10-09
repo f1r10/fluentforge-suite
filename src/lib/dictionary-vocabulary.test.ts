@@ -152,6 +152,57 @@ describe("WiktAPI vocabulary enrichment", () => {
     expect(result.source?.license).toBe("CC BY-SA 4.0");
   });
 
+  it("classifies number words as numbers instead of incidental noun senses", () => {
+    const result = parseWiktApiVocabularyResponse(
+      {
+        entries: [
+          {
+            pos: "noun",
+            senses: [{ glosses: ["the digit 5"] }],
+            forms: [{ form: "fives", tags: ["plural"] }],
+          },
+          {
+            pos: "num",
+            senses: [{ glosses: ["the cardinal number five"] }],
+            forms: [],
+          },
+        ],
+      },
+      "five",
+      { language: "en" },
+    );
+
+    expect(result.part_of_speech).toBe("number");
+  });
+
+  it("prefers a verb entry when verb morphology provides stronger evidence", () => {
+    const result = parseWiktApiVocabularyResponse(
+      {
+        entries: [
+          {
+            pos: "noun",
+            senses: [{ glosses: ["a written work"] }],
+            forms: [{ form: "writes", tags: ["plural"] }],
+          },
+          {
+            pos: "verb",
+            senses: [{ glosses: ["to form words in writing"] }],
+            forms: [
+              { form: "writes", tags: ["third-person", "singular"] },
+              { form: "wrote", tags: ["past"] },
+              { form: "written", tags: ["participle"] },
+              { form: "writing", tags: ["present-participle"] },
+            ],
+          },
+        ],
+      },
+      "write",
+      { language: "en" },
+    );
+
+    expect(result.part_of_speech).toBe("verb");
+  });
+
   it("prefers WiktAPI before the free dictionary fallback", async () => {
     const fullResponse = {
       word: "improve",
