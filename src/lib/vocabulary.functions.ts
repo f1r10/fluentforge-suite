@@ -14,6 +14,41 @@ const exampleSchema = z.object({
   translation: z.string().max(5_000).nullable().default(null),
 });
 
+const enrichmentMetadataSchema = z.object({
+  provider: z.enum(["wiktapi", "dictionary", "local", "gemini"]),
+  model: z.string().trim().min(1).max(200),
+  fetched_at: z.string().trim().min(1).max(100),
+  lookup_word: z.string().trim().min(1).max(500),
+  source: z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      url: z.string().url().nullable().default(null),
+      license: z.string().trim().max(120).nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+  pronunciations: z
+    .array(
+      z.object({
+        ipa: z.string().max(500).nullable().default(null),
+        audio: z.string().url().nullable().default(null),
+        region: z.string().max(80).nullable().default(null),
+        tags: z.array(z.string().max(120)).max(20).default([]),
+      }),
+    )
+    .max(30)
+    .default([]),
+  forms: z
+    .array(
+      z.object({
+        form: z.string().trim().min(1).max(500),
+        tags: z.array(z.string().max(120)).max(20).default([]),
+      }),
+    )
+    .max(100)
+    .default([]),
+});
+
 const vocabularyInputSchema = z.object({
   id: z.string().uuid().optional(),
   word: z.string().trim().min(1).max(500),
@@ -30,6 +65,7 @@ const vocabularyInputSchema = z.object({
   examples: z.array(exampleSchema).max(100).default([]),
   topicIds: z.array(z.string().uuid()).max(100).default([]),
   tags: z.array(z.string().trim().min(1).max(60)).max(100).default([]),
+  enrichment_metadata: enrichmentMetadataSchema.nullable().optional(),
 });
 
 export type VocabularyInput = z.infer<typeof vocabularyInputSchema>;
@@ -97,7 +133,7 @@ export const getVocabularyEntry = createServerFn({ method: "GET" })
     const { data: row, error } = await context.supabase
       .from("vocabulary_entries")
       .select(
-        "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,level,notes,status,audio_media_id,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order),vocabulary_topics(topic_id),vocabulary_tags(tags(name))",
+        "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,level,notes,status,audio_media_id,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order),vocabulary_topics(topic_id),vocabulary_tags(tags(name))",
       )
       .eq("id", data.id)
       .is("deleted_at", null)
@@ -118,6 +154,7 @@ export const getVocabularyEntry = createServerFn({ method: "GET" })
       notes: string | null;
       status: "active" | "draft" | "archived";
       audio_media_id: string | null;
+      provenance: unknown;
       vocabulary_translations: Array<{ id: string; language: string; value: string }>;
       vocabulary_examples: Array<{ id: string; sentence: string; translation: string | null; sort_order: number }>;
       vocabulary_topics: Array<{ topic_id: string }>;
@@ -137,6 +174,13 @@ export const getVocabularyEntry = createServerFn({ method: "GET" })
       notes: typed.notes,
       status: typed.status,
       audio_media_id: typed.audio_media_id,
+      enrichment_metadata:
+        typed.provenance &&
+        typeof typed.provenance === "object" &&
+        (typed.provenance as Record<string, unknown>)["dictionary"] &&
+        typeof (typed.provenance as Record<string, unknown>)["dictionary"] === "object"
+          ? ((typed.provenance as Record<string, unknown>)["dictionary"] as Record<string, unknown>)
+          : null,
       translations: typed.vocabulary_translations.map((x) => ({ language: x.language, value: x.value })),
       examples: typed.vocabulary_examples
         .sort((a, b) => a.sort_order - b.sort_order)
@@ -161,6 +205,20 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
     const synonyms = [...new Set(data.synonyms.map((x) => x.trim()).filter(Boolean))];
     const antonyms = [...new Set(data.antonyms.map((x) => x.trim()).filter(Boolean))];
 
+    let currentProvenance: Record<string, unknown> = {};
+    if (data.id && data.enrichment_metadata) {
+      const { data: current, error: provenanceError } = await sb
+        .from("vocabulary_entries")
+        .select("provenance")
+        .eq("id", data.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (provenanceError) throw new Error(provenanceError.message);
+      if (current?.provenance && typeof current.provenance === "object") {
+        currentProvenance = current.provenance as Record<string, unknown>;
+      }
+    }
+
     const core = {
       word: data.word,
       learning_language: data.learning_language,
@@ -172,6 +230,14 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
       level: data.level || null,
       notes: data.notes || null,
       status: data.status,
+      ...(data.enrichment_metadata
+        ? {
+            provenance: {
+              ...currentProvenance,
+              dictionary: data.enrichment_metadata,
+            },
+          }
+        : {}),
     };
 
     let id = data.id;
@@ -253,7 +319,8 @@ export const getVocabularyEnrichmentStatus = createServerFn({ method: "GET" })
     return {
       ...ai,
       dictionaryFallback: true,
-      dictionaryLanguages: ["en"],
+      dictionaryLanguages: ["en", "az", "ru", "tr"],
+      dictionaryProviders: ["wiktapi", "dictionaryapi.dev"],
     };
   });
 
@@ -294,32 +361,56 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
       );
       const aiStatus = getAiProviderStatus();
       const normalizedLanguage = data.learningLanguage.toLowerCase();
+      const baseLanguage = normalizedLanguage.split("-")[0] || normalizedLanguage;
+      const targetLanguages = [
+        ...new Set(
+          data.targetLanguages
+            .map((value) => value.toLowerCase())
+            .filter((value) => value !== normalizedLanguage),
+        ),
+      ];
+
+      let dictionarySuggestion = null;
+      let dictionaryError: unknown = null;
+      try {
+        const { fetchBestDictionaryVocabularySuggestion } = await import(
+          "./dictionary-vocabulary"
+        );
+        dictionarySuggestion = await fetchBestDictionaryVocabularySuggestion(
+          data.word,
+          {
+            language: baseLanguage,
+            targetLanguages,
+          },
+        );
+      } catch (error) {
+        dictionaryError = error;
+      }
+
+      let aiSuggestion = null;
+      if (aiStatus.available) {
+        try {
+          aiSuggestion = await suggestVocabularyEnrichment({
+            word: data.word,
+            learningLanguage: data.learningLanguage,
+            targetLanguages,
+            existing: data.existing,
+          });
+        } catch (error) {
+          if (!dictionarySuggestion) throw error;
+        }
+      }
+
+      if (!dictionarySuggestion && !aiSuggestion) {
+        throw dictionaryError instanceof Error
+          ? dictionaryError
+          : new Error("No vocabulary enrichment provider returned a result.");
+      }
+
       const suggestion =
-        aiStatus.available
-          ? await suggestVocabularyEnrichment({
-              word: data.word,
-              learningLanguage: data.learningLanguage,
-              targetLanguages: [
-                ...new Set(
-                  data.targetLanguages
-                    .map((value) => value.toLowerCase())
-                    .filter(
-                      (value) => value !== normalizedLanguage,
-                    ),
-                ),
-              ],
-              existing: data.existing,
-            })
-          : normalizedLanguage === "en" ||
-              normalizedLanguage.startsWith("en-")
-            ? await (
-                await import("./dictionary-vocabulary")
-              ).fetchDictionaryVocabularySuggestion(data.word)
-            : (() => {
-                throw new Error(
-                  "Metadata suggestions require an AI provider for this language. English words can use the built-in dictionary fallback.",
-                );
-              })();
+        dictionarySuggestion && aiSuggestion
+          ? mergeVocabularySuggestions(dictionarySuggestion, aiSuggestion)
+          : (dictionarySuggestion ?? aiSuggestion)!;
 
       await audit(admin, {
         actor_type: "teacher",
@@ -332,7 +423,9 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
           model: suggestion.model,
           confidence: suggestion.confidence,
           target_languages: data.targetLanguages,
-          fallback: suggestion.provider === "dictionary",
+          fallback:
+            suggestion.provider === "dictionary" ||
+            suggestion.provider === "wiktapi",
         },
       });
 
@@ -390,4 +483,375 @@ export const trashVocabulary = createServerFn({ method: "POST" })
       .in("id", data.ids);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+
+function mergeVocabularySuggestions(
+  primary: Awaited<
+    ReturnType<
+      typeof import("./dictionary-vocabulary").fetchBestDictionaryVocabularySuggestion
+    >
+  >,
+  secondary: Awaited<
+    ReturnType<typeof import("./ai.server").suggestVocabularyEnrichment>
+  >,
+) {
+  const translationMap = new Map(
+    primary.translations.map((item) => [
+      item.language.toLowerCase(),
+      { ...item, language: item.language.toLowerCase() },
+    ]),
+  );
+  for (const item of secondary.translations) {
+    const key = item.language.toLowerCase();
+    if (!translationMap.has(key)) {
+      translationMap.set(key, { ...item, language: key });
+    }
+  }
+
+  const exampleMap = new Map(
+    primary.examples.map((item) => [
+      item.sentence.trim().toLowerCase(),
+      item,
+    ]),
+  );
+  for (const item of secondary.examples) {
+    const key = item.sentence.trim().toLowerCase();
+    if (!exampleMap.has(key)) exampleMap.set(key, item);
+  }
+
+  return {
+    ...primary,
+    definition: primary.definition ?? secondary.definition,
+    ipa: primary.ipa ?? secondary.ipa,
+    part_of_speech:
+      primary.part_of_speech ?? secondary.part_of_speech,
+    synonyms: [
+      ...new Set([...primary.synonyms, ...secondary.synonyms]),
+    ].slice(0, 30),
+    antonyms: [
+      ...new Set([...primary.antonyms, ...secondary.antonyms]),
+    ].slice(0, 30),
+    translations: [...translationMap.values()].slice(0, 20),
+    examples: [...exampleMap.values()].slice(0, 10),
+    notes: [primary.notes, secondary.notes]
+      .filter(Boolean)
+      .join(" "),
+    model: `${primary.model} + ${secondary.model}`,
+  };
+}
+
+function dictionaryMetadataFromSuggestion(
+  suggestion: Awaited<
+    ReturnType<
+      typeof import("./dictionary-vocabulary").fetchBestDictionaryVocabularySuggestion
+    >
+  >,
+  lookupWord: string,
+) {
+  return {
+    provider: suggestion.provider,
+    model: suggestion.model,
+    fetched_at: suggestion.generated_at,
+    lookup_word: lookupWord,
+    source: suggestion.source,
+    pronunciations: suggestion.pronunciations,
+    forms: suggestion.forms,
+  };
+}
+
+function cleanVocabularyLookupWord(word: string) {
+  return word
+    .replace(/^\s*(?:#\s*)?\d{1,4}(?:\s*[.)-]\s*|\s+)/, "")
+    .trim();
+}
+
+export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(50),
+        overwrite: z.boolean().default(false),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const { getAiProviderStatus, suggestVocabularyEnrichment } = await import(
+      "./ai.server"
+    );
+    const { fetchBestDictionaryVocabularySuggestion } = await import(
+      "./dictionary-vocabulary"
+    );
+    const aiStatus = getAiProviderStatus();
+
+    const [entriesResult, languagesResult] = await Promise.all([
+      admin
+        .from("vocabulary_entries")
+        .select(
+          "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order)",
+        )
+        .in("id", data.ids)
+        .is("deleted_at", null),
+      admin
+        .from("languages")
+        .select("code")
+        .eq("is_translation", true)
+        .order("sort_order"),
+    ]);
+    if (entriesResult.error) throw new Error(entriesResult.error.message);
+    if (languagesResult.error) throw new Error(languagesResult.error.message);
+
+    const targetLanguageCodes = (languagesResult.data ?? []).map((row) =>
+      String(row.code).toLowerCase(),
+    );
+    const failures: Array<{ id: string; word: string; error: string }> = [];
+    const providerCounts: Record<string, number> = {};
+    let updated = 0;
+
+    const rows = (entriesResult.data ?? []) as unknown as Array<{
+      id: string;
+      word: string;
+      learning_language: string | null;
+      definition: string | null;
+      ipa: string | null;
+      part_of_speech: string | null;
+      synonyms: string[] | null;
+      antonyms: string[] | null;
+      provenance: unknown;
+      vocabulary_translations: Array<{
+        id: string;
+        language: string;
+        value: string;
+      }>;
+      vocabulary_examples: Array<{
+        id: string;
+        sentence: string;
+        translation: string | null;
+        sort_order: number;
+      }>;
+    }>;
+
+    for (let offset = 0; offset < rows.length; offset += 4) {
+      const batch = rows.slice(offset, offset + 4);
+      const results = await Promise.all(
+        batch.map(async (row) => {
+          const lookupWord = cleanVocabularyLookupWord(row.word);
+          const learningLanguage = (
+            row.learning_language || "en"
+          ).toLowerCase();
+          const baseLanguage =
+            learningLanguage.split("-")[0] || learningLanguage;
+          const targets = targetLanguageCodes.filter(
+            (code) => code !== baseLanguage,
+          );
+
+          try {
+            let dictionarySuggestion = null;
+            let dictionaryError: unknown = null;
+            try {
+              dictionarySuggestion =
+                await fetchBestDictionaryVocabularySuggestion(
+                  lookupWord,
+                  {
+                    language: baseLanguage,
+                    targetLanguages: targets,
+                  },
+                );
+            } catch (error) {
+              dictionaryError = error;
+            }
+
+            let aiSuggestion = null;
+            const existingTranslations = row.vocabulary_translations.map(
+              (item) => ({
+                language: item.language,
+                value: item.value,
+              }),
+            );
+            if (aiStatus.available) {
+              try {
+                aiSuggestion = await suggestVocabularyEnrichment({
+                  word: lookupWord,
+                  learningLanguage,
+                  targetLanguages: targets,
+                  existing: {
+                    definition: row.definition,
+                    ipa: row.ipa,
+                    partOfSpeech: row.part_of_speech,
+                    translations: existingTranslations,
+                  },
+                });
+              } catch (error) {
+                if (!dictionarySuggestion) throw error;
+              }
+            }
+
+            if (!dictionarySuggestion && !aiSuggestion) {
+              throw dictionaryError instanceof Error
+                ? dictionaryError
+                : new Error("No enrichment provider returned a result.");
+            }
+
+            const suggestion =
+              dictionarySuggestion && aiSuggestion
+                ? mergeVocabularySuggestions(
+                    dictionarySuggestion,
+                    aiSuggestion,
+                  )
+                : (dictionarySuggestion ?? aiSuggestion)!;
+
+            const existingProvenance =
+              row.provenance && typeof row.provenance === "object"
+                ? (row.provenance as Record<string, unknown>)
+                : {};
+            const patch = {
+              ...(lookupWord !== row.word &&
+              /^\s*(?:#\s*)?\d{1,4}/.test(row.word)
+                ? { word: lookupWord }
+                : {}),
+              definition:
+                data.overwrite || !row.definition?.trim()
+                  ? suggestion.definition ?? row.definition
+                  : row.definition,
+              ipa:
+                data.overwrite || !row.ipa?.trim()
+                  ? suggestion.ipa ?? row.ipa
+                  : row.ipa,
+              part_of_speech:
+                data.overwrite || !row.part_of_speech?.trim()
+                  ? suggestion.part_of_speech ?? row.part_of_speech
+                  : row.part_of_speech,
+              synonyms: [
+                ...new Set([
+                  ...(row.synonyms ?? []),
+                  ...suggestion.synonyms,
+                ]),
+              ].slice(0, 100),
+              antonyms: [
+                ...new Set([
+                  ...(row.antonyms ?? []),
+                  ...suggestion.antonyms,
+                ]),
+              ].slice(0, 100),
+              provenance: {
+                ...existingProvenance,
+                dictionary: dictionaryMetadataFromSuggestion(
+                  suggestion,
+                  lookupWord,
+                ),
+              },
+              updated_at: new Date().toISOString(),
+            };
+
+            const { error: updateError } = await admin
+              .from("vocabulary_entries")
+              .update(patch)
+              .eq("id", row.id)
+              .is("deleted_at", null);
+            if (updateError) throw new Error(updateError.message);
+
+            const translationByLanguage = new Map(
+              row.vocabulary_translations.map((item) => [
+                item.language.toLowerCase(),
+                item,
+              ]),
+            );
+            for (const incoming of suggestion.translations) {
+              const language = incoming.language.toLowerCase();
+              const current = translationByLanguage.get(language);
+              if (current) {
+                if (
+                  data.overwrite &&
+                  incoming.value.trim() &&
+                  current.value !== incoming.value
+                ) {
+                  const { error } = await admin
+                    .from("vocabulary_translations")
+                    .update({ value: incoming.value })
+                    .eq("id", current.id);
+                  if (error) throw new Error(error.message);
+                }
+              } else if (incoming.value.trim()) {
+                const { error } = await admin
+                  .from("vocabulary_translations")
+                  .insert({
+                    entry_id: row.id,
+                    language,
+                    value: incoming.value,
+                  });
+                if (error) throw new Error(error.message);
+              }
+            }
+
+            const exampleKeys = new Set(
+              row.vocabulary_examples.map((item) =>
+                item.sentence.trim().toLowerCase(),
+              ),
+            );
+            let sortOrder =
+              row.vocabulary_examples.reduce(
+                (max, item) => Math.max(max, item.sort_order),
+                -1,
+              ) + 1;
+            for (const example of suggestion.examples) {
+              const key = example.sentence.trim().toLowerCase();
+              if (!key || exampleKeys.has(key)) continue;
+              exampleKeys.add(key);
+              const { error } = await admin
+                .from("vocabulary_examples")
+                .insert({
+                  entry_id: row.id,
+                  sentence: example.sentence,
+                  translation: example.translation || null,
+                  sort_order: sortOrder++,
+                });
+              if (error) throw new Error(error.message);
+            }
+
+            providerCounts[suggestion.provider] =
+              (providerCounts[suggestion.provider] ?? 0) + 1;
+            return true;
+          } catch (error) {
+            failures.push({
+              id: row.id,
+              word: row.word,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : String(error),
+            });
+            return false;
+          }
+        }),
+      );
+      updated += results.filter(Boolean).length;
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "vocabulary_bulk_enriched",
+      entity_type: "vocabulary",
+      summary: `Auto-filled dictionary metadata for ${updated} vocabulary entries`,
+      details: {
+        requested: data.ids.length,
+        found: rows.length,
+        updated,
+        failed: failures.length,
+        overwrite: data.overwrite,
+        providers: providerCounts,
+      },
+    });
+
+    return {
+      requested: data.ids.length,
+      found: rows.length,
+      updated,
+      failed: failures.length,
+      failures: failures.slice(0, 20),
+      providers: providerCounts,
+    };
   });
