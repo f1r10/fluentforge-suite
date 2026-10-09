@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
-from .models import DocumentImportRequest, JobCreated, JobView, PdfReportRequest, TranscriptionRequest, YouTubeImportRequest
+from .models import DocxReportRequest, DocumentImportRequest, JobCreated, JobView, PdfReportRequest, TranscriptionRequest, YouTubeImportRequest
 from .store import create_job, get_job, init_db
 from .worker import start_worker, stop_worker
 
@@ -141,6 +141,77 @@ def render_pdf_report(request: PdfReportRequest):
             headers={
                 "cache-control": "no-store",
                 "content-disposition": 'attachment; filename="report.pdf"',
+            },
+        )
+
+
+@app.post(
+    "/v1/reports/docx",
+    dependencies=[Depends(verify_key)],
+)
+def render_docx_report(request: DocxReportRequest):
+    with tempfile.TemporaryDirectory(prefix="fluentforge-docx-") as temp_dir:
+        temp_path = Path(temp_dir)
+        source_path = temp_path / "report.html"
+        source_path.write_text(request.html, encoding="utf-8")
+
+        command = [
+            "libreoffice",
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nolockcheck",
+            "--norestore",
+            "--convert-to",
+            "docx:Office Open XML Text",
+            "--outdir",
+            str(temp_path),
+            str(source_path),
+        ]
+
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=90,
+                env={
+                    **os.environ,
+                    "HOME": temp_dir,
+                },
+            )
+        except subprocess.TimeoutExpired as error:
+            raise HTTPException(
+                status_code=504,
+                detail="DOCX conversion timed out",
+            ) from error
+
+        docx_path = temp_path / "report.docx"
+        if completed.returncode != 0 or not docx_path.exists():
+            stderr = completed.stderr.decode("utf-8", errors="replace")
+            stdout = completed.stdout.decode("utf-8", errors="replace")
+            detail = (stderr or stdout or "DOCX conversion failed")[:2000]
+            raise HTTPException(status_code=500, detail=detail)
+
+        payload = docx_path.read_bytes()
+        if not payload.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=500,
+                detail="DOCX converter returned an invalid document",
+            )
+        if len(payload) > 64 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail="Rendered DOCX exceeds the 64 MB safety limit",
+            )
+
+        return Response(
+            content=payload,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "cache-control": "no-store",
+                "content-disposition": 'attachment; filename="report.docx"',
             },
         )
 
