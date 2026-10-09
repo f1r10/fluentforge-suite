@@ -221,7 +221,20 @@ function validateImportItemPayload(
       return { state: "ready", message: null };
     }
     if (itemType === "vocabulary") {
-      vocabularyImportPayloadSchema.parse(payload);
+      const parsed = vocabularyImportPayloadSchema.parse(payload);
+      const suspiciousRawRow =
+        /^\s*\d{1,4}[.)]\s+/.test(parsed.word) ||
+        /\b(noun|verb|adjective|adverb|preposition|pronoun|determiner|conjunction)\b/i.test(
+          parsed.word,
+        ) ||
+        /\b(A1|A2|B1|B2|C1|C2)\s*$/i.test(parsed.word);
+      if (suspiciousRawRow) {
+        return {
+          state: "needs_fix",
+          message:
+            "The extracted vocabulary word still looks like an unparsed source row. Review the word, part of speech, level and source sense before approving.",
+        };
+      }
       return { state: "ready", message: null };
     }
     if (itemType === "reading") {
