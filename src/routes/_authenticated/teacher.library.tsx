@@ -299,20 +299,8 @@ function CategoryDialog({
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
-      setUploadStage("idle");
     }
   }
-
-  const uploadStageLabel =
-    uploadStage === "authorizing"
-      ? "Preparing upload…"
-      : uploadStage === "uploading"
-        ? "Uploading file…"
-        : uploadStage === "finalizing"
-          ? "Verifying file…"
-          : uploadStage === "saving"
-            ? "Saving book…"
-            : null;
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
@@ -447,8 +435,20 @@ function BookDialog({
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+      setUploadStage("idle");
     }
   }
+
+  const uploadStageLabel =
+    uploadStage === "authorizing"
+      ? "Preparing upload…"
+      : uploadStage === "uploading"
+        ? "Uploading file…"
+        : uploadStage === "finalizing"
+          ? "Verifying file…"
+          : uploadStage === "saving"
+            ? "Saving book…"
+            : null;
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
