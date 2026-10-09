@@ -37,6 +37,10 @@ import {
   type CatalogSettings,
 } from "@/lib/catalog.functions";
 import { useI18n } from "@/lib/i18n";
+import { listTopics } from "@/lib/questions.functions";
+import { LEVELS, QUESTION_TYPES } from "@/lib/question-types";
+import { topicOptions } from "@/components/app/topics";
+import { useContentLanguages } from "@/lib/content-languages";
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 
@@ -51,11 +55,31 @@ const catalogsQuery = queryOptions({
   queryFn: () => listCatalogsDetailed(),
 });
 
+const topicsQuery = queryOptions({
+  queryKey: ["topics"],
+  queryFn: () => listTopics(),
+});
+
+const VOCAB_PARTS_OF_SPEECH = [
+  "noun",
+  "verb",
+  "adjective",
+  "adverb",
+  "pronoun",
+  "preposition",
+  "conjunction",
+  "determiner",
+  "interjection",
+  "modal verb",
+  "phrasal verb",
+] as const;
+
 export const Route = createFileRoute("/_authenticated/teacher/catalogs/$id")({
   loader: async ({ context, params }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(catalogQuery(params.id)),
       context.queryClient.ensureQueryData(catalogsQuery),
+      context.queryClient.ensureQueryData(topicsQuery),
     ]);
   },
   component: CatalogWorkspace,
@@ -497,18 +521,60 @@ function ContentPicker({
   onChanged: () => Promise<void>;
 }) {
   const { t } = useI18n();
+  const languages = useContentLanguages();
+  const { data: topics } = useSuspenseQuery(topicsQuery);
+  const topicOpts = topicOptions(topics);
   const [search, setSearch] = useState("");
   const [type, setType] = useState<"all" | CatalogItemType>("all");
+  const [language, setLanguage] = useState("");
+  const [level, setLevel] = useState("");
+  const [subtype, setSubtype] = useState("");
+  const [topicId, setTopicId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const { data = [], isFetching } = useQuery({
-    queryKey: ["catalog-content-search", catalogId, search, type],
-    queryFn: () => searchCatalogContent({ data: { catalogId, search, type } }),
+    queryKey: [
+      "catalog-content-search",
+      catalogId,
+      search,
+      type,
+      language,
+      level,
+      subtype,
+      topicId,
+    ],
+    queryFn: () =>
+      searchCatalogContent({
+        data: {
+          catalogId,
+          search,
+          type,
+          language,
+          level,
+          subtype,
+          topicId: topicId || null,
+        },
+      }),
   });
 
   const selectable = data.filter((row) => !row.inCatalog);
-  const selectedRows = selectable.filter((row) => selected.includes(`${row.entity_type}:${row.entity_id}`));
+  const selectedRows = selectable.filter((row) =>
+    selected.includes(`${row.entity_type}:${row.entity_id}`),
+  );
+
+  const subtypeOptions =
+    type === "question"
+      ? QUESTION_TYPES.map((item) => ({
+          value: item.id,
+          label: item.label,
+        }))
+      : type === "vocabulary"
+        ? VOCAB_PARTS_OF_SPEECH.map((value) => ({
+            value,
+            label: value,
+          }))
+        : [];
 
   async function add() {
     if (!selectedRows.length) return;
@@ -534,21 +600,115 @@ function ContentPicker({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden">
-        <DialogHeader><DialogTitle>{t("add_content")}</DialogTitle></DialogHeader>
-        <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("search")} />
+      <DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>{t("add_content")}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-[1fr_200px]">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("search")}
+              />
+            </div>
+            <select
+              className={selectClass}
+              value={type}
+              onChange={(e) => {
+                setType(e.target.value as typeof type);
+                setSubtype("");
+              }}
+            >
+              <option value="all">{t("all")}</option>
+              {CATALOG_ITEM_TYPES.map((x) => (
+                <option key={x} value={x}>
+                  {t(x)}
+                </option>
+              ))}
+            </select>
           </div>
-          <select className={selectClass} value={type} onChange={(e) => setType(e.target.value as typeof type)}>
-            <option value="all">{t("all")}</option>
-            {CATALOG_ITEM_TYPES.map((x) => <option key={x} value={x}>{t(x)}</option>)}
-          </select>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <select
+              className={selectClass}
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              <option value="">
+                {t("language")}: {t("all")}
+              </option>
+              {(languages.learning.length ? languages.learning : languages.all).map(
+                (item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ),
+              )}
+            </select>
+
+            <select
+              className={selectClass}
+              value={level}
+              onChange={(e) => setLevel(e.target.value)}
+            >
+              <option value="">
+                {t("level")}: {t("all")}
+              </option>
+              {LEVELS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className={selectClass}
+              value={topicId}
+              onChange={(e) => setTopicId(e.target.value)}
+            >
+              <option value="">
+                {t("topics")}: {t("all")}
+              </option>
+              {topicOpts.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className={selectClass}
+              value={subtype}
+              disabled={subtypeOptions.length === 0}
+              onChange={(e) => setSubtype(e.target.value)}
+            >
+              <option value="">
+                {type === "question"
+                  ? `${t("type")}: ${t("all")}`
+                  : type === "vocabulary"
+                    ? `${t("part_of_speech")}: ${t("all")}`
+                    : "—"}
+              </option>
+              {subtypeOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border">
-          {data.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{isFetching ? "…" : t("no_results")}</div>}
+          {data.length === 0 && (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              {isFetching ? "…" : t("no_results")}
+            </div>
+          )}
           <ul className="divide-y divide-border">
             {data.map((row) => {
               const key = `${row.entity_type}:${row.entity_id}`;
@@ -559,7 +719,11 @@ function ContentPicker({
                     disabled={row.inCatalog}
                     checked={row.inCatalog || selected.includes(key)}
                     onCheckedChange={(checked) =>
-                      setSelected(checked ? [...selected, key] : selected.filter((x) => x !== key))
+                      setSelected(
+                        checked
+                          ? [...selected, key]
+                          : selected.filter((x) => x !== key),
+                      )
                     }
                   />
                   <div className="min-w-0 flex-1">
@@ -571,7 +735,11 @@ function ContentPicker({
                       {row.level ? ` · ${row.level}` : ""}
                     </div>
                   </div>
-                  {row.inCatalog && <span className="text-xs text-muted-foreground">{t("already_added")}</span>}
+                  {row.inCatalog && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("already_added")}
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -579,7 +747,9 @@ function ContentPicker({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t("cancel")}</Button>
+          <Button variant="outline" onClick={onClose}>
+            {t("cancel")}
+          </Button>
           <Button onClick={add} disabled={busy || selectedRows.length === 0}>
             {t("add")} ({selectedRows.length})
           </Button>
