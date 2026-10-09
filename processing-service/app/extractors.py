@@ -501,9 +501,16 @@ def detect_candidates(
         if expected_content == "vocabulary":
             table_items: list[dict[str, Any]] = []
             for table in page.get("tables") or []:
+                rows = table.get("rows") or []
+                # PDF grid lines often make PyMuPDF split one visual word-list
+                # row across 10+ mostly empty cells. Treat those as layout,
+                # not as a spreadsheet: the native text layer preserves the
+                # complete row much more accurately.
+                if not _is_usable_vocabulary_table(rows):
+                    continue
                 table_items.extend(
                     _vocabulary_from_rows(
-                        table.get("rows") or [],
+                        rows,
                         page=page_number,
                         sheet=None,
                         profile=profile,
@@ -983,6 +990,7 @@ def _vocabulary_payload(
     ipa: str | None = None,
     part_of_speech: str | None = None,
     level: str | None = None,
+    notes: str | None = None,
     translations: list[dict[str, str]] | None = None,
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -995,12 +1003,109 @@ def _vocabulary_payload(
         "synonyms": [],
         "antonyms": [],
         "level": level or defaults["level"],
-        "notes": None,
+        "notes": notes or None,
         "status": defaults["status"],
         "translations": translations or [],
         "examples": [],
         "tags": tags or [],
     }
+
+
+def _is_usable_vocabulary_table(rows: list[list[Any]]) -> bool:
+    """Return True only when detected table cells represent real data columns.
+
+    Decorative PDF table/grid lines can produce 10-20 columns while each
+    logical row has only one non-empty fragment. Feeding that structure to the
+    spreadsheet parser truncates words and CEFR labels. Headered tables and
+    genuinely multi-column rows remain supported.
+    """
+    clean_rows = [
+        [str(cell or "").strip() for cell in row]
+        for row in rows
+        if any(str(cell or "").strip() for cell in row)
+    ]
+    if not clean_rows:
+        return False
+
+    headers = {_normalize_header(value) for value in clean_rows[0] if value}
+    if headers & VOCAB_WORD_HEADERS:
+        return True
+
+    nonempty_counts = [
+        sum(1 for cell in row if cell)
+        for row in clean_rows[:100]
+    ]
+    multi_column_rows = sum(1 for count in nonempty_counts if count >= 2)
+    max_columns = max((len(row) for row in clean_rows), default=0)
+
+    # A headerless two-column glossary is useful. A 16-column grid where 90%
+    # of rows contain a single text fragment is not.
+    if multi_column_rows >= max(2, len(nonempty_counts) // 2):
+        return True
+    if max_columns <= 3 and multi_column_rows > 0:
+        return True
+    return False
+
+
+def _parse_vocab_list_entry(
+    value: str,
+) -> tuple[str, str | None, str | None, str | None, str | None]:
+    """Parse Cambridge/Oxford-style word-list rows with optional sense labels.
+
+    Examples:
+      aboard adverb, preposition C1
+      absorb verb REMEMBER C1
+      abuse noun WRONG ACTION C1
+      Absolutely! C1
+      in accordance with sth C1
+    """
+    cleaned = _clean_vocab_word(value)
+    level: str | None = None
+    ipa: str | None = None
+    notes: str | None = None
+
+    level_match = re.search(r"\b(A1|A2|B1|B2|C1|C2)\s*$", cleaned, re.IGNORECASE)
+    if level_match:
+        level = level_match.group(1).upper()
+        cleaned = cleaned[: level_match.start()].strip()
+
+    ipa_match = re.search(r"\s(/[^/]{1,120}/)\s*", cleaned)
+    if ipa_match:
+        ipa = ipa_match.group(1)
+        cleaned = f"{cleaned[:ipa_match.start()]} {cleaned[ipa_match.end():]}".strip()
+
+    full_labels = [
+        key
+        for key in VOCAB_POS_ALIASES
+        if len(key) > 1 and key not in {"n", "v"}
+    ]
+    label_pattern = "|".join(
+        sorted((re.escape(label) for label in full_labels), key=len, reverse=True)
+    )
+    pos_match = re.search(
+        rf"\s+(?P<pos>(?:{label_pattern})(?:\s*,\s*(?:{label_pattern}))*)\b",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if pos_match:
+        head = cleaned[: pos_match.start()].strip()
+        raw_pos = pos_match.group("pos")
+        labels = [
+            VOCAB_POS_ALIASES.get(piece.strip().casefold(), piece.strip().casefold())
+            for piece in re.split(r"\s*,\s*", raw_pos)
+            if piece.strip()
+        ]
+        pos = ", ".join(dict.fromkeys(labels)) or None
+        tail = cleaned[pos_match.end() :].strip(" \t—–-:;,")
+        if tail:
+            notes = f"Source sense: {tail}"
+        return _clean_vocab_word(head), ipa, pos, level, notes
+
+    # Compact/parenthesized formats are already handled by the generic parser.
+    word, generic_ipa, pos, generic_level = _parse_vocab_head(
+        f"{cleaned} {level or ''}".strip()
+    )
+    return word, ipa or generic_ipa, pos, level or generic_level, None
 
 
 def _parse_vocab_head(
@@ -1133,13 +1238,21 @@ def _vocabulary_from_text(
         ipa: str | None = None,
         part_of_speech: str | None = None,
         level: str | None = None,
+        notes: str | None = None,
         translations: list[dict[str, str]] | None = None,
         confidence: float,
     ) -> None:
         clean = _clean_vocab_word(word)
         if not _looks_like_vocab_term(clean):
             return
-        key = clean.casefold()
+        key = "::".join(
+            [
+                clean.casefold(),
+                (part_of_speech or "").casefold(),
+                (notes or "").casefold(),
+                (definition or "").casefold(),
+            ]
+        )
         if key in seen:
             return
         seen.add(key)
@@ -1156,6 +1269,7 @@ def _vocabulary_from_text(
                     ipa=ipa,
                     part_of_speech=part_of_speech,
                     level=level,
+                    notes=notes,
                     translations=translations,
                 ),
                 "confidence": confidence,
@@ -1207,7 +1321,7 @@ def _vocabulary_from_text(
         # Recognize dictionary word-list metadata before comma-based
         # term/definition parsing. This prevents entries such as
         # "a, an indefinite article A1" from being split into a fake definition.
-        word, ipa, pos, level = _parse_vocab_head(line)
+        word, ipa, pos, level, source_note = _parse_vocab_list_entry(line)
         has_definition_separator = bool(
             re.search(r"\t+|\s+[—–-]\s+|\s*:\s+", line)
         )
@@ -1221,7 +1335,8 @@ def _vocabulary_from_text(
                 ipa=ipa,
                 part_of_speech=pos,
                 level=level,
-                confidence=0.92 if level and pos else 0.84,
+                notes=source_note,
+                confidence=0.96 if level and pos else 0.88,
             )
             continue
 
@@ -1234,7 +1349,7 @@ def _vocabulary_from_text(
             maxsplit=1,
         )
         if len(parts) == 2 and parts[0].strip() and parts[1].strip():
-            word, ipa, pos, level = _parse_vocab_head(parts[0])
+            word, ipa, pos, level, source_note = _parse_vocab_list_entry(parts[0])
             meaning = parts[1].strip()
             if (
                 _looks_like_vocab_term(word)
@@ -1248,6 +1363,7 @@ def _vocabulary_from_text(
                     ipa=ipa,
                     part_of_speech=pos,
                     level=level,
+                    notes=source_note,
                     translations=(
                         [
                             {
