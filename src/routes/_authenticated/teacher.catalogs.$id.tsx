@@ -559,6 +559,12 @@ function ContentPicker({
   });
 
   const selectable = data.filter((row) => !row.inCatalog);
+  const selectableKeys = selectable.map(
+    (row) => `${row.entity_type}:${row.entity_id}`,
+  );
+  const allVisibleSelected =
+    selectableKeys.length > 0 &&
+    selectableKeys.every((key) => selected.includes(key));
   const selectedRows = selectable.filter((row) =>
     selected.includes(`${row.entity_type}:${row.entity_id}`),
   );
@@ -700,6 +706,36 @@ function ContentPicker({
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-muted-foreground">
+            {selectable.length} {t("items").toLocaleLowerCase()}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectableKeys.length === 0}
+              onClick={() =>
+                setSelected((current) => [
+                  ...new Set([...current, ...selectableKeys]),
+                ])
+              }
+            >
+              {allVisibleSelected ? `✓ ${t("select_all")}` : t("select_all")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={selected.length === 0}
+              onClick={() => setSelected([])}
+            >
+              {t("clear")}
+            </Button>
           </div>
         </div>
 
