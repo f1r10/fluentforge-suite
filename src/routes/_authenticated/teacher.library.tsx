@@ -239,7 +239,12 @@ function TeacherLibraryPage() {
           book={bookEditor === "new" ? null : bookEditor}
           categories={categories}
           languages={languages.all}
-          defaultCategoryId={categoryId ?? categories[0]?.id ?? ""}
+          defaultCategoryId={
+            categoryId ??
+            categories.find((item) => item.system_key === "books")?.id ??
+            categories[0]?.id ??
+            ""
+          }
           onClose={() => setBookEditor(null)}
           onSaved={async () => {
             setBookEditor(null);
