@@ -224,12 +224,7 @@ export function parseWiktApiVocabularyResponse(
   );
   const definition = glosses[0] ?? null;
 
-  const partOfSpeech =
-    entries
-      .map((entry) =>
-        typeof entry.pos === "string" ? entry.pos.trim() : "",
-      )
-      .find(Boolean) ?? null;
+  const partOfSpeech = choosePrimaryPartOfSpeech(word, entries);
 
   const sounds = entries.flatMap((entry) =>
     Array.isArray(entry.sounds)
@@ -516,6 +511,10 @@ export async function fetchDictionaryVocabularySuggestion(
     const parsed = parseDictionaryVocabularyResponse(await response.json());
     return {
       ...parsed,
+      part_of_speech: normalizePartOfSpeechForWord(
+        word,
+        parsed.part_of_speech,
+      ),
       generated_at: new Date().toISOString(),
     };
   } catch (error) {
@@ -681,6 +680,142 @@ export async function fetchDatamuseCefrEstimate(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+const NUMBER_WORDS = new Set([
+  "zero","one","two","three","four","five","six","seven","eight","nine","ten",
+  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen",
+  "twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety",
+  "hundred","thousand","million","billion","trillion",
+  "first","second","third","fourth","fifth","sixth","seventh","eighth","ninth","tenth",
+  "eleventh","twelfth","thirteenth","fourteenth","fifteenth","sixteenth","seventeenth","eighteenth","nineteenth",
+  "twentieth","thirtieth","fortieth","fiftieth","sixtieth","seventieth","eightieth","ninetieth",
+  "hundredth","thousandth","millionth","billionth",
+]);
+
+const POS_ALIASES: Record<string, string> = {
+  adj: "adjective",
+  adjective: "adjective",
+  adv: "adverb",
+  adverb: "adverb",
+  noun: "noun",
+  verb: "verb",
+  pron: "pronoun",
+  pronoun: "pronoun",
+  det: "determiner",
+  determiner: "determiner",
+  prep: "preposition",
+  preposition: "preposition",
+  conj: "conjunction",
+  conjunction: "conjunction",
+  interj: "interjection",
+  interjection: "interjection",
+  num: "number",
+  numeral: "number",
+  number: "number",
+  "proper-noun": "proper noun",
+  "proper noun": "proper noun",
+  particle: "particle",
+  phrase: "phrase",
+};
+
+function normalizePartOfSpeech(value: string | null | undefined) {
+  if (!value) return null;
+  const cleaned = value.trim().toLowerCase().replace(/_/g, "-");
+  return POS_ALIASES[cleaned] ?? cleaned.replace(/-/g, " ");
+}
+
+function normalizePartOfSpeechForWord(
+  word: string,
+  value: string | null | undefined,
+) {
+  const cleanedWord = word.trim().toLowerCase();
+  if (
+    /^\d+(?:[.,]\d+)?$/.test(cleanedWord) ||
+    NUMBER_WORDS.has(cleanedWord)
+  ) {
+    return "number";
+  }
+  return normalizePartOfSpeech(value);
+}
+
+function entryFormTags(entry: WiktEntry) {
+  return Array.isArray(entry.forms)
+    ? entry.forms.flatMap((form) => {
+        if (!form || typeof form !== "object") return [];
+        const row = form as Record<string, unknown>;
+        return Array.isArray(row["tags"])
+          ? row["tags"].filter(
+              (tag): tag is string => typeof tag === "string",
+            )
+          : [];
+      })
+    : [];
+}
+
+function choosePrimaryPartOfSpeech(word: string, entries: WiktEntry[]) {
+  const cleanedWord = word.trim().toLowerCase();
+  if (
+    /^\d+(?:[.,]\d+)?$/.test(cleanedWord) ||
+    NUMBER_WORDS.has(cleanedWord)
+  ) {
+    return "number";
+  }
+
+  const candidates = entries
+    .map((entry, index) => {
+      const pos =
+        typeof entry.pos === "string"
+          ? normalizePartOfSpeech(entry.pos)
+          : null;
+      if (!pos) return null;
+
+      const tags = entryFormTags(entry).map((tag) => tag.toLowerCase());
+      let score = 100 - index;
+
+      if (
+        pos === "verb" &&
+        tags.some((tag) =>
+          [
+            "past",
+            "past-tense",
+            "participle",
+            "present-participle",
+            "third-person",
+            "singular",
+            "gerund",
+            "infinitive",
+          ].includes(tag),
+        )
+      ) {
+        score += 120;
+      }
+
+      if (
+        pos === "adjective" &&
+        tags.some((tag) =>
+          ["comparative", "superlative"].includes(tag),
+        )
+      ) {
+        score += 80;
+      }
+
+      if (
+        pos === "noun" &&
+        tags.some((tag) => ["plural"].includes(tag))
+      ) {
+        score += 35;
+      }
+
+      return { pos, score };
+    })
+    .filter(
+      (item): item is { pos: string; score: number } => item != null,
+    );
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]!.pos;
 }
 
 function normalizeLanguage(value: string) {
