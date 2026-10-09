@@ -65,6 +65,38 @@ async function syncTopics(
   if (error) throw new Error(error.message);
 }
 
+async function syncContextQuestionStatus(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  kind: "reading" | "listening",
+  ownerId: string,
+  status: "active" | "draft" | "archived",
+) {
+  const setTable =
+    kind === "reading" ? "reading_question_sets" : "listening_question_sets";
+  const ownerColumn = kind === "reading" ? "reading_id" : "listening_id";
+  const questionSetColumn =
+    kind === "reading"
+      ? "reading_question_set_id"
+      : "listening_question_set_id";
+
+  const { data: sets, error: setError } = await sb
+    .from(setTable)
+    .select("id")
+    .eq(ownerColumn, ownerId);
+  if (setError) throw new Error(setError.message);
+  const setIds = (sets ?? []).map((row: { id: string }) => row.id);
+  if (!setIds.length) return;
+
+  const { error } = await sb
+    .from("questions")
+    .update({ status })
+    .in(questionSetColumn, setIds)
+    .is("deleted_at", null);
+  if (error) throw new Error(error.message);
+}
+
+
 // -------------------- Readings --------------------
 
 export const listReadings = createServerFn({ method: "GET" })
@@ -190,6 +222,12 @@ export const saveReading = createServerFn({ method: "POST" })
 
     await syncTopics(context.supabase, "reading_topics", "reading_id", id, topicIds);
     await syncTags(context.supabase, "reading_tags", "reading_id", id, tags);
+    await syncContextQuestionStatus(
+      context.supabase,
+      "reading",
+      id,
+      input.status,
+    );
 
     const { adminClient, audit } = await import("./security.server");
     await audit(await adminClient(), {
@@ -429,6 +467,12 @@ export const saveListening = createServerFn({ method: "POST" })
 
     await syncTopics(context.supabase, "listening_topics", "listening_id", id, topicIds);
     await syncTags(context.supabase, "listening_tags", "listening_id", id, tags);
+    await syncContextQuestionStatus(
+      context.supabase,
+      "listening",
+      id,
+      input.status,
+    );
 
     const { adminClient, audit } = await import("./security.server");
     await audit(await adminClient(), {
