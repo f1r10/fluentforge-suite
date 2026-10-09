@@ -955,6 +955,12 @@ async function gotoHydrated(page, path) {
       .getByText("Correct", { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] student vocabulary answer checking and part-of-speech filter work");
+    await studentPage
+      .getByRole("button", { name: "New practice", exact: true })
+      .click();
+    await studentPage
+      .getByText("Session mode", { exact: true })
+      .waitFor({ timeout: 20000 });
 
     await gotoHydrated(studentPage, "/student/practice");
     const sessionModeField = studentPage
