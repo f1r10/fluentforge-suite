@@ -528,7 +528,7 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
           .neq("status", "archived")
           .eq("context_kind", "none")
           .order("updated_at", { ascending: false })
-          .limit(data.type === "all" ? 12 : 80);
+          .limit(data.type === "all" ? 12 : 500);
         if (safe) q = q.ilike("prompt", `%${safe}%`);
         if (data.language) q = q.eq("learning_language", data.language);
         if (data.level) q = q.eq("level", data.level);
@@ -562,7 +562,7 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
           .is("deleted_at", null)
           .neq("status", "archived")
           .order("updated_at", { ascending: false })
-          .limit(data.type === "all" ? 12 : 80);
+          .limit(data.type === "all" ? 12 : 500);
         if (safe) q = q.ilike("word", `%${safe}%`);
         if (data.language) q = q.eq("learning_language", data.language);
         if (data.level) q = q.eq("level", data.level);
@@ -596,7 +596,7 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
           .is("deleted_at", null)
           .neq("status", "archived")
           .order("updated_at", { ascending: false })
-          .limit(data.type === "all" ? 12 : 80);
+          .limit(data.type === "all" ? 12 : 500);
         if (safe) q = q.ilike("title", `%${safe}%`);
         if (data.language) q = q.eq("learning_language", data.language);
         if (data.level) q = q.eq("level", data.level);
@@ -627,7 +627,7 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
           .is("deleted_at", null)
           .neq("status", "archived")
           .order("updated_at", { ascending: false })
-          .limit(data.type === "all" ? 12 : 80);
+          .limit(data.type === "all" ? 12 : 500);
         if (safe) q = q.ilike("title", `%${safe}%`);
         if (data.language) q = q.eq("learning_language", data.language);
         if (data.level) q = q.eq("level", data.level);
