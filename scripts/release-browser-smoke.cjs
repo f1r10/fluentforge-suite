@@ -896,6 +896,43 @@ async function gotoHydrated(page, path) {
       console.log("[ok] student learning area: " + path);
     }
 
+    await gotoHydrated(studentPage, "/student/word-search");
+    await studentPage
+      .getByPlaceholder(
+        "Type a word to see detailed dictionary information.",
+        { exact: true },
+      )
+      .fill("releaseword");
+    await studentPage
+      .getByRole("button", { name: "Search word", exact: true })
+      .click();
+    await studentPage
+      .getByRole("heading", { name: "releaseword", level: 2 })
+      .waitFor({ timeout: 30000 });
+    await studentPage
+      .getByText("a word imported during release testing", {
+        exact: true,
+      })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByRole("button", {
+        name: "Add to my dictionary",
+        exact: true,
+      })
+      .click();
+    await studentPage
+      .getByRole("button", {
+        name: "Update saved word",
+        exact: true,
+      })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByRole("heading", { name: "My dictionary", level: 2 })
+      .locator("xpath=..")
+      .getByText("1 items", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] student searched a detailed word and saved it to the private dictionary");
+
     await gotoHydrated(studentPage, "/student/questions");
     await studentPage
       .getByText("Runtime PDF import works?", { exact: true })
