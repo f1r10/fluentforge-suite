@@ -1196,6 +1196,24 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
           antonyms,
           level: raw.level || null,
           notes: raw.notes || null,
+          source_file_id: job.source_file_id,
+          provenance: {
+            import: {
+              job_id: job.id,
+              import_item_id: item.id,
+              page: item.page ?? null,
+              sheet: item.sheet ?? null,
+              confidence: item.confidence ?? null,
+              original: {
+                word: raw.word,
+                definition: raw.definition || null,
+                ipa: raw.ipa || null,
+                part_of_speech: raw.part_of_speech || null,
+                level: raw.level || null,
+                notes: raw.notes || null,
+              },
+            },
+          } as never,
           status: raw.status,
         })
         .select("id")
