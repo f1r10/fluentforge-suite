@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { listTopics } from "@/lib/questions.functions";
 import {
+  autoFillMissingVocabularyLevels,
   bulkEnrichVocabulary,
   getVocabularyEntry,
   getVocabularyEnrichmentStatus,
@@ -108,6 +109,7 @@ function VocabularyPage() {
   const [busyEditor, setBusyEditor] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [bulkEnriching, setBulkEnriching] = useState(false);
+  const [fillingLevels, setFillingLevels] = useState(false);
   const [enrichment, setEnrichment] = useState<
     Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
   >(null);
@@ -365,6 +367,21 @@ function VocabularyPage() {
     toast.success(t("enrichment_applied"));
   }
 
+  async function fillMissingLevels() {
+    setFillingLevels(true);
+    try {
+      const result = await autoFillMissingVocabularyLevels();
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      toast.success(t("levels_filled"), {
+        description: `${result.updated} / ${result.candidates}`,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFillingLevels(false);
+    }
+  }
+
   async function bulkEnrich() {
     if (!selected.length) return;
     setBulkEnriching(true);
@@ -423,6 +440,14 @@ function VocabularyPage() {
           <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={fillingLevels}
+            onClick={() => void fillMissingLevels()}
+          >
+            <Sparkles className="h-4 w-4" />
+            {fillingLevels ? t("generating") : t("auto_fill_levels")}
+          </Button>
           <Button variant="outline" asChild>
             <Link to="/teacher/sources" search={{ target: "vocabulary" }}>
               <FileUp className="h-4 w-4" />
