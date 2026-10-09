@@ -224,6 +224,7 @@ export const saveExam = createServerFn({ method: "POST" })
   .inputValidator((d) => examInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
 
     const core = {
       title: data.title,
@@ -234,16 +235,19 @@ export const saveExam = createServerFn({ method: "POST" })
       settings: data.settings,
     };
 
+    // requireTeacher has already authenticated and authorized the caller.
+    // Use the trusted server client for this multi-step write so exam creation
+    // is not dependent on user-scoped PostgREST/RLS role propagation.
     if (data.id) {
-      await ensureDraftExam(context.supabase, data.id);
-      const { error } = await context.supabase
+      await ensureDraftExam(admin, data.id);
+      const { error } = await admin
         .from("exams")
         .update(core as never)
         .eq("id", data.id)
         .eq("status", "draft");
       if (error) throw new Error(error.message);
 
-      await audit(await adminClient(), {
+      await audit(admin, {
         actor_type: "teacher",
         actor_id: context.userId,
         action: "exam_updated",
@@ -254,25 +258,29 @@ export const saveExam = createServerFn({ method: "POST" })
       return { id: data.id };
     }
 
-    const { data: created, error } = await context.supabase
+    const { data: created, error } = await admin
       .from("exams")
       .insert({ ...core, status: "draft" } as never)
       .select("id")
       .single();
-    if (error || !created) throw new Error(error?.message ?? "Could not create exam.");
+    if (error || !created) {
+      throw new Error(error?.message ?? "Could not create exam.");
+    }
 
-    const { error: sectionError } = await context.supabase.from("exam_sections").insert({
-      exam_id: created.id,
-      title: "Section 1",
-      sort_order: 0,
-      pool_rules: { enabled: false, pools: [] },
-    } as never);
+    const { error: sectionError } = await admin
+      .from("exam_sections")
+      .insert({
+        exam_id: created.id,
+        title: "Section 1",
+        sort_order: 0,
+        pool_rules: { enabled: false, pools: [] },
+      } as never);
     if (sectionError) {
-      await context.supabase.from("exams").delete().eq("id", created.id);
+      await admin.from("exams").delete().eq("id", created.id);
       throw new Error(sectionError.message);
     }
 
-    await audit(await adminClient(), {
+    await audit(admin, {
       actor_type: "teacher",
       actor_id: context.userId,
       action: "exam_created",
