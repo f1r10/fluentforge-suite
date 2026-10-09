@@ -41,6 +41,7 @@ const questionPoolSchema = commonPoolSchema.extend({
 
 const vocabularyPoolSchema = commonPoolSchema.extend({
   count: z.number().int().min(0).max(100).default(0),
+  partOfSpeech: z.string().trim().max(100).nullable().default(null),
   direction: z
     .enum(["word_to_translation", "translation_to_word", "mixed"])
     .default("word_to_translation"),
@@ -603,6 +604,13 @@ export const getSelfPracticeOptions = createServerFn({ method: "GET" })
         id: type.id,
         label: type.label,
       })),
+      partsOfSpeech: [
+        ...new Set(
+          vocabulary
+            .map((row) => row.part_of_speech)
+            .filter((value): value is string => !!value),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
       questions: withCatalogs("question", questionsResult.data ?? []),
       vocabulary,
       readings: withCatalogs("reading", readingsResult.data ?? []),
@@ -871,6 +879,9 @@ async function selectVocabularyPracticeItems(
 
   if (pool.language) query = query.eq("learning_language", pool.language);
   if (pool.level) query = query.eq("level", pool.level);
+  if (pool.partOfSpeech) {
+    query = query.eq("part_of_speech", pool.partOfSpeech);
+  }
   if (allowedIds) query = query.in("id", allowedIds);
 
   const { data, error } = await query;
