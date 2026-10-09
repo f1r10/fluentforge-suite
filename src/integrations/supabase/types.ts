@@ -2095,6 +2095,60 @@ export type Database = {
           },
         ]
       }
+      student_review_schedules: {
+        Row: {
+          due_at: string
+          entity_id: string
+          entity_type: string
+          interval_days: number
+          lapses: number
+          last_event_id: number | null
+          last_reviewed_at: string | null
+          step: number
+          student_id: string
+          updated_at: string
+        }
+        Insert: {
+          due_at?: string
+          entity_id: string
+          entity_type: string
+          interval_days?: number
+          lapses?: number
+          last_event_id?: number | null
+          last_reviewed_at?: string | null
+          step?: number
+          student_id: string
+          updated_at?: string
+        }
+        Update: {
+          due_at?: string
+          entity_id?: string
+          entity_type?: string
+          interval_days?: number
+          lapses?: number
+          last_event_id?: number | null
+          last_reviewed_at?: string | null
+          step?: number
+          student_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_review_schedules_last_event_id_fkey"
+            columns: ["last_event_id"]
+            isOneToOne: false
+            referencedRelation: "activity_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_review_schedules_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_vocabulary_state: {
         Row: {
           student_id: string
@@ -2710,6 +2764,10 @@ export type Database = {
     }
     Functions: {
       current_student_id: { Args: never; Returns: string }
+      record_review_from_event: {
+        Args: { p_event_id: number }
+        Returns: undefined
+      }
       claim_scheduled_backup: {
         Args: { p_interval_hours: number }
         Returns: string | null
