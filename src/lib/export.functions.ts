@@ -1,26 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireTeacher } from "./teacher-middleware";
+import {
+  EXPORT_FORMATS,
+  EXPORT_KINDS,
+  isExportFormatAllowed,
+  type ExportFormat,
+  type ExportKind,
+} from "./export-formats";
+
+export { EXPORT_FORMATS, EXPORT_KINDS };
+export type { ExportFormat, ExportKind };
 
 const EXPORT_BUCKET = "exports";
 const PAGE_SIZE = 1000;
-
-export const EXPORT_KINDS = [
-  "questions",
-  "vocabulary",
-  "readings",
-  "listenings",
-  "catalogs",
-  "exams",
-  "activity",
-  "results",
-  "students",
-  "analytics",
-  "content_package",
-] as const;
-
-export type ExportKind = (typeof EXPORT_KINDS)[number];
-export type ExportFormat = "json" | "xlsx" | "csv" | "pdf";
 
 type TableSpec = {
   key: string;
@@ -31,7 +24,7 @@ type TableSpec = {
 };
 
 const kindSchema = z.enum(EXPORT_KINDS);
-const formatSchema = z.enum(["json", "xlsx", "csv", "pdf"]);
+const formatSchema = z.enum(["json", "xlsx", "csv", "pdf", "docx"]);
 
 const TABLES: Record<ExportKind, TableSpec[]> = {
   questions: [
@@ -147,19 +140,6 @@ const TABLES: Record<ExportKind, TableSpec[]> = {
   ],
 };
 
-const PRIMARY_CSV_TABLE: Partial<Record<ExportKind, string>> = {
-  questions: "questions",
-  vocabulary: "vocabulary_entries",
-  readings: "readings",
-  listenings: "listenings",
-  catalogs: "catalogs",
-  exams: "exams",
-  activity: "activity_events",
-  results: "exam_attempts",
-  students: "students",
-  analytics: "student_analytics",
-};
-
 export const listExports = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
@@ -188,16 +168,9 @@ export const createExport = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    if (data.format === "csv" && !PRIMARY_CSV_TABLE[data.kind]) {
-      throw new Error("CSV is not available for this export package.");
-    }
-    if (
-      data.format === "pdf" &&
-      data.kind !== "analytics" &&
-      data.kind !== "questions"
-    ) {
+    if (!isExportFormatAllowed(data.kind, data.format)) {
       throw new Error(
-        "PDF is currently available for Question Bank and Analytics exports.",
+        `${data.format.toUpperCase()} is not available for ${data.kind} exports.`,
       );
     }
 
