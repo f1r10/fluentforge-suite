@@ -294,8 +294,20 @@ function CategoryDialog({
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+      setUploadStage("idle");
     }
   }
+
+  const uploadStageLabel =
+    uploadStage === "authorizing"
+      ? "Preparing upload…"
+      : uploadStage === "uploading"
+        ? "Uploading file…"
+        : uploadStage === "finalizing"
+          ? "Verifying file…"
+          : uploadStage === "saving"
+            ? "Saving book…"
+            : null;
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
@@ -348,10 +360,14 @@ function BookDialog({
   const [allowDownload, setAllowDownload] = useState(book?.allow_download ?? true);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadStage, setUploadStage] = useState<
+    "idle" | "authorizing" | "uploading" | "finalizing" | "saving"
+  >("idle");
 
   const existingMedia = book?.media_assets as unknown as { original_filename: string | null } | null;
 
   async function upload(fileValue: File) {
+    setUploadStage("authorizing");
     const session = await createMediaUploadSession({
       data: {
         filename: fileValue.name,
@@ -362,17 +378,28 @@ function BookDialog({
     if (!["document", "other"].includes(session.kind)) {
       throw new Error(t("library_document_required"));
     }
+
+    setUploadStage("uploading");
     const { error } = await supabase.storage
       .from(session.bucket)
       .uploadToSignedUrl(session.path, session.token, fileValue, {
         contentType: fileValue.type || "application/octet-stream",
         upsert: false,
       });
-    if (error) throw error;
+    if (error) {
+      throw new Error(`File upload failed: ${error.message}`);
+    }
+
+    setUploadStage("finalizing");
+    const checksum =
+      fileValue.size <= 50 * 1024 * 1024
+        ? await sha256LibraryFile(fileValue).catch(() => null)
+        : null;
+
     return await finalizeMediaUpload({
       data: {
         sessionId: session.sessionId,
-        checksum: null,
+        checksum,
         durationSeconds: null,
         width: null,
         height: null,
@@ -394,6 +421,7 @@ function BookDialog({
         const result = await upload(file);
         mediaId = result.id;
       }
+      setUploadStage("saving");
       await saveLibraryBook({
         data: {
           id: book?.id,
@@ -456,15 +484,38 @@ function BookDialog({
               ref={inputRef}
               type="file"
               className="hidden"
-              accept=".pdf,.epub,.doc,.docx,.ppt,.pptx,.txt,.rtf"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              accept=".pdf,.epub,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.rtf"
+              onChange={(event) => {
+                const next = event.target.files?.[0] ?? null;
+                setFile(next);
+                if (next && !title.trim()) {
+                  setTitle(
+                    next.name
+                      .replace(/\.[^.]+$/, "")
+                      .replace(/[_-]+/g, " ")
+                      .trim(),
+                  );
+                }
+              }}
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 text-sm">
                 <div className="font-medium">{file?.name ?? existingMedia?.original_filename ?? t("no_file_selected")}</div>
-                <div className="text-xs text-muted-foreground">{t("library_file_formats")}</div>
+                <div className="text-xs text-muted-foreground">
+                  {t("library_file_formats")} · max 500 MB
+                </div>
+                {uploadStageLabel && (
+                  <div className="mt-1 text-xs font-medium text-foreground">
+                    {uploadStageLabel}
+                  </div>
+                )}
               </div>
-              <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => inputRef.current?.click()}
+              >
                 <FileUp className="h-4 w-4" />
                 {book ? t("replace_file") : t("choose_file")}
               </Button>
@@ -493,4 +544,12 @@ function categoryLabel(category: Pick<Category, "system_key" | "name">, t: (key:
   const key = "library_section_" + category.system_key;
   const translated = t(key);
   return translated === key ? category.name : translated;
+}
+
+
+async function sha256LibraryFile(file: File) {
+  const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
