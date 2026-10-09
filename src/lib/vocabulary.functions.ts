@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireTeacher } from "./teacher-middleware";
+import { choosePartOfSpeechRepair } from "./vocabulary-part-of-speech";
 
 const PAGE_SIZE = 50;
 
@@ -741,12 +742,39 @@ export const repairVocabularyPartOfSpeech = createServerFn({
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
 
-    const { data: rows, error } = await admin
-      .from("vocabulary_entries")
-      .select("id,word,learning_language,part_of_speech,provenance")
-      .in("id", data.ids)
-      .is("deleted_at", null);
-    if (error) throw new Error(error.message);
+    const [entriesResult, importsResult] = await Promise.all([
+      admin
+        .from("vocabulary_entries")
+        .select("id,word,learning_language,part_of_speech,provenance")
+        .in("id", data.ids)
+        .is("deleted_at", null),
+      admin
+        .from("import_items")
+        .select("created_entity_id,payload,created_at")
+        .eq("item_type", "vocabulary")
+        .in("created_entity_id", data.ids)
+        .order("created_at", { ascending: false }),
+    ]);
+    if (entriesResult.error) throw new Error(entriesResult.error.message);
+    if (importsResult.error) throw new Error(importsResult.error.message);
+
+    const originalImportPartOfSpeech = new Map<string, string | null>();
+    for (const item of importsResult.data ?? []) {
+      const entityId =
+        typeof item.created_entity_id === "string"
+          ? item.created_entity_id
+          : "";
+      if (!entityId || originalImportPartOfSpeech.has(entityId)) continue;
+      const payload =
+        item.payload && typeof item.payload === "object"
+          ? (item.payload as Record<string, unknown>)
+          : {};
+      const value =
+        typeof payload["part_of_speech"] === "string"
+          ? payload["part_of_speech"].trim() || null
+          : null;
+      originalImportPartOfSpeech.set(entityId, value);
+    }
 
     const failures: Array<{
       id: string;
@@ -757,46 +785,119 @@ export const repairVocabularyPartOfSpeech = createServerFn({
       id: string;
       word: string;
       before: string | null;
-      after: string;
+      after: string | null;
+      reason:
+        | "restore_previous"
+        | "restore_import"
+        | "fill_missing_import"
+        | "fill_missing_dictionary";
     }> = [];
 
-    for (let offset = 0; offset < (rows ?? []).length; offset += 4) {
-      const batch = (rows ?? []).slice(offset, offset + 4);
+    for (let offset = 0; offset < (entriesResult.data ?? []).length; offset += 4) {
+      const batch = (entriesResult.data ?? []).slice(offset, offset + 4);
       await Promise.all(
         batch.map(async (row) => {
           try {
-            const language = (row.learning_language || "en")
-              .toLowerCase()
-              .split("-")[0] || "en";
-            const resolved = await resolveStoredVocabularyDictionary(
-              row.word,
-              language,
-              [],
-            );
-            const next = resolved.suggestion.part_of_speech?.trim() || null;
-            if (!next || next === row.part_of_speech) return;
-
             const provenance =
               row.provenance && typeof row.provenance === "object"
                 ? (row.provenance as Record<string, unknown>)
                 : {};
+            const dictionary =
+              provenance["dictionary"] &&
+              typeof provenance["dictionary"] === "object"
+                ? (provenance["dictionary"] as Record<string, unknown>)
+                : {};
+            const previousWasRecorded =
+              typeof dictionary["part_of_speech_repaired_at"] === "string" &&
+              !dictionary["part_of_speech_repair_rolled_back_at"] &&
+              Object.prototype.hasOwnProperty.call(
+                dictionary,
+                "previous_part_of_speech",
+              );
+            const previousBeforeRepair =
+              typeof dictionary["previous_part_of_speech"] === "string"
+                ? dictionary["previous_part_of_speech"]
+                : null;
+            const imported =
+              originalImportPartOfSpeech.get(row.id) ?? null;
 
-            const { error: updateError } = await admin
-              .from("vocabulary_entries")
-              .update({
-                part_of_speech: next,
-                provenance: {
-                  ...provenance,
-                  dictionary: {
+            let decision = choosePartOfSpeechRepair({
+              current: row.part_of_speech,
+              imported,
+              dictionary: null,
+              previousBeforeRepair,
+              previousWasRecorded,
+            });
+            let resolved:
+              | Awaited<ReturnType<typeof resolveStoredVocabularyDictionary>>
+              | null = null;
+
+            // Dictionary lookup is a fallback for missing metadata only.
+            // It must never replace a non-empty teacher/import value.
+            if (
+              !decision &&
+              !row.part_of_speech?.trim() &&
+              !previousWasRecorded &&
+              !imported
+            ) {
+              const language =
+                (row.learning_language || "en")
+                  .toLowerCase()
+                  .split("-")[0] || "en";
+              resolved = await resolveStoredVocabularyDictionary(
+                row.word,
+                language,
+                [],
+              );
+              decision = choosePartOfSpeechRepair({
+                current: row.part_of_speech,
+                imported,
+                dictionary: resolved.suggestion.part_of_speech,
+                previousBeforeRepair,
+                previousWasRecorded,
+              });
+            }
+
+            if (!decision || decision.value === row.part_of_speech) return;
+
+            const now = new Date().toISOString();
+            const dictionaryPatch =
+              decision.reason === "fill_missing_dictionary" && resolved
+                ? {
+                    ...dictionary,
                     ...dictionaryMetadataFromSuggestion(
                       resolved.suggestion,
                       resolved.lookupWord,
                     ),
-                    part_of_speech_repaired_at: new Date().toISOString(),
-                    previous_part_of_speech: row.part_of_speech,
-                  },
+                    part_of_speech_filled_at: now,
+                    part_of_speech_fill_source: "dictionary",
+                  }
+                : {
+                    ...dictionary,
+                    ...(decision.reason === "restore_previous"
+                      ? {
+                          part_of_speech_repair_rolled_back_at: now,
+                          part_of_speech_restored_at: now,
+                          part_of_speech_restore_source: "previous_value",
+                        }
+                      : decision.reason === "fill_missing_import" ||
+                          decision.reason === "restore_import"
+                        ? {
+                            part_of_speech_restored_at: now,
+                            part_of_speech_restore_source: "import_payload",
+                          }
+                        : {}),
+                  };
+
+            const { error: updateError } = await admin
+              .from("vocabulary_entries")
+              .update({
+                part_of_speech: decision.value,
+                provenance: {
+                  ...provenance,
+                  dictionary: dictionaryPatch,
                 } as never,
-                updated_at: new Date().toISOString(),
+                updated_at: now,
               })
               .eq("id", row.id)
               .is("deleted_at", null);
@@ -806,7 +907,8 @@ export const repairVocabularyPartOfSpeech = createServerFn({
               id: row.id,
               word: row.word,
               before: row.part_of_speech,
-              after: next,
+              after: decision.value,
+              reason: decision.reason,
             });
           } catch (repairError) {
             failures.push({
@@ -827,11 +929,22 @@ export const repairVocabularyPartOfSpeech = createServerFn({
       actor_id: context.userId,
       action: "vocabulary_part_of_speech_repaired",
       entity_type: "vocabulary",
-      summary: `Rechecked part of speech for ${data.ids.length} vocabulary entries`,
+      summary: `Safely repaired part of speech for ${changes.length} vocabulary entries`,
       details: {
         requested: data.ids.length,
         changed: changes.length,
         failed: failures.length,
+        restored_previous: changes.filter(
+          (item) => item.reason === "restore_previous",
+        ).length,
+        restored_or_filled_from_import: changes.filter(
+          (item) =>
+            item.reason === "restore_import" ||
+            item.reason === "fill_missing_import",
+        ).length,
+        filled_from_dictionary: changes.filter(
+          (item) => item.reason === "fill_missing_dictionary",
+        ).length,
         changes: changes.slice(0, 100),
       },
     });
