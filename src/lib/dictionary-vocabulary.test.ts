@@ -175,15 +175,53 @@ describe("WiktAPI vocabulary enrichment", () => {
     expect(result.part_of_speech).toBe("number");
   });
 
-  it("prefers a verb entry when verb morphology provides stronger evidence", () => {
-    const result = parseWiktApiVocabularyResponse(
+  it("preserves dictionary sense order instead of promoting a secondary verb", () => {
+    const apple = parseWiktApiVocabularyResponse(
       {
         entries: [
           {
             pos: "noun",
-            senses: [{ glosses: ["a written work"] }],
-            forms: [{ form: "writes", tags: ["plural"] }],
+            senses: [{ glosses: ["a round fruit"] }],
+            forms: [{ form: "apples", tags: ["plural"] }],
           },
+          {
+            pos: "verb",
+            senses: [{ glosses: ["to make apple-like"] }],
+            forms: [
+              { form: "apples", tags: ["third-person", "singular"] },
+              { form: "appled", tags: ["past"] },
+              { form: "appling", tags: ["present-participle"] },
+            ],
+          },
+        ],
+      },
+      "apple",
+      { language: "en" },
+    );
+    const bad = parseWiktApiVocabularyResponse(
+      {
+        entries: [
+          {
+            pos: "adjective",
+            senses: [{ glosses: ["not good"] }],
+            forms: [],
+          },
+          {
+            pos: "verb",
+            senses: [{ glosses: ["a rare secondary verb sense"] }],
+            forms: [
+              { form: "bads", tags: ["third-person", "singular"] },
+              { form: "badded", tags: ["past"] },
+            ],
+          },
+        ],
+      },
+      "bad",
+      { language: "en" },
+    );
+    const write = parseWiktApiVocabularyResponse(
+      {
+        entries: [
           {
             pos: "verb",
             senses: [{ glosses: ["to form words in writing"] }],
@@ -191,8 +229,12 @@ describe("WiktAPI vocabulary enrichment", () => {
               { form: "writes", tags: ["third-person", "singular"] },
               { form: "wrote", tags: ["past"] },
               { form: "written", tags: ["participle"] },
-              { form: "writing", tags: ["present-participle"] },
             ],
+          },
+          {
+            pos: "noun",
+            senses: [{ glosses: ["a computing write operation"] }],
+            forms: [{ form: "writes", tags: ["plural"] }],
           },
         ],
       },
@@ -200,7 +242,9 @@ describe("WiktAPI vocabulary enrichment", () => {
       { language: "en" },
     );
 
-    expect(result.part_of_speech).toBe("verb");
+    expect(apple.part_of_speech).toBe("noun");
+    expect(bad.part_of_speech).toBe("adjective");
+    expect(write.part_of_speech).toBe("verb");
   });
 
   it("prefers WiktAPI before the free dictionary fallback", async () => {
