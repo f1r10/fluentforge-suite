@@ -15,6 +15,7 @@ import {
   bulkEnrichVocabulary,
   getVocabularyEntry,
   getVocabularyEnrichmentStatus,
+  repairVocabularyPartOfSpeech,
   listVocabulary,
   saveVocabularyEntry,
   setVocabularyStatus,
@@ -112,6 +113,7 @@ function VocabularyPage() {
   const [busyEditor, setBusyEditor] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [bulkEnriching, setBulkEnriching] = useState(false);
+  const [repairingPartOfSpeech, setRepairingPartOfSpeech] = useState(false);
   const [fillingLevels, setFillingLevels] = useState(false);
   const [enrichment, setEnrichment] = useState<
     Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
@@ -443,6 +445,46 @@ function VocabularyPage() {
     }
   }
 
+  async function repairSelectedPartOfSpeech() {
+    if (!selected.length) return;
+    setRepairingPartOfSpeech(true);
+    try {
+      let changed = 0;
+      let failed = 0;
+      const failures: Array<{ word: string; error: string }> = [];
+
+      for (let index = 0; index < selected.length; index += 40) {
+        const result = await repairVocabularyPartOfSpeech({
+          data: { ids: selected.slice(index, index + 40) },
+        });
+        changed += result.changed;
+        failed += result.failed;
+        failures.push(...result.failures);
+      }
+
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      if (failed > 0) {
+        toast.warning(
+          `${changed} updated · ${failed} failed`,
+          {
+            description: failures
+              .slice(0, 3)
+              .map((item) => `${item.word}: ${item.error}`)
+              .join("\n"),
+          },
+        );
+      } else {
+        toast.success(t("part_of_speech_repaired"), {
+          description: String(changed),
+        });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepairingPartOfSpeech(false);
+    }
+  }
+
   async function bulkStatus(next: "active" | "draft" | "archived") {
     if (!selected.length) return;
     try {
@@ -579,6 +621,16 @@ function VocabularyPage() {
           >
             <Sparkles className="h-4 w-4" />
             {bulkEnriching ? t("generating") : t("suggest_enrichment")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={repairingPartOfSpeech}
+            onClick={() => void repairSelectedPartOfSpeech()}
+          >
+            {repairingPartOfSpeech
+              ? t("generating")
+              : t("repair_part_of_speech")}
           </Button>
           <Button size="sm" variant="outline" onClick={() => bulkStatus("active")}>{t("active")}</Button>
           <Button size="sm" variant="outline" onClick={() => bulkStatus("draft")}>{t("draft")}</Button>
