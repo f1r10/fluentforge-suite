@@ -859,10 +859,11 @@ async function gotoHydrated(page, path) {
     await studentPage
       .getByRole("button", { name: "Release Books", exact: true })
       .click();
-    await studentPage
+    const studentLibraryBook = studentPage
       .getByText("Release Library Book", { exact: true })
-      .waitFor({ timeout: 20000 });
-    await studentPage
+      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+    await studentLibraryBook.waitFor({ timeout: 20000 });
+    await studentLibraryBook
       .getByRole("button", { name: "View", exact: true })
       .click();
     await studentPage
