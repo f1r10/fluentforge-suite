@@ -47,6 +47,16 @@ function silentWavBuffer(durationMs = 400) {
   return buffer;
 }
 
+function minimalDocxBuffer() {
+  // The library stores office documents as opaque bytes; a small ZIP-like
+  // payload is enough to exercise signed upload/finalization for .docx.
+  return Buffer.from([
+    0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+  ]);
+}
+
 function minimalPngBuffer() {
   return Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -540,6 +550,39 @@ async function gotoHydrated(page, path) {
       .getByText("Release Library Book", { exact: true })
       .waitFor({ timeout: 30000 });
     console.log("[ok] teacher created a custom library section and uploaded a PDF book");
+
+    await page
+      .getByRole("button", { name: "Add book", exact: true })
+      .click();
+    const docxDialog = page
+      .getByRole("dialog")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Add book",
+          exact: true,
+        }),
+      });
+    await docxDialog
+      .locator("select")
+      .first()
+      .selectOption({ label: "Release Books" });
+    await docxDialog
+      .locator('input:not([type="file"])')
+      .first()
+      .fill("Release DOCX Book");
+    await docxDialog.locator('input[type="file"]').setInputFiles({
+      name: "lüğət-release.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: minimalDocxBuffer(),
+    });
+    await docxDialog
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await page
+      .getByText("Release DOCX Book", { exact: true })
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher uploaded a DOCX book with a Unicode filename");
 
     await gotoHydrated(page, "/teacher/readings");
     await page
