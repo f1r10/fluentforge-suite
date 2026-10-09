@@ -242,21 +242,24 @@ export function parseWiktApiVocabularyResponse(
       const tags = uniqueStrings(
         Array.isArray(sound["tags"]) ? sound["tags"] : [],
       ).slice(0, 20);
-      const audioValue = [
-        sound["audio"],
+      const audio = [
         sound["mp3_url"],
         sound["ogg_url"],
         sound["wav_url"],
-      ].find((candidate) => typeof candidate === "string" && candidate.trim());
+        sound["audio"],
+      ]
+        .flatMap((candidate) =>
+          typeof candidate === "string"
+            ? [normalizeAudioUrl(candidate)]
+            : [],
+        )
+        .find((candidate): candidate is string => !!candidate) ?? null;
       return {
         ipa:
           typeof sound["ipa"] === "string"
             ? sound["ipa"].trim() || null
             : null,
-        audio:
-          typeof audioValue === "string"
-            ? normalizeAudioUrl(audioValue)
-            : null,
+        audio,
         region: pronunciationRegion(tags),
         tags,
       };
