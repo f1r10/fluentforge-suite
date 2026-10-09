@@ -881,6 +881,7 @@ async function gotoHydrated(page, path) {
     const studentLibraryChecks = [
       ["/student/questions", "Question Bank"],
       ["/student/vocabulary", "Vocabulary"],
+      ["/student/word-search", "Word search"],
       ["/student/readings", "Readings"],
       ["/student/listenings", "Listenings"],
       ["/student/mistakes", "My mistakes"],
@@ -926,6 +927,33 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     await studentPage.locator("audio").waitFor({ timeout: 20000 });
     console.log("[ok] student opened listening media and contextual question set");
+
+    await gotoHydrated(studentPage, "/student/practice?focus=vocabulary");
+    const vocabularyPosField = studentPage
+      .getByText("Part of speech", { exact: true })
+      .locator("xpath=..");
+    await vocabularyPosField.locator("select").selectOption("noun");
+    const vocabularyCountField = studentPage
+      .getByText("Vocabulary count", { exact: true })
+      .locator("xpath=..");
+    await vocabularyCountField.locator('input[type="number"]').fill("1");
+    await studentPage
+      .getByRole("button", { name: "Generate practice" })
+      .click();
+    const releaseVocabularyCard = studentPage
+      .getByText("releaseword", { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+    await releaseVocabularyCard.waitFor({ timeout: 30000 });
+    await releaseVocabularyCard
+      .getByPlaceholder("Type your answer")
+      .fill("sınaq sözü");
+    await releaseVocabularyCard
+      .getByRole("button", { name: "Check", exact: true })
+      .click();
+    await releaseVocabularyCard
+      .getByText("Correct", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] student vocabulary answer checking and part-of-speech filter work");
 
     await gotoHydrated(studentPage, "/student/practice");
     const sessionModeField = studentPage
