@@ -153,12 +153,34 @@ describe("WiktAPI vocabulary enrichment", () => {
   });
 
   it("prefers WiktAPI before the free dictionary fallback", async () => {
+    const fullResponse = {
+      word: "improve",
+      edition: "en",
+      entries: response.entries.map(({ pos: _pos, ...entry }) => entry),
+    };
+    const definitionsResponse = {
+      word: "improve",
+      edition: "en",
+      definitions: response.entries.map((entry) => ({
+        pos: entry.pos,
+        lang_code: "en",
+        senses: entry.senses,
+      })),
+    };
+
     const fetcher = vi.fn(async (url: string) => {
       expect(url).toContain("api.wiktapi.dev");
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify(
+          url.includes("/definitions")
+            ? definitionsResponse
+            : fullResponse,
+        ),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     });
 
     const result = await fetchBestDictionaryVocabularySuggestion(
@@ -167,8 +189,9 @@ describe("WiktAPI vocabulary enrichment", () => {
       fetcher as typeof fetch,
     );
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(result.provider).toBe("wiktapi");
+    expect(result.part_of_speech).toBe("verb");
     expect(result.translations[0]?.value).toBe("yaxşılaşdırmaq");
   });
 });
