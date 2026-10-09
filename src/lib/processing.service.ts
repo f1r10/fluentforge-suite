@@ -76,6 +76,10 @@ export interface ProcessingService {
     html: string;
   }): Promise<Uint8Array>;
 
+  renderDocxReport(input: {
+    html: string;
+  }): Promise<Uint8Array>;
+
   enrichVocabulary(input: {
     entryIds: string[];
     targetLanguages?: string[];
@@ -107,6 +111,9 @@ export class PlaceholderProcessingService implements ProcessingService {
   transcribeMedia = notImplemented;
   importYouTube = notImplemented;
   async renderPdfReport(): Promise<Uint8Array> {
+    throw new Error("External processing service is not configured.");
+  }
+  async renderDocxReport(): Promise<Uint8Array> {
     throw new Error("External processing service is not configured.");
   }
   enrichVocabulary = notImplemented;
@@ -165,6 +172,7 @@ class HttpProcessingService implements ProcessingService {
 
   private async requestBinary(
     path: string,
+    expectedContentType: string,
     init?: RequestInit,
   ): Promise<Uint8Array> {
     const controller = new AbortController();
@@ -189,7 +197,7 @@ class HttpProcessingService implements ProcessingService {
       }
 
       const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.toLowerCase().includes("application/pdf")) {
+      if (!contentType.toLowerCase().includes(expectedContentType.toLowerCase())) {
         throw new Error(
           `Processing service returned unexpected content type: ${contentType || "unknown"}`,
         );
@@ -316,10 +324,32 @@ class HttpProcessingService implements ProcessingService {
       throw new Error("PDF report HTML exceeds the 8 MB safety limit.");
     }
 
-    return this.requestBinary("/v1/reports/pdf", {
-      method: "POST",
-      body: JSON.stringify({ html: input.html }),
-    });
+    return this.requestBinary(
+      "/v1/reports/pdf",
+      "application/pdf",
+      {
+        method: "POST",
+        body: JSON.stringify({ html: input.html }),
+      },
+    );
+  }
+
+  async renderDocxReport(input: { html: string }) {
+    if (!input.html.trim()) {
+      throw new Error("DOCX report HTML must not be empty.");
+    }
+    if (input.html.length > 8_000_000) {
+      throw new Error("DOCX report HTML exceeds the 8 MB safety limit.");
+    }
+
+    return this.requestBinary(
+      "/v1/reports/docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      {
+        method: "POST",
+        body: JSON.stringify({ html: input.html }),
+      },
+    );
   }
 
   enrichVocabulary = notImplemented;
