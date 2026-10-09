@@ -380,7 +380,9 @@ function BookDialog({
         upsert: false,
       });
     if (error) {
-      throw new Error(`File upload failed: ${error.message}`);
+      throw new Error(
+        readLibraryError(error, "The selected file could not be uploaded."),
+      );
     }
 
     setUploadStage("finalizing");
@@ -432,7 +434,22 @@ function BookDialog({
       toast.success(t("save"));
       await onSaved();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      const stage =
+        uploadStage === "authorizing"
+          ? "preparing the upload"
+          : uploadStage === "uploading"
+            ? "uploading the file"
+            : uploadStage === "finalizing"
+              ? "verifying the uploaded file"
+              : uploadStage === "saving"
+                ? "saving the book"
+                : "adding the book";
+      toast.error(
+        readLibraryError(
+          error,
+          `Could not add the book while ${stage}. Please try again.`,
+        ),
+      );
     } finally {
       setBusy(false);
       setUploadStage("idle");
@@ -551,6 +568,23 @@ function categoryLabel(category: Pick<Category, "system_key" | "name">, t: (key:
   return translated === key ? category.name : translated;
 }
 
+
+function readLibraryError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  if (error && typeof error === "object") {
+    const source = error as Record<string, unknown>;
+    for (const key of ["message", "details", "hint", "code"]) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+  const text = String(error ?? "").trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
 
 async function sha256LibraryFile(file: File) {
   const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
