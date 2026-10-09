@@ -592,7 +592,7 @@ export const listStudentVocabulary = createServerFn({ method: "GET" })
     let query = admin
       .from("vocabulary_entries")
       .select(
-        "id,word,definition,ipa,part_of_speech,learning_language,level,vocabulary_translations(language,value),vocabulary_examples(sentence,translation,sort_order)",
+        "id,word,definition,ipa,part_of_speech,learning_language,level,provenance,vocabulary_translations(language,value),vocabulary_examples(sentence,translation,sort_order)",
         { count: "exact" },
       )
       .eq("status", "active")
@@ -637,6 +637,13 @@ export const listStudentVocabulary = createServerFn({ method: "GET" })
         part_of_speech: entry.part_of_speech,
         learning_language: entry.learning_language,
         level: entry.level,
+        lexical_metadata:
+          entry.provenance &&
+          typeof entry.provenance === "object" &&
+          (entry.provenance as Record<string, unknown>)["dictionary"] &&
+          typeof (entry.provenance as Record<string, unknown>)["dictionary"] === "object"
+            ? ((entry.provenance as Record<string, unknown>)["dictionary"] as Record<string, unknown>)
+            : null,
         translations: (entry.vocabulary_translations ?? []) as Array<{
           language: string;
           value: string;
