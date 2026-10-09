@@ -412,30 +412,34 @@ async function buildArtifact(input: {
   includeAnswers: boolean;
   includeExplanations: boolean;
 }) {
-  if (input.format === "pdf") {
-    const html =
-      input.kind === "analytics"
-        ? buildAnalyticsPdfHtml({
-            exportedAt: input.exportedAt,
-            tables: input.tables,
-          })
-        : input.kind === "questions"
-          ? buildQuestionBankPdfHtml({
-              exportedAt: input.exportedAt,
-              questions: input.tables["questions"] ?? [],
-              includeAnswers: input.includeAnswers,
-              includeExplanations: input.includeExplanations,
-            })
-          : null;
-
+  if (input.format === "pdf" || input.format === "docx") {
+    const html = buildPrintableHtml(input);
     if (!html) {
       throw new Error(
-        "PDF is currently available for Question Bank and Analytics exports.",
+        `${input.format.toUpperCase()} is not available for this export.`,
       );
     }
 
     const { getProcessingService } = await import("./processing.service");
-    const pdf = await getProcessingService().renderPdfReport({ html });
+    const processing = getProcessingService();
+
+    if (input.format === "docx") {
+      const docx = await processing.renderDocxReport({ html });
+      if (
+        docx.byteLength < 4 ||
+        new TextDecoder().decode(docx.slice(0, 2)) !== "PK"
+      ) {
+        throw new Error("Processing service returned an invalid DOCX.");
+      }
+      return {
+        body: Buffer.from(docx),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        extension: "docx",
+      };
+    }
+
+    const pdf = await processing.renderPdfReport({ html });
     if (
       pdf.byteLength < 5 ||
       new TextDecoder().decode(pdf.slice(0, 5)) !== "%PDF-"
@@ -468,13 +472,16 @@ async function buildArtifact(input: {
     };
   }
 
+  const sheets = buildFriendlySpreadsheetSheets(input);
+  if (!sheets.length) {
+    throw new Error("No spreadsheet data is available for this export.");
+  }
+
+  const XLSX = await import("xlsx");
+
   if (input.format === "csv") {
-    const tableName = PRIMARY_CSV_TABLE[input.kind];
-    if (!tableName) throw new Error("CSV is not available for this export.");
-    const rows = input.tables[tableName] ?? [];
-    const { utils } = await import("xlsx");
-    const sheet = utils.json_to_sheet(rows.map(toSheetRow));
-    const csv = utils.sheet_to_csv(sheet);
+    const sheet = createWorksheet(XLSX.utils, sheets[0]!.rows);
+    const csv = XLSX.utils.sheet_to_csv(sheet);
     return {
       body: Buffer.from(csv, "utf8"),
       mimeType: "text/csv; charset=utf-8",
@@ -482,16 +489,13 @@ async function buildArtifact(input: {
     };
   }
 
-  const XLSX = await import("xlsx");
   const workbook = XLSX.utils.book_new();
-
-  for (const [name, rows] of Object.entries(input.tables)) {
-    const sheetRows = rows.length ? rows.map(toSheetRow) : [{ empty: true }];
-    const sheet = XLSX.utils.json_to_sheet(sheetRows);
+  for (const definition of sheets) {
+    const sheet = createWorksheet(XLSX.utils, definition.rows);
     XLSX.utils.book_append_sheet(
       workbook,
       sheet,
-      safeSheetName(name, workbook.SheetNames),
+      safeSheetName(definition.name, workbook.SheetNames),
     );
   }
 
@@ -507,6 +511,748 @@ async function buildArtifact(input: {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     extension: "xlsx",
   };
+}
+
+type FriendlySheet = {
+  name: string;
+  rows: Record<string, string | number | boolean>[];
+};
+
+function buildPrintableHtml(input: {
+  kind: ExportKind;
+  exportedAt: string;
+  tables: Record<string, Record<string, unknown>[]>;
+  includeAnswers: boolean;
+  includeExplanations: boolean;
+}) {
+  if (input.kind === "analytics") {
+    return buildAnalyticsPdfHtml({
+      exportedAt: input.exportedAt,
+      tables: input.tables,
+    });
+  }
+  if (input.kind === "questions") {
+    return buildQuestionBankPdfHtml({
+      exportedAt: input.exportedAt,
+      questions: input.tables["questions"] ?? [],
+      includeAnswers: input.includeAnswers,
+      includeExplanations: input.includeExplanations,
+    });
+  }
+  if (input.kind === "vocabulary") {
+    return buildVocabularyPdfHtml({
+      exportedAt: input.exportedAt,
+      rows: vocabularySpreadsheetRows(input.tables),
+    });
+  }
+  if (input.kind === "readings") {
+    return buildReadingsHtml({
+      exportedAt: input.exportedAt,
+      readings: input.tables["readings"] ?? [],
+      questionSets: input.tables["reading_question_sets"] ?? [],
+      questions: input.tables["reading_questions"] ?? [],
+    });
+  }
+  return null;
+}
+
+function buildFriendlySpreadsheetSheets(input: {
+  kind: ExportKind;
+  tables: Record<string, Record<string, unknown>[]>;
+  includeAnswers: boolean;
+  includeExplanations: boolean;
+}): FriendlySheet[] {
+  switch (input.kind) {
+    case "vocabulary":
+      return [{ name: "Vocabulary", rows: vocabularySpreadsheetRows(input.tables) }];
+    case "questions":
+      return [
+        {
+          name: "Questions",
+          rows: questionSpreadsheetRows(
+            input.tables["questions"] ?? [],
+            input.tables,
+            input.includeAnswers,
+            input.includeExplanations,
+          ),
+        },
+      ];
+    case "listenings":
+      return listeningSpreadsheetSheets(input.tables);
+    case "catalogs":
+      return catalogSpreadsheetSheets(input.tables);
+    case "exams":
+      return examSpreadsheetSheets(input.tables);
+    case "activity":
+      return cleanGenericSheets(input.tables, {
+        activity_events: "Activity",
+        audit_logs: "Audit log",
+      });
+    case "results":
+      return cleanGenericSheets(input.tables, {
+        exam_attempts: "Attempts",
+        exam_listening_plays: "Listening plays",
+        attempt_answers: "Answers",
+        manual_reviews: "Manual reviews",
+        teacher_feedback: "Teacher feedback",
+        question_reports: "Question reports",
+      });
+    case "students":
+      return studentSpreadsheetSheets(input.tables);
+    case "analytics":
+      return cleanGenericSheets(input.tables, {
+        question_analytics: "Question analytics",
+        catalog_analytics: "Catalog analytics",
+        student_analytics: "Student analytics",
+      });
+    case "readings":
+    case "content_package":
+      return [];
+  }
+}
+
+function vocabularySpreadsheetRows(
+  tables: Record<string, Record<string, unknown>[]>,
+): FriendlySheet["rows"] {
+  const entries = tables["vocabulary_entries"] ?? [];
+  const translations = groupByStringKey(
+    tables["vocabulary_translations"] ?? [],
+    "entry_id",
+  );
+  const examples = groupByStringKey(
+    tables["vocabulary_examples"] ?? [],
+    "entry_id",
+  );
+  const topicLinks = groupByStringKey(
+    tables["vocabulary_topics"] ?? [],
+    "entry_id",
+  );
+  const tagLinks = groupByStringKey(
+    tables["vocabulary_tags"] ?? [],
+    "entry_id",
+  );
+  const topicNames = new Map(
+    (tables["topics"] ?? []).map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+  const tagNames = new Map(
+    (tables["tags"] ?? []).map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+
+  return entries.map((entry, index) => {
+    const id = String(entry["id"] ?? "");
+    const translationText = (translations.get(id) ?? [])
+      .map((row) => {
+        const language = String(row["language"] ?? "").toUpperCase();
+        const value = String(row["value"] ?? "");
+        return language ? `${language}: ${value}` : value;
+      })
+      .filter(Boolean)
+      .join(" | ");
+    const exampleText = (examples.get(id) ?? [])
+      .sort(
+        (a, b) =>
+          Number(a["sort_order"] ?? 0) - Number(b["sort_order"] ?? 0),
+      )
+      .map((row) => {
+        const sentence = String(row["sentence"] ?? "");
+        const translation = String(row["translation"] ?? "");
+        return translation ? `${sentence} — ${translation}` : sentence;
+      })
+      .filter(Boolean)
+      .join(" | ");
+
+    const topics = (topicLinks.get(id) ?? [])
+      .map((row) => topicNames.get(String(row["topic_id"] ?? "")) ?? "")
+      .filter(Boolean)
+      .join(", ");
+    const tags = (tagLinks.get(id) ?? [])
+      .map((row) => tagNames.get(String(row["tag_id"] ?? "")) ?? "")
+      .filter(Boolean)
+      .join(", ");
+
+    return {
+      "No.": index + 1,
+      Word: scalar(entry["word"]),
+      Language: scalar(entry["learning_language"]).toUpperCase(),
+      IPA: scalar(entry["ipa"]),
+      "Part of speech": scalar(entry["part_of_speech"]),
+      Level: scalar(entry["level"]),
+      Definition: scalar(entry["definition"]),
+      Translations: translationText,
+      Examples: exampleText,
+      Synonyms: arrayText(entry["synonyms"]),
+      Antonyms: arrayText(entry["antonyms"]),
+      Topics: topics,
+      Tags: tags,
+      Notes: scalar(entry["notes"]),
+      Status: scalar(entry["status"]),
+    };
+  });
+}
+
+function questionSpreadsheetRows(
+  questions: Record<string, unknown>[],
+  tables: Record<string, Record<string, unknown>[]>,
+  includeAnswers: boolean,
+  includeExplanations: boolean,
+): FriendlySheet["rows"] {
+  const topicLinks = groupByStringKey(tables["question_topics"] ?? [], "question_id");
+  const tagLinks = groupByStringKey(tables["question_tags"] ?? [], "question_id");
+  const topicNames = new Map(
+    (tables["topics"] ?? []).map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+  const tagNames = new Map(
+    (tables["tags"] ?? []).map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+
+  return questions.map((question, index) => {
+    const id = String(question["id"] ?? "");
+    const payload = objectValue(question["payload"]);
+    const answerKey = objectValue(question["answer_key"]);
+    const options = printableOptions(payload["options"]);
+    const row: Record<string, string | number | boolean> = {
+      "No.": index + 1,
+      Question: scalar(question["prompt"]),
+      Type: humanizeColumn(scalar(question["question_type"])),
+      Instructions: scalar(question["instructions"]),
+      Language: scalar(question["learning_language"]).toUpperCase(),
+      Level: scalar(question["level"]),
+      Difficulty: scalar(question["difficulty"]),
+      Options: options
+        .map((option) => `${option.id.toUpperCase()}) ${option.text}`)
+        .join(" | "),
+      Points: numericObjectValue(question["scoring"], "points"),
+      Topics: (topicLinks.get(id) ?? [])
+        .map((link) => topicNames.get(String(link["topic_id"] ?? "")) ?? "")
+        .filter(Boolean)
+        .join(", "),
+      Tags: (tagLinks.get(id) ?? [])
+        .map((link) => tagNames.get(String(link["tag_id"] ?? "")) ?? "")
+        .filter(Boolean)
+        .join(", "),
+      Status: scalar(question["status"]),
+    };
+    if (includeAnswers) {
+      row["Correct answer"] = formatQuestionAnswer(answerKey, options);
+    }
+    if (includeExplanations) {
+      row["Explanation"] = scalar(question["explanation"]);
+    }
+    return row;
+  });
+}
+
+function listeningSpreadsheetSheets(
+  tables: Record<string, Record<string, unknown>[]>,
+): FriendlySheet[] {
+  const listenings = tables["listenings"] ?? [];
+  const sections = groupByStringKey(
+    tables["listening_sections"] ?? [],
+    "listening_id",
+  );
+  const sets = tables["listening_question_sets"] ?? [];
+  const setToListening = new Map(
+    sets.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["listening_id"] ?? ""),
+    ]),
+  );
+  const listeningNames = new Map(
+    listenings.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["title"] ?? ""),
+    ]),
+  );
+  const main = listenings.map((row, index) => {
+    const id = String(row["id"] ?? "");
+    const rules = objectValue(row["playback_rules"]);
+    return {
+      "No.": index + 1,
+      Title: scalar(row["title"]),
+      Language: scalar(row["learning_language"]).toUpperCase(),
+      Level: scalar(row["level"]),
+      Transcript: scalar(row["transcript"]),
+      Sections: (sections.get(id) ?? []).length,
+      "Max plays": scalar(rules["max_plays"]),
+      "Allow pause": boolText(rules["allow_pause"]),
+      "Allow seek": boolText(rules["allow_seek"]),
+      "Allow rewind": boolText(rules["allow_rewind"]),
+      "Show transcript": boolText(rules["show_transcript"]),
+      Status: scalar(row["status"]),
+    };
+  });
+
+  const questionRows = (tables["listening_questions"] ?? []).map(
+    (question, index) => {
+      const setId = String(question["listening_question_set_id"] ?? "");
+      const listeningId = setToListening.get(setId) ?? "";
+      const payload = objectValue(question["payload"]);
+      const options = printableOptions(payload["options"]);
+      return {
+        "No.": index + 1,
+        Listening: listeningNames.get(listeningId) ?? "",
+        Question: scalar(question["prompt"]),
+        Type: humanizeColumn(scalar(question["question_type"])),
+        Level: scalar(question["level"]),
+        Options: options
+          .map((option) => `${option.id.toUpperCase()}) ${option.text}`)
+          .join(" | "),
+        Status: scalar(question["status"]),
+      };
+    },
+  );
+
+  return [
+    { name: "Listenings", rows: main },
+    { name: "Questions", rows: questionRows },
+  ];
+}
+
+function catalogSpreadsheetSheets(
+  tables: Record<string, Record<string, unknown>[]>,
+): FriendlySheet[] {
+  const catalogs = tables["catalogs"] ?? [];
+  const names = new Map(
+    catalogs.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+  const items = groupByStringKey(tables["catalog_items"] ?? [], "catalog_id");
+  const assignments = groupByStringKey(
+    tables["catalog_assignments"] ?? [],
+    "catalog_id",
+  );
+
+  return [
+    {
+      name: "Catalogs",
+      rows: catalogs.map((row, index) => {
+        const id = String(row["id"] ?? "");
+        const settings = objectValue(row["settings"]);
+        return {
+          "No.": index + 1,
+          Name: scalar(row["name"]),
+          Description: scalar(row["description"]),
+          Status: scalar(row["status"]),
+          Items: (items.get(id) ?? []).length,
+          Assignments: (assignments.get(id) ?? []).length,
+          Feedback: scalar(settings["feedback_mode"]),
+          "Shuffle questions": boolText(settings["shuffle_questions"]),
+          "Shuffle vocabulary": boolText(settings["shuffle_vocabulary"]),
+          "Student self-practice": boolText(settings["allow_self_practice"]),
+        };
+      }),
+    },
+    {
+      name: "Content",
+      rows: (tables["catalog_items"] ?? []).map((row, index) => ({
+        "No.": index + 1,
+        Catalog: names.get(String(row["catalog_id"] ?? "")) ?? "",
+        Order: numberValue(row["sort_order"]),
+        Type: humanizeColumn(scalar(row["entity_type"])),
+        "Content reference": scalar(row["entity_id"]),
+      })),
+    },
+    {
+      name: "Assignments",
+      rows: (tables["catalog_assignments"] ?? []).map((row, index) => ({
+        "No.": index + 1,
+        Catalog: names.get(String(row["catalog_id"] ?? "")) ?? "",
+        "Target type": humanizeColumn(scalar(row["target_type"])),
+        "Target reference": scalar(
+          row["student_id"] ?? row["group_id"] ?? row["target_id"],
+        ),
+      })),
+    },
+  ];
+}
+
+function examSpreadsheetSheets(
+  tables: Record<string, Record<string, unknown>[]>,
+): FriendlySheet[] {
+  const exams = tables["exams"] ?? [];
+  const examNames = new Map(
+    exams.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["title"] ?? ""),
+    ]),
+  );
+  const sections = tables["exam_sections"] ?? [];
+  const sectionNames = new Map(
+    sections.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["title"] ?? ""),
+    ]),
+  );
+
+  return [
+    {
+      name: "Exams",
+      rows: exams.map((row, index) => {
+        const settings = objectValue(row["settings"]);
+        return {
+          "No.": index + 1,
+          Title: scalar(row["title"]),
+          Description: scalar(row["description"]),
+          Status: scalar(row["status"]),
+          "Duration (minutes)": numberValue(row["duration_minutes"]),
+          "Available from": scalar(row["available_from"]),
+          "Available until": scalar(row["available_until"]),
+          "Max attempts": numberValue(settings["max_attempts"]),
+          "Pass score (%)": numberValue(settings["pass_score_percent"]),
+          "Result release": scalar(settings["result_release"]),
+        };
+      }),
+    },
+    {
+      name: "Sections",
+      rows: sections.map((row, index) => ({
+        "No.": index + 1,
+        Exam: examNames.get(String(row["exam_id"] ?? "")) ?? "",
+        Section: scalar(row["title"]),
+        Instructions: scalar(row["instructions"]),
+        Order: numberValue(row["sort_order"]),
+      })),
+    },
+    {
+      name: "Items",
+      rows: (tables["exam_items"] ?? []).map((row, index) => ({
+        "No.": index + 1,
+        Section: sectionNames.get(String(row["section_id"] ?? "")) ?? "",
+        Type: humanizeColumn(scalar(row["item_type"] ?? row["entity_type"])),
+        Order: numberValue(row["sort_order"]),
+        "Content reference": scalar(
+          row["entity_id"] ?? row["question_id"] ?? row["catalog_id"],
+        ),
+      })),
+    },
+    {
+      name: "Assignments",
+      rows: (tables["exam_assignments"] ?? []).map((row, index) => ({
+        "No.": index + 1,
+        Exam: examNames.get(String(row["exam_id"] ?? "")) ?? "",
+        "Target type": humanizeColumn(scalar(row["target_type"])),
+        "Target reference": scalar(
+          row["student_id"] ?? row["group_id"] ?? row["target_id"],
+        ),
+      })),
+    },
+  ];
+}
+
+function studentSpreadsheetSheets(
+  tables: Record<string, Record<string, unknown>[]>,
+): FriendlySheet[] {
+  const students = tables["students"] ?? [];
+  const groups = tables["groups"] ?? [];
+  const studentNames = new Map(
+    students.map((row) => [
+      String(row["id"] ?? ""),
+      [scalar(row["first_name"]), scalar(row["last_name"])]
+        .filter(Boolean)
+        .join(" "),
+    ]),
+  );
+  const groupNames = new Map(
+    groups.map((row) => [
+      String(row["id"] ?? ""),
+      String(row["name"] ?? ""),
+    ]),
+  );
+
+  return [
+    {
+      name: "Students",
+      rows: students.map((row, index) => ({
+        "No.": index + 1,
+        Name: [scalar(row["first_name"]), scalar(row["last_name"])]
+          .filter(Boolean)
+          .join(" "),
+        Username: scalar(row["username"]),
+        Status: scalar(row["status"]),
+        "Interface language": scalar(row["interface_language"]).toUpperCase(),
+        "Last active": scalar(row["last_active_at"]),
+        Created: scalar(row["created_at"]),
+      })),
+    },
+    {
+      name: "Groups",
+      rows: groups.map((row, index) => ({
+        "No.": index + 1,
+        Group: scalar(row["name"]),
+        Description: scalar(row["description"]),
+        Status: scalar(row["status"]),
+      })),
+    },
+    {
+      name: "Memberships",
+      rows: (tables["group_memberships"] ?? []).map((row, index) => ({
+        "No.": index + 1,
+        Student: studentNames.get(String(row["student_id"] ?? "")) ?? "",
+        Group: groupNames.get(String(row["group_id"] ?? "")) ?? "",
+      })),
+    },
+  ];
+}
+
+function cleanGenericSheets(
+  tables: Record<string, Record<string, unknown>[]>,
+  labels: Record<string, string>,
+): FriendlySheet[] {
+  return Object.entries(labels).map(([key, name]) => ({
+    name,
+    rows: (tables[key] ?? []).map((row, index) =>
+      cleanGenericRow(row, index),
+    ),
+  }));
+}
+
+function cleanGenericRow(
+  row: Record<string, unknown>,
+  index: number,
+): Record<string, string | number | boolean> {
+  const output: Record<string, string | number | boolean> = {
+    "No.": index + 1,
+  };
+  const hidden = new Set([
+    "id",
+    "deleted_at",
+    "content_hash",
+    "provenance",
+    "metadata",
+  ]);
+  for (const [key, value] of Object.entries(row)) {
+    if (hidden.has(key)) continue;
+    output[humanizeColumn(key)] = friendlyCell(value);
+  }
+  return output;
+}
+
+function createWorksheet(
+  utils: typeof import("xlsx").utils,
+  rows: FriendlySheet["rows"],
+) {
+  const safeRows = rows.length ? rows : [{ Message: "No data" }];
+  const sheet = utils.json_to_sheet(safeRows);
+  const columns = [...new Set(safeRows.flatMap((row) => Object.keys(row)))];
+  sheet["!cols"] = columns.map((column) => {
+    const max = Math.max(
+      column.length,
+      ...safeRows.slice(0, 500).map((row) =>
+        String(row[column] ?? "").split("\n")[0]!.length,
+      ),
+    );
+    return { wch: Math.min(55, Math.max(10, max + 2)) };
+  });
+  if (sheet["!ref"]) {
+    sheet["!autofilter"] = { ref: sheet["!ref"] };
+  }
+  return sheet;
+}
+
+function groupByStringKey(
+  rows: Record<string, unknown>[],
+  key: string,
+) {
+  const map = new Map<string, Record<string, unknown>[]>();
+  for (const row of rows) {
+    const value = String(row[key] ?? "");
+    const list = map.get(value) ?? [];
+    list.push(row);
+    map.set(value, list);
+  }
+  return map;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function scalar(value: unknown) {
+  if (value == null) return "";
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+  return friendlyCell(value).toString();
+}
+
+function arrayText(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => scalar(item)).filter(Boolean).join(", ")
+    : scalar(value);
+}
+
+function boolText(value: unknown) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "";
+}
+
+function numberValue(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function numericObjectValue(value: unknown, key: string) {
+  const object = objectValue(value);
+  const numeric = Number(object[key]);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function friendlyCell(value: unknown): string | number | boolean {
+  if (value == null) return "";
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => scalar(item)).filter(Boolean).join(" | ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${humanizeColumn(key)}: ${scalar(item)}`)
+      .join(" | ");
+  }
+  return String(value);
+}
+
+function buildVocabularyPdfHtml(input: {
+  exportedAt: string;
+  rows: FriendlySheet["rows"];
+}) {
+  const body = input.rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(String(row["No."] ?? ""))}</td>
+        <td class="word">${escapeHtml(String(row["Word"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["IPA"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["Part of speech"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["Level"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["Translations"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["Definition"] ?? ""))}</td>
+        <td>${escapeHtml(String(row["Notes"] ?? ""))}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FluentForge Vocabulary</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; color: #111; font-size: 8.5pt; }
+  h1 { font-size: 18pt; margin: 0 0 2mm; }
+  .meta { color: #555; margin: 0 0 5mm; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #bbb; padding: 1.5mm; vertical-align: top; overflow-wrap: anywhere; }
+  th { background: #f1f1f1; text-align: left; }
+  th:nth-child(1), td:nth-child(1) { width: 5%; }
+  th:nth-child(2), td:nth-child(2) { width: 14%; }
+  th:nth-child(3), td:nth-child(3) { width: 11%; }
+  th:nth-child(4), td:nth-child(4) { width: 10%; }
+  th:nth-child(5), td:nth-child(5) { width: 6%; }
+  .word { font-weight: 700; }
+  tr { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+<h1>FluentForge Vocabulary</h1>
+<p class="meta">Generated: ${escapeHtml(input.exportedAt)} · ${input.rows.length} entries</p>
+<table>
+<thead><tr><th>No.</th><th>Word</th><th>IPA</th><th>Part of speech</th><th>Level</th><th>Translations</th><th>Definition</th><th>Notes</th></tr></thead>
+<tbody>${body || '<tr><td colspan="8">No vocabulary entries.</td></tr>'}</tbody>
+</table>
+</body>
+</html>`;
+}
+
+function buildReadingsHtml(input: {
+  exportedAt: string;
+  readings: Record<string, unknown>[];
+  questionSets: Record<string, unknown>[];
+  questions: Record<string, unknown>[];
+}) {
+  const setsByReading = groupByStringKey(input.questionSets, "reading_id");
+  const questionsBySet = groupByStringKey(
+    input.questions,
+    "reading_question_set_id",
+  );
+
+  const readings = input.readings
+    .map((reading, index) => {
+      const id = String(reading["id"] ?? "");
+      const sets = setsByReading.get(id) ?? [];
+      const questionHtml = sets
+        .flatMap((set) => questionsBySet.get(String(set["id"] ?? "")) ?? [])
+        .map(
+          (question, qIndex) =>
+            `<li>${escapeHtml(scalar(question["prompt"]))}</li>`,
+        )
+        .join("");
+      return `
+        <article class="reading">
+          <h2>${index + 1}. ${escapeHtml(scalar(reading["title"]) || "Untitled reading")}</h2>
+          <p class="reading-meta">${escapeHtml(
+            [
+              scalar(reading["learning_language"]).toUpperCase(),
+              scalar(reading["level"]),
+            ].filter(Boolean).join(" · "),
+          )}</p>
+          <div class="body">${escapeHtml(scalar(reading["body"])).replaceAll("\n", "<br>")}</div>
+          ${questionHtml ? `<h3>Questions</h3><ol>${questionHtml}</ol>` : ""}
+        </article>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FluentForge Readings</title>
+<style>
+  @page { size: A4 portrait; margin: 17mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; color: #111; font-size: 10.5pt; line-height: 1.55; }
+  h1 { font-size: 19pt; margin: 0 0 2mm; }
+  h2 { font-size: 15pt; margin: 0 0 1mm; }
+  h3 { font-size: 11pt; margin: 5mm 0 2mm; }
+  .meta, .reading-meta { color: #666; font-size: 9pt; }
+  .reading { margin-top: 9mm; page-break-before: auto; }
+  .reading + .reading { page-break-before: always; }
+  .body { white-space: normal; }
+  li { margin: 1.5mm 0; }
+</style>
+</head>
+<body>
+<h1>FluentForge Readings</h1>
+<p class="meta">Generated: ${escapeHtml(input.exportedAt)} · ${input.readings.length} reading(s)</p>
+${readings || "<p>No readings.</p>"}
+</body>
+</html>`;
 }
 
 
