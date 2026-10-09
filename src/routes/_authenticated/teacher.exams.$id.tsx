@@ -98,6 +98,11 @@ function ExamWorkspace() {
   const [publishing, setPublishing] = useState(false);
 
   const isDraft = data.status === "draft";
+  const closeTimeRequired =
+    !meta.available_until &&
+    (meta.settings.result_release === "after_close" ||
+      meta.settings.answer_visibility === "after_close" ||
+      meta.settings.explanation_visibility === "after_close");
 
   useEffect(() => {
     setMeta(examToForm(data));
@@ -265,7 +270,15 @@ function ExamWorkspace() {
         <div className="flex flex-wrap gap-2">
           {isDraft ? (
             <>
-              <Button onClick={publish} disabled={publishing}>
+              <Button
+                onClick={publish}
+                disabled={publishing || closeTimeRequired}
+                title={
+                  closeTimeRequired
+                    ? t("exam_close_required_for_visibility")
+                    : undefined
+                }
+              >
                 <CheckCircle2 className="h-4 w-4" />
                 {t("publish_exam")}
               </Button>
@@ -293,6 +306,12 @@ function ExamWorkspace() {
       {!isDraft && (
         <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
           {t("published_exam_immutable")}
+        </div>
+      )}
+
+      {isDraft && closeTimeRequired && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          {t("exam_close_required_for_visibility")}
         </div>
       )}
 
