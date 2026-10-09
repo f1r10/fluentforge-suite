@@ -861,7 +861,7 @@ async function gotoHydrated(page, path) {
       .click();
     const studentLibraryBook = studentPage
       .getByText("Release Library Book", { exact: true })
-      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+      .locator("xpath=ancestor::article[1]");
     await studentLibraryBook.waitFor({ timeout: 20000 });
     await studentLibraryBook
       .getByRole("button", { name: "View", exact: true })
