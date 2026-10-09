@@ -455,6 +455,10 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
         catalogId: z.string().uuid(),
         search: z.string().max(200).default(""),
         type: z.enum(["all", ...CATALOG_ITEM_TYPES]).default("all"),
+        language: z.string().trim().max(10).default(""),
+        level: z.string().trim().max(20).default(""),
+        subtype: z.string().trim().max(100).default(""),
+        topicId: z.string().uuid().nullable().default(null),
       })
       .parse(d ?? {}),
   )
@@ -466,6 +470,42 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
       .eq("catalog_id", data.catalogId);
     if (existingError) throw new Error(existingError.message);
     const inCatalog = new Set((existing ?? []).map((x) => `${x.entity_type}:${x.entity_id}`));
+
+    const topicMatches = new Map<CatalogItemType, Set<string>>();
+    if (data.topicId) {
+      if (data.type === "all" || data.type === "question") {
+        const { data: rows, error } = await context.supabase
+          .from("question_topics")
+          .select("question_id")
+          .eq("topic_id", data.topicId);
+        if (error) throw new Error(error.message);
+        topicMatches.set("question", new Set((rows ?? []).map((row) => row.question_id)));
+      }
+      if (data.type === "all" || data.type === "vocabulary") {
+        const { data: rows, error } = await context.supabase
+          .from("vocabulary_topics")
+          .select("entry_id")
+          .eq("topic_id", data.topicId);
+        if (error) throw new Error(error.message);
+        topicMatches.set("vocabulary", new Set((rows ?? []).map((row) => row.entry_id)));
+      }
+      if (data.type === "all" || data.type === "reading") {
+        const { data: rows, error } = await context.supabase
+          .from("reading_topics")
+          .select("reading_id")
+          .eq("topic_id", data.topicId);
+        if (error) throw new Error(error.message);
+        topicMatches.set("reading", new Set((rows ?? []).map((row) => row.reading_id)));
+      }
+      if (data.type === "all" || data.type === "listening") {
+        const { data: rows, error } = await context.supabase
+          .from("listening_topics")
+          .select("listening_id")
+          .eq("topic_id", data.topicId);
+        if (error) throw new Error(error.message);
+        topicMatches.set("listening", new Set((rows ?? []).map((row) => row.listening_id)));
+      }
+    }
 
     const results: Array<{
       entity_type: CatalogItemType;
@@ -479,103 +519,133 @@ export const searchCatalogContent = createServerFn({ method: "GET" })
     }> = [];
 
     if (data.type === "all" || data.type === "question") {
-      let q = context.supabase
-        .from("questions")
-        .select("id,prompt,question_type,learning_language,level,status,context_kind")
-        .is("deleted_at", null)
-        .neq("status", "archived")
-        .eq("context_kind", "none")
-        .order("updated_at", { ascending: false })
-        .limit(data.type === "all" ? 12 : 40);
-      if (safe) q = q.ilike("prompt", `%${safe}%`);
-      const { data: rows, error } = await q;
-      if (error) throw new Error(error.message);
-      for (const row of rows ?? []) {
-        results.push({
-          entity_type: "question",
-          entity_id: row.id,
-          title: row.prompt,
-          subtitle: row.question_type,
-          language: row.learning_language,
-          level: row.level,
-          status: row.status,
-          inCatalog: inCatalog.has(`question:${row.id}`),
-        });
+      const topicIds = topicMatches.get("question");
+      if (!data.topicId || (topicIds && topicIds.size > 0)) {
+        let q = context.supabase
+          .from("questions")
+          .select("id,prompt,question_type,learning_language,level,status,context_kind")
+          .is("deleted_at", null)
+          .neq("status", "archived")
+          .eq("context_kind", "none")
+          .order("updated_at", { ascending: false })
+          .limit(data.type === "all" ? 12 : 80);
+        if (safe) q = q.ilike("prompt", `%${safe}%`);
+        if (data.language) q = q.eq("learning_language", data.language);
+        if (data.level) q = q.eq("level", data.level);
+        if (data.type === "question" && data.subtype) {
+          q = q.eq("question_type", data.subtype);
+        }
+        if (topicIds) q = q.in("id", [...topicIds]);
+        const { data: rows, error } = await q;
+        if (error) throw new Error(error.message);
+        for (const row of rows ?? []) {
+          results.push({
+            entity_type: "question",
+            entity_id: row.id,
+            title: row.prompt,
+            subtitle: row.question_type,
+            language: row.learning_language,
+            level: row.level,
+            status: row.status,
+            inCatalog: inCatalog.has(`question:${row.id}`),
+          });
+        }
       }
     }
 
     if (data.type === "all" || data.type === "vocabulary") {
-      let q = context.supabase
-        .from("vocabulary_entries")
-        .select("id,word,part_of_speech,learning_language,level,status")
-        .is("deleted_at", null)
-        .neq("status", "archived")
-        .order("updated_at", { ascending: false })
-        .limit(data.type === "all" ? 12 : 40);
-      if (safe) q = q.ilike("word", `%${safe}%`);
-      const { data: rows, error } = await q;
-      if (error) throw new Error(error.message);
-      for (const row of rows ?? []) {
-        results.push({
-          entity_type: "vocabulary",
-          entity_id: row.id,
-          title: row.word,
-          subtitle: row.part_of_speech,
-          language: row.learning_language,
-          level: row.level,
-          status: row.status,
-          inCatalog: inCatalog.has(`vocabulary:${row.id}`),
-        });
+      const topicIds = topicMatches.get("vocabulary");
+      if (!data.topicId || (topicIds && topicIds.size > 0)) {
+        let q = context.supabase
+          .from("vocabulary_entries")
+          .select("id,word,part_of_speech,learning_language,level,status")
+          .is("deleted_at", null)
+          .neq("status", "archived")
+          .order("updated_at", { ascending: false })
+          .limit(data.type === "all" ? 12 : 80);
+        if (safe) q = q.ilike("word", `%${safe}%`);
+        if (data.language) q = q.eq("learning_language", data.language);
+        if (data.level) q = q.eq("level", data.level);
+        if (data.type === "vocabulary" && data.subtype) {
+          q = q.eq("part_of_speech", data.subtype);
+        }
+        if (topicIds) q = q.in("id", [...topicIds]);
+        const { data: rows, error } = await q;
+        if (error) throw new Error(error.message);
+        for (const row of rows ?? []) {
+          results.push({
+            entity_type: "vocabulary",
+            entity_id: row.id,
+            title: row.word,
+            subtitle: row.part_of_speech,
+            language: row.learning_language,
+            level: row.level,
+            status: row.status,
+            inCatalog: inCatalog.has(`vocabulary:${row.id}`),
+          });
+        }
       }
     }
 
     if (data.type === "all" || data.type === "reading") {
-      let q = context.supabase
-        .from("readings")
-        .select("id,title,learning_language,level,status")
-        .is("deleted_at", null)
-        .neq("status", "archived")
-        .order("updated_at", { ascending: false })
-        .limit(data.type === "all" ? 12 : 40);
-      if (safe) q = q.ilike("title", `%${safe}%`);
-      const { data: rows, error } = await q;
-      if (error) throw new Error(error.message);
-      for (const row of rows ?? []) {
-        results.push({
-          entity_type: "reading",
-          entity_id: row.id,
-          title: row.title,
-          subtitle: null,
-          language: row.learning_language,
-          level: row.level,
-          status: row.status,
-          inCatalog: inCatalog.has(`reading:${row.id}`),
-        });
+      const topicIds = topicMatches.get("reading");
+      if (!data.topicId || (topicIds && topicIds.size > 0)) {
+        let q = context.supabase
+          .from("readings")
+          .select("id,title,learning_language,level,status")
+          .is("deleted_at", null)
+          .neq("status", "archived")
+          .order("updated_at", { ascending: false })
+          .limit(data.type === "all" ? 12 : 80);
+        if (safe) q = q.ilike("title", `%${safe}%`);
+        if (data.language) q = q.eq("learning_language", data.language);
+        if (data.level) q = q.eq("level", data.level);
+        if (topicIds) q = q.in("id", [...topicIds]);
+        const { data: rows, error } = await q;
+        if (error) throw new Error(error.message);
+        for (const row of rows ?? []) {
+          results.push({
+            entity_type: "reading",
+            entity_id: row.id,
+            title: row.title,
+            subtitle: null,
+            language: row.learning_language,
+            level: row.level,
+            status: row.status,
+            inCatalog: inCatalog.has(`reading:${row.id}`),
+          });
+        }
       }
     }
 
     if (data.type === "all" || data.type === "listening") {
-      let q = context.supabase
-        .from("listenings")
-        .select("id,title,learning_language,level,status")
-        .is("deleted_at", null)
-        .neq("status", "archived")
-        .order("updated_at", { ascending: false })
-        .limit(data.type === "all" ? 12 : 40);
-      if (safe) q = q.ilike("title", `%${safe}%`);
-      const { data: rows, error } = await q;
-      if (error) throw new Error(error.message);
-      for (const row of rows ?? []) {
-        results.push({
-          entity_type: "listening",
-          entity_id: row.id,
-          title: row.title,
-          subtitle: null,
-          language: row.learning_language,
-          level: row.level,
-          status: row.status,
-          inCatalog: inCatalog.has(`listening:${row.id}`),
-        });
+      const topicIds = topicMatches.get("listening");
+      if (!data.topicId || (topicIds && topicIds.size > 0)) {
+        let q = context.supabase
+          .from("listenings")
+          .select("id,title,learning_language,level,status")
+          .is("deleted_at", null)
+          .neq("status", "archived")
+          .order("updated_at", { ascending: false })
+          .limit(data.type === "all" ? 12 : 80);
+        if (safe) q = q.ilike("title", `%${safe}%`);
+        if (data.language) q = q.eq("learning_language", data.language);
+        if (data.level) q = q.eq("level", data.level);
+        if (topicIds) q = q.in("id", [...topicIds]);
+        const { data: rows, error } = await q;
+        if (error) throw new Error(error.message);
+        for (const row of rows ?? []) {
+          results.push({
+            entity_type: "listening",
+            entity_id: row.id,
+            title: row.title,
+            subtitle: null,
+            language: row.learning_language,
+            level: row.level,
+            status: row.status,
+            inCatalog: inCatalog.has(`listening:${row.id}`),
+          });
+        }
       }
     }
 
