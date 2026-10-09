@@ -77,7 +77,7 @@ function maxBytes(kind: MediaKind, maxVideoMb: number) {
   if (kind === "video") return maxVideoMb * MiB;
   if (kind === "audio") return 500 * MiB;
   if (kind === "image") return 50 * MiB;
-  if (kind === "document") return 100 * MiB;
+  if (kind === "document") return 500 * MiB;
   return 100 * MiB;
 }
 
