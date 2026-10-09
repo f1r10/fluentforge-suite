@@ -1,7 +1,7 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, Headphones } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Headphones, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getWhoAmI } from "@/lib/teacher.functions";
@@ -52,7 +52,12 @@ function PracticePage() {
   const { id } = Route.useParams();
   const { t } = useI18n();
   const { data } = useSuspenseQuery(practiceQuery(id));
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [practiceKind, setPracticeKind] = useState<
+    "all" | "question" | "vocabulary" | "reading" | "listening"
+  >("all");
+  const [practiceCount, setPracticeCount] = useState("10");
+  const [activeBlockIds, setActiveBlockIds] = useState<string[] | null>(null);
   const [responses, setResponses] = useState<Record<string, PracticeResponse>>({});
   const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
@@ -67,9 +72,63 @@ function PracticePage() {
     accuracy: number | null;
   } | null>(null);
 
-  const questions = useMemo(() => collectQuestions(data), [data]);
-  const vocabularyEntries = useMemo(() => collectVocabulary(data), [data]);
+  const activeBlocks = useMemo(
+    () =>
+      activeBlockIds == null
+        ? data.blocks
+        : data.blocks.filter((block) =>
+            activeBlockIds.includes(block.item_id),
+          ),
+    [activeBlockIds, data.blocks],
+  );
+  const activePracticeData = useMemo(
+    () => ({ ...data, blocks: activeBlocks }),
+    [activeBlocks, data],
+  );
+  const questions = useMemo(
+    () => collectQuestions(activePracticeData),
+    [activePracticeData],
+  );
+  const vocabularyEntries = useMemo(
+    () => collectVocabulary(activePracticeData),
+    [activePracticeData],
+  );
   const feedbackMode = data.catalog.settings.feedback_mode;
+
+  function createCatalogPractice() {
+    const eligible =
+      practiceKind === "all"
+        ? data.blocks
+        : data.blocks.filter((block) => block.kind === practiceKind);
+
+    if (!eligible.length) {
+      toast.error(t("no_questions_match"));
+      return;
+    }
+
+    const requested = Math.max(
+      1,
+      Math.min(Number(practiceCount) || eligible.length, eligible.length),
+    );
+    const shuffled = [...eligible];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const target = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[target]] = [
+        shuffled[target]!,
+        shuffled[index]!,
+      ];
+    }
+
+    setActiveBlockIds(
+      shuffled.slice(0, requested).map((block) => block.item_id),
+    );
+    setSessionId(crypto.randomUUID());
+    setResponses({});
+    setFeedback({});
+    setRevealed({});
+    setSummary(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   function currentResponse(question: PracticeQuestion) {
     return responses[question.id] ?? defaultPracticeResponse(question);
@@ -164,6 +223,71 @@ function PracticePage() {
         </div>
       </header>
 
+      <section className="mb-6 space-y-3 rounded-md border border-border p-4">
+        <div>
+          <div className="font-medium">{t("new_practice")}</div>
+          <div className="text-xs text-muted-foreground">
+            {t("catalog_practice")}
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_160px_auto]">
+          <select
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            value={practiceKind}
+            onChange={(event) =>
+              setPracticeKind(
+                event.target.value as
+                  | "all"
+                  | "question"
+                  | "vocabulary"
+                  | "reading"
+                  | "listening",
+              )
+            }
+          >
+            <option value="all">{t("all")}</option>
+            <option value="question">{t("question")}</option>
+            <option value="vocabulary">{t("vocabulary")}</option>
+            <option value="reading">{t("reading")}</option>
+            <option value="listening">{t("listening")}</option>
+          </select>
+          <Input
+            type="number"
+            min={1}
+            max={Math.max(1, data.blocks.length)}
+            value={practiceCount}
+            onChange={(event) => setPracticeCount(event.target.value)}
+            aria-label={t("requested_content")}
+          />
+          <Button type="button" onClick={createCatalogPractice}>
+            <Play className="h-4 w-4" />
+            {t("generate_practice")}
+          </Button>
+        </div>
+        {activeBlockIds != null && (
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {activeBlockIds.length} {t("items").toLocaleLowerCase()}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setActiveBlockIds(null);
+                setSessionId(crypto.randomUUID());
+                setResponses({});
+                setFeedback({});
+                setRevealed({});
+                setSummary(null);
+              }}
+            >
+              {t("all")}
+            </Button>
+          </div>
+        )}
+      </section>
+
       {summary && (
         <section className="mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-4">
           <SummaryCell label={t("answered")} value={summary.answered} />
@@ -200,13 +324,13 @@ function PracticePage() {
       )}
 
       <div className="space-y-6">
-        {data.blocks.length === 0 && (
+        {activeBlocks.length === 0 && (
           <div className="rounded-md border border-border p-8 text-center text-sm text-muted-foreground">
             {t("catalog_empty")}
           </div>
         )}
 
-        {data.blocks.map((block) => {
+        {activeBlocks.map((block) => {
           if (block.kind === "question") {
             const question = block.question as PracticeQuestion;
             return (
