@@ -19,6 +19,14 @@ const enrichmentMetadataSchema = z.object({
   model: z.string().trim().min(1).max(200),
   fetched_at: z.string().trim().min(1).max(100),
   lookup_word: z.string().trim().min(1).max(500),
+  level_estimate: z
+    .object({
+      source: z.string().trim().min(1).max(120),
+      confidence: z.number().finite().min(0).max(1),
+      frequency_per_million: z.number().finite().min(0).nullable().default(null),
+    })
+    .nullable()
+    .default(null),
   source: z
     .object({
       name: z.string().trim().min(1).max(120),
@@ -342,6 +350,7 @@ export const suggestVocabularyEnrichmentForEditor = createServerFn({
             definition: z.string().max(10_000).nullable().optional(),
             ipa: z.string().max(500).nullable().optional(),
             partOfSpeech: z.string().max(100).nullable().optional(),
+            level: z.string().max(20).nullable().optional(),
             translations: z
               .array(translationSchema)
               .max(50)
@@ -522,6 +531,9 @@ function mergeVocabularySuggestions(
 
   return {
     ...primary,
+    level: primary.level ?? secondary.level,
+    level_estimate:
+      primary.level_estimate ?? secondary.level_estimate,
     definition: primary.definition ?? secondary.definition,
     ipa: primary.ipa ?? secondary.ipa,
     part_of_speech:
@@ -554,6 +566,7 @@ function dictionaryMetadataFromSuggestion(
     model: suggestion.model,
     fetched_at: suggestion.generated_at,
     lookup_word: lookupWord,
+    level_estimate: suggestion.level_estimate,
     source: suggestion.source,
     pronunciations: suggestion.pronunciations,
     forms: suggestion.forms,
@@ -641,7 +654,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
         admin
           .from("vocabulary_entries")
           .select(
-            "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order)",
+            "id,word,learning_language,definition,ipa,part_of_speech,level,synonyms,antonyms,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order)",
           )
           .in("id", data.ids)
           .is("deleted_at", null),
@@ -686,6 +699,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
       definition: string | null;
       ipa: string | null;
       part_of_speech: string | null;
+      level: string | null;
       synonyms: string[] | null;
       antonyms: string[] | null;
       provenance: unknown;
@@ -752,6 +766,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                     definition: row.definition,
                     ipa: row.ipa,
                     partOfSpeech: row.part_of_speech,
+                    level: row.level,
                     translations: existingTranslations,
                   },
                 });
@@ -794,6 +809,10 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
                 data.overwrite || !row.part_of_speech?.trim()
                   ? suggestion.part_of_speech ?? row.part_of_speech
                   : row.part_of_speech,
+              level:
+                data.overwrite || !row.level?.trim()
+                  ? suggestion.level ?? row.level
+                  : row.level,
               synonyms: [
                 ...new Set([
                   ...(row.synonyms ?? []),
