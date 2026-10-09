@@ -386,22 +386,36 @@ function VocabularyPage() {
     if (!selected.length) return;
     setBulkEnriching(true);
     try {
-      const result = await bulkEnrichVocabulary({
-        data: { ids: selected, overwrite: false },
-      });
+      const chunks: string[][] = [];
+      for (let index = 0; index < selected.length; index += 40) {
+        chunks.push(selected.slice(index, index + 40));
+      }
+
+      let updated = 0;
+      let failed = 0;
+      const failures: Array<{ id: string; word: string; error: string }> = [];
+      for (const ids of chunks) {
+        const result = await bulkEnrichVocabulary({
+          data: { ids, overwrite: false },
+        });
+        updated += result.updated;
+        failed += result.failed;
+        failures.push(...result.failures);
+      }
+
       await qc.invalidateQueries({ queryKey: ["vocabulary"] });
-      if (result.failed > 0) {
+      if (failed > 0) {
         toast.warning(
-          `${result.updated} enriched · ${result.failed} failed`,
+          `${updated} enriched · ${failed} failed`,
           {
-            description: result.failures
+            description: failures
               .slice(0, 3)
               .map((item) => `${item.word}: ${item.error}`)
               .join("\n"),
           },
         );
       } else {
-        toast.success(`${result.updated} vocabulary entries enriched`);
+        toast.success(`${updated} vocabulary entries enriched`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
