@@ -26,6 +26,8 @@ import { LEVELS } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
+import { addCatalogItems } from "@/lib/catalog.functions";
+import { CatalogTargetSelect } from "@/components/app/CatalogTargetSelect";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
 
@@ -106,6 +108,7 @@ function VocabularyPage() {
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState("");
   const [busyEditor, setBusyEditor] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [bulkEnriching, setBulkEnriching] = useState(false);
@@ -151,6 +154,7 @@ function VocabularyPage() {
     try {
       const v = await getVocabularyEntry({ data: { id } });
       setEnrichment(null);
+      setCatalogTarget("");
       setEditor({
         id: v.id,
         word: v.word,
@@ -216,8 +220,23 @@ function VocabularyPage() {
           .filter(Boolean),
         enrichment_metadata: editor.enrichment_metadata,
       };
-      await saveVocabularyEntry({ data: input });
+      const saved = await saveVocabularyEntry({ data: input });
+      if (catalogTarget) {
+        await addCatalogItems({
+          data: {
+            catalogId: catalogTarget,
+            items: [
+              {
+                entity_type: "vocabulary",
+                entity_id: saved.id,
+              },
+            ],
+          },
+        });
+        await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
+      }
       setEditor(null);
+      setCatalogTarget("");
       await qc.invalidateQueries({ queryKey: ["vocabulary"] });
       toast.success(t("save"));
     } catch (err) {
@@ -472,6 +491,7 @@ function VocabularyPage() {
             disabled={languages.isPending}
             onClick={() => {
               setEnrichment(null);
+              setCatalogTarget("");
               setEditor(
                 emptyEditor(
                   languages.defaultLearningCode,
@@ -1114,8 +1134,20 @@ function VocabularyPage() {
                 </div>
               </details>
 
+              <CatalogTargetSelect
+                value={catalogTarget}
+                onChange={setCatalogTarget}
+              />
+
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditor(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditor(null);
+                    setCatalogTarget("");
+                  }}
+                >
                   {t("cancel")}
                 </Button>
                 <Button type="submit" disabled={busyEditor}>
