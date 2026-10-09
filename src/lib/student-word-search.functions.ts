@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { gradeVocabularyResponse } from "./vocabulary-practice";
 
 const translationSchema = z.object({
   language: z.string().trim().min(2).max(10),
@@ -305,6 +306,9 @@ export const listStudentPersonalWords = createServerFn({ method: "GET" })
     z
       .object({
         search: z.string().max(200).default(""),
+        language: z.string().max(10).default(""),
+        level: z.string().max(20).default(""),
+        partOfSpeech: z.string().max(100).default(""),
         page: z.number().int().min(0).default(0),
       })
       .parse(d ?? {}),
@@ -328,6 +332,15 @@ export const listStudentPersonalWords = createServerFn({ method: "GET" })
     if (data.search.trim()) {
       const safe = data.search.trim().replace(/[%,()]/g, " ");
       query = query.ilike("word", `%${safe}%`);
+    }
+    if (data.language) {
+      query = query.eq("learning_language", data.language);
+    }
+    if (data.level) {
+      query = query.eq("level", data.level);
+    }
+    if (data.partOfSpeech) {
+      query = query.eq("part_of_speech", data.partOfSpeech);
     }
 
     const { data: rows, count, error } = await query;
@@ -407,6 +420,98 @@ export const saveStudentPersonalWord = createServerFn({ method: "POST" })
       throw new Error(error?.message ?? "Could not save word to your dictionary.");
     }
     return { id: created.id, created: true };
+  });
+
+export const submitStudentPersonalWordPractice = createServerFn({
+  method: "POST",
+})
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        mode: z.enum([
+          "translation_recall",
+          "reverse_recall",
+          "multiple_choice",
+        ]),
+        response: z.string().max(10_000),
+        targetLanguage: z.string().trim().min(2).max(10).nullable().default(null),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const studentId = await currentStudentId(context.supabase);
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: row, error } = await admin
+      .from("student_personal_vocabulary")
+      .select("id,word,learning_language,translations")
+      .eq("id", data.id)
+      .eq("student_id", studentId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Saved word was not found.");
+
+    const translations = Array.isArray(row.translations)
+      ? (row.translations as Array<Record<string, unknown>>)
+          .flatMap((item) => {
+            const language =
+              typeof item["language"] === "string" ? item["language"] : "";
+            const value =
+              typeof item["value"] === "string" ? item["value"] : "";
+            return language && value ? [{ language, value }] : [];
+          })
+      : [];
+
+    const expected =
+      data.mode === "reverse_recall"
+        ? [row.word]
+        : translations
+            .filter(
+              (item) =>
+                !data.targetLanguage ||
+                item.language.toLowerCase() ===
+                  data.targetLanguage.toLowerCase(),
+            )
+            .map((item) => item.value);
+
+    const fallbackExpected =
+      expected.length > 0
+        ? expected
+        : translations.map((item) => item.value);
+    if (!fallbackExpected.length) {
+      throw new Error("This saved word has no translation to practice.");
+    }
+
+    const graded = gradeVocabularyResponse(
+      data.response,
+      fallbackExpected,
+    );
+
+    const { error: activityError } = await admin
+      .from("activity_events")
+      .insert({
+        student_id: studentId,
+        category: "practice",
+        event_type: "personal_vocabulary_practice",
+        entity_type: "personal_vocabulary",
+        entity_id: row.id,
+        is_correct: graded.correct,
+        response: { text: data.response } as never,
+        details: {
+          mode: data.mode,
+          target_language: data.targetLanguage,
+          learning_language: row.learning_language,
+        } as never,
+      });
+    if (activityError) throw new Error(activityError.message);
+
+    return {
+      correct: graded.correct,
+      expected: fallbackExpected,
+    };
   });
 
 export const deleteStudentPersonalWord = createServerFn({ method: "POST" })
