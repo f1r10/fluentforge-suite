@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { listTopics } from "@/lib/questions.functions";
 import {
+  bulkEnrichVocabulary,
   getVocabularyEntry,
   getVocabularyEnrichmentStatus,
   listVocabulary,
@@ -52,6 +53,7 @@ type EditorState = {
   examples: Example[];
   topicIds: string[];
   tags: string;
+  enrichment_metadata: VocabularyInput["enrichment_metadata"];
 };
 
 const emptyEditor = (
@@ -74,6 +76,7 @@ const emptyEditor = (
   examples: [],
   topicIds: [],
   tags: "",
+  enrichment_metadata: null,
 });
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
@@ -104,6 +107,7 @@ function VocabularyPage() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [busyEditor, setBusyEditor] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [bulkEnriching, setBulkEnriching] = useState(false);
   const [enrichment, setEnrichment] = useState<
     Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
   >(null);
@@ -111,8 +115,10 @@ function VocabularyPage() {
   const dictionaryFallbackForEditor =
     !!editor &&
     enrichmentStatus?.dictionaryFallback === true &&
-    (editor.learning_language.toLowerCase() === "en" ||
-      editor.learning_language.toLowerCase().startsWith("en-"));
+    (enrichmentStatus.dictionaryLanguages ?? []).includes(
+      editor.learning_language.toLowerCase().split("-")[0] ||
+        editor.learning_language.toLowerCase(),
+    );
   const enrichmentAvailable =
     !!enrichmentStatus &&
     (enrichmentStatus.available || dictionaryFallbackForEditor);
@@ -167,6 +173,9 @@ function VocabularyPage() {
         examples: v.examples,
         topicIds: v.topicIds,
         tags: v.tags.join(", "),
+        enrichment_metadata:
+          (v.enrichment_metadata as VocabularyInput["enrichment_metadata"]) ??
+          null,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -203,6 +212,7 @@ function VocabularyPage() {
           .split(",")
           .map((x) => x.trim())
           .filter(Boolean),
+        enrichment_metadata: editor.enrichment_metadata,
       };
       await saveVocabularyEntry({ data: input });
       setEditor(null);
@@ -338,9 +348,46 @@ function VocabularyPage() {
         ),
         translations: [...translationMap.values()],
         examples,
+        enrichment_metadata: {
+          provider: suggestion.provider,
+          model: suggestion.model,
+          fetched_at: suggestion.generated_at,
+          lookup_word: current.word.trim(),
+          source: suggestion.source,
+          pronunciations: suggestion.pronunciations,
+          forms: suggestion.forms,
+        },
       };
     });
     toast.success(t("enrichment_applied"));
+  }
+
+  async function bulkEnrich() {
+    if (!selected.length) return;
+    setBulkEnriching(true);
+    try {
+      const result = await bulkEnrichVocabulary({
+        data: { ids: selected, overwrite: false },
+      });
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      if (result.failed > 0) {
+        toast.warning(
+          `${result.updated} enriched · ${result.failed} failed`,
+          {
+            description: result.failures
+              .slice(0, 3)
+              .map((item) => `${item.word}: ${item.error}`)
+              .join("\n"),
+          },
+        );
+      } else {
+        toast.success(`${result.updated} vocabulary entries enriched`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkEnriching(false);
+    }
   }
 
   async function bulkStatus(next: "active" | "draft" | "archived") {
@@ -462,6 +509,15 @@ function VocabularyPage() {
       {selected.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
           <strong>{selected.length} {t("selected")}</strong>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulkEnriching}
+            onClick={() => void bulkEnrich()}
+          >
+            <Sparkles className="h-4 w-4" />
+            {bulkEnriching ? t("generating") : t("suggest_enrichment")}
+          </Button>
           <Button size="sm" variant="outline" onClick={() => bulkStatus("active")}>{t("active")}</Button>
           <Button size="sm" variant="outline" onClick={() => bulkStatus("draft")}>{t("draft")}</Button>
           <Button size="sm" variant="outline" onClick={() => bulkStatus("archived")}>{t("archive")}</Button>
@@ -645,6 +701,61 @@ function VocabularyPage() {
                     </dd>
                   </div>
                 </dl>
+                {enrichment.pronunciations.some(
+                  (item) => item.ipa || item.audio,
+                ) && (
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Pronunciation / audio
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {enrichment.pronunciations
+                        .slice(0, 4)
+                        .map((item, index) => (
+                          <div
+                            key={`${item.ipa ?? ""}:${item.audio ?? ""}:${index}`}
+                            className="rounded-md border border-border px-2 py-1 text-xs"
+                          >
+                            <span>
+                              {item.region ? `${item.region} · ` : ""}
+                              {item.ipa || "audio"}
+                            </span>
+                            {item.audio && (
+                              <audio
+                                className="mt-1 h-7 max-w-52"
+                                controls
+                                preload="none"
+                                src={item.audio}
+                              />
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+                {enrichment.forms.length > 0 && (
+                  <div className="border-t border-border pt-3 text-xs">
+                    <span className="font-medium text-muted-foreground">
+                      Forms:{" "}
+                    </span>
+                    {enrichment.forms
+                      .slice(0, 12)
+                      .map((item) =>
+                        item.tags.length
+                          ? `${item.form} (${item.tags.join(", ")})`
+                          : item.form,
+                      )
+                      .join(" · ")}
+                  </div>
+                )}
+                {enrichment.source && (
+                  <div className="text-xs text-muted-foreground">
+                    Source: {enrichment.source.name}
+                    {enrichment.source.license
+                      ? ` · ${enrichment.source.license}`
+                      : ""}
+                  </div>
+                )}
                 {enrichment.notes && (
                   <p className="text-xs text-muted-foreground">
                     {enrichment.notes}
