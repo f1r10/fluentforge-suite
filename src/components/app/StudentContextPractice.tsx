@@ -179,10 +179,10 @@ export function StudentReadingBlock({
           <h2 className="text-xl font-bold">{reading.title}</h2>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
-          <div className="lg:max-h-[70vh] lg:overflow-y-auto lg:pr-3">
+          <div className="min-w-0 lg:max-h-[70vh] lg:overflow-y-auto lg:pr-3">
             <Passage body={reading.body} />
           </div>
-          <div>{questionArea}</div>
+          <div className="min-w-0">{questionArea}</div>
         </div>
       </section>
     );
@@ -409,7 +409,7 @@ export function collectContextQuestions(
 
 function Passage({ body }: { body: string }) {
   return (
-    <div className="whitespace-pre-wrap text-sm leading-7">
+    <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-7">
       {body}
     </div>
   );
