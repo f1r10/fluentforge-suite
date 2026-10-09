@@ -949,6 +949,137 @@ def test_listening_target_splits_multiple_tasks_on_one_page():
     }
 
 
+def test_btu_c1_vocabulary_rows_parse_word_pos_level_and_sense():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "native_text",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "1) abandon verb STOP DOING C1\n"
+                    "3) aboard adverb, preposition C1\n"
+                    "5) Absolutely! C1\n"
+                    "6) absorb verb REMEMBER C1\n"
+                    "7) abuse noun WRONG ACTION C1\n"
+                    "15) in accordance with sth C1\n"
+                    "20) acknowledge verb ACCEPT C1\n"
+                    "21) acknowledge verb SAY RECEIVED C1\n"
+                ),
+                "tables": [],
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+    payloads = [item["payload"] for item in items]
+
+    assert [item["word"] for item in payloads] == [
+        "abandon",
+        "aboard",
+        "Absolutely!",
+        "absorb",
+        "abuse",
+        "in accordance with sth",
+        "acknowledge",
+        "acknowledge",
+    ]
+    assert payloads[0]["part_of_speech"] == "verb"
+    assert payloads[0]["notes"] == "Source sense: STOP DOING"
+    assert payloads[1]["part_of_speech"] == "adverb, preposition"
+    assert payloads[1]["level"] == "C1"
+    assert payloads[2]["part_of_speech"] is None
+    assert payloads[2]["level"] == "C1"
+    assert payloads[3]["part_of_speech"] == "verb"
+    assert payloads[3]["notes"] == "Source sense: REMEMBER"
+    assert payloads[4]["part_of_speech"] == "noun"
+    assert payloads[4]["notes"] == "Source sense: WRONG ACTION"
+    assert payloads[5]["part_of_speech"] is None
+    assert payloads[5]["level"] == "C1"
+    assert payloads[6]["notes"] == "Source sense: ACCEPT"
+    assert payloads[7]["notes"] == "Source sense: SAY RECEIVED"
+
+
+def test_sparse_pdf_grid_falls_back_to_complete_native_vocabulary_text():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "pdf_layout_native",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "3) aboard adverb, preposition C1\n"
+                    "4) abortion noun C1\n"
+                    "6) absorb verb REMEMBER C1\n"
+                ),
+                "tables": [
+                    {
+                        "rows": [
+                            [
+                                "3) aboard adverb, preposition C",
+                                None,
+                                None,
+                                None,
+                                None,
+                                "1",
+                            ],
+                            [
+                                "4) abortion noun C",
+                                None,
+                                None,
+                                "1",
+                                None,
+                                None,
+                            ],
+                            [
+                                "6) absorb verb REMEMBER",
+                                None,
+                                None,
+                                None,
+                                "C1",
+                                None,
+                            ],
+                        ],
+                        "crop": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.7},
+                    }
+                ],
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+    payloads = [item["payload"] for item in items]
+
+    assert [item["word"] for item in payloads] == [
+        "aboard",
+        "abortion",
+        "absorb",
+    ]
+    assert payloads[0]["part_of_speech"] == "adverb, preposition"
+    assert payloads[0]["level"] == "C1"
+    assert payloads[2]["notes"] == "Source sense: REMEMBER"
+
+
 def test_oxford_style_vocabulary_list_detection():
     from app.extractors import Extraction
 
