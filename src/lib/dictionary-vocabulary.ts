@@ -385,28 +385,76 @@ export async function fetchWiktApiVocabularySuggestion(
   const timeout = setTimeout(() => controller.abort(), 8_000);
   const language = normalizeLanguage(options.language ?? "en") || "en";
   const edition = "en";
+  const encodedWord = encodeURIComponent(word.trim());
+  const query = `?lang=${encodeURIComponent(language)}`;
+  const base = `https://api.wiktapi.dev/v1/${edition}/word/${encodedWord}`;
 
   try {
-    const response = await fetcher(
-      `https://api.wiktapi.dev/v1/${edition}/word/${encodeURIComponent(
-        word.trim(),
-      )}?lang=${encodeURIComponent(language)}`,
-      {
+    // WiktAPI's full-entry endpoint intentionally omits POS/lang_code while
+    // the definitions endpoint includes them. Fetch both and merge entries
+    // by their stable query order so we retain rich sounds/forms/translations
+    // together with part-of-speech metadata.
+    const [fullResponse, definitionsResponse] = await Promise.all([
+      fetcher(`${base}${query}`, {
         method: "GET",
         headers: { accept: "application/json" },
         signal: controller.signal,
-      },
-    );
+      }),
+      fetcher(`${base}/definitions${query}`, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      }),
+    ]);
 
-    if (response.status === 404) {
+    if (fullResponse.status === 404 || definitionsResponse.status === 404) {
       throw new Error(`WiktAPI found no entry for "${word}".`);
     }
-    if (!response.ok) {
-      throw new Error(`WiktAPI lookup failed with HTTP ${response.status}.`);
+    if (!fullResponse.ok) {
+      throw new Error(
+        `WiktAPI lookup failed with HTTP ${fullResponse.status}.`,
+      );
+    }
+    if (!definitionsResponse.ok) {
+      throw new Error(
+        `WiktAPI definitions lookup failed with HTTP ${definitionsResponse.status}.`,
+      );
     }
 
+    const [fullJson, definitionsJson] = (await Promise.all([
+      fullResponse.json(),
+      definitionsResponse.json(),
+    ])) as [Record<string, unknown>, Record<string, unknown>];
+
+    const fullEntries = Array.isArray(fullJson["entries"])
+      ? (fullJson["entries"] as Array<Record<string, unknown>>)
+      : [];
+    const definitions = Array.isArray(definitionsJson["definitions"])
+      ? (definitionsJson["definitions"] as Array<Record<string, unknown>>)
+      : [];
+
+    const count = Math.max(fullEntries.length, definitions.length);
+    const entries = Array.from({ length: count }, (_, index) => {
+      const full = fullEntries[index] ?? {};
+      const definition = definitions[index] ?? {};
+      return {
+        ...full,
+        pos:
+          typeof definition["pos"] === "string"
+            ? definition["pos"]
+            : full["pos"],
+        lang_code:
+          typeof definition["lang_code"] === "string"
+            ? definition["lang_code"]
+            : full["lang_code"],
+        senses: Array.isArray(definition["senses"])
+          ? definition["senses"]
+          : full["senses"],
+      };
+    });
+
     const parsed = parseWiktApiVocabularyResponse(
-      await response.json(),
+      { entries },
       word,
       options,
     );
