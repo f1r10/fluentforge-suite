@@ -447,9 +447,9 @@ export async function fetchWiktApiVocabularySuggestion(
           typeof definition["lang_code"] === "string"
             ? definition["lang_code"]
             : full["lang_code"],
-        senses: Array.isArray(definition["senses"])
-          ? definition["senses"]
-          : full["senses"],
+        senses: Array.isArray(full["senses"])
+          ? full["senses"]
+          : definition["senses"],
       };
     });
 
