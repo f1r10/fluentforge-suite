@@ -631,6 +631,101 @@ async function resolveStoredVocabularyDictionary(
   }
 }
 
+export const autoFillMissingVocabularyLevels = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const { fetchDatamuseCefrEstimate } = await import(
+      "./dictionary-vocabulary"
+    );
+    const admin = await adminClient();
+
+    const { data: rows, error } = await admin
+      .from("vocabulary_entries")
+      .select("id,word,learning_language,level,provenance")
+      .eq("status", "active")
+      .eq("learning_language", "en")
+      .is("level", null)
+      .is("deleted_at", null)
+      .order("word")
+      .limit(500);
+    if (error) throw new Error(error.message);
+
+    let updated = 0;
+    let unavailable = 0;
+    for (let offset = 0; offset < (rows ?? []).length; offset += 8) {
+      const batch = (rows ?? []).slice(offset, offset + 8);
+      const results = await Promise.all(
+        batch.map(async (row) => {
+          const estimate = await fetchDatamuseCefrEstimate(row.word).catch(
+            () => null,
+          );
+          if (!estimate) return false;
+
+          const provenance =
+            row.provenance && typeof row.provenance === "object"
+              ? (row.provenance as Record<string, unknown>)
+              : {};
+          const dictionary =
+            provenance["dictionary"] &&
+            typeof provenance["dictionary"] === "object"
+              ? (provenance["dictionary"] as Record<string, unknown>)
+              : {};
+
+          const { data: changed, error: updateError } = await admin
+            .from("vocabulary_entries")
+            .update({
+              level: estimate.level,
+              provenance: {
+                ...provenance,
+                dictionary: {
+                  ...dictionary,
+                  level_estimate: {
+                    source: "Datamuse frequency heuristic",
+                    confidence: estimate.confidence,
+                    frequency_per_million:
+                      estimate.frequencyPerMillion,
+                  },
+                  level_estimated_at: new Date().toISOString(),
+                },
+              } as never,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", row.id)
+            .is("level", null)
+            .select("id")
+            .maybeSingle();
+          if (updateError) throw new Error(updateError.message);
+          return !!changed;
+        }),
+      );
+      updated += results.filter(Boolean).length;
+      unavailable += results.filter((value) => !value).length;
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "vocabulary_levels_auto_filled",
+      entity_type: "vocabulary",
+      summary: `Automatically filled CEFR levels for ${updated} vocabulary entries`,
+      details: {
+        candidates: rows?.length ?? 0,
+        updated,
+        unavailable,
+        method: "datamuse_frequency",
+      },
+    });
+
+    return {
+      candidates: rows?.length ?? 0,
+      updated,
+      unavailable,
+    };
+  });
+
 export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
