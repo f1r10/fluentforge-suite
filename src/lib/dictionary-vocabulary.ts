@@ -739,20 +739,6 @@ function normalizePartOfSpeechForWord(
   return normalizePartOfSpeech(value);
 }
 
-function entryFormTags(entry: WiktEntry) {
-  return Array.isArray(entry.forms)
-    ? entry.forms.flatMap((form) => {
-        if (!form || typeof form !== "object") return [];
-        const row = form as Record<string, unknown>;
-        return Array.isArray(row["tags"])
-          ? row["tags"].filter(
-              (tag): tag is string => typeof tag === "string",
-            )
-          : [];
-      })
-    : [];
-}
-
 function choosePrimaryPartOfSpeech(word: string, entries: WiktEntry[]) {
   const cleanedWord = word.trim().toLowerCase();
   if (
@@ -762,60 +748,23 @@ function choosePrimaryPartOfSpeech(word: string, entries: WiktEntry[]) {
     return "number";
   }
 
-  const candidates = entries
-    .map((entry, index) => {
-      const pos =
-        typeof entry.pos === "string"
-          ? normalizePartOfSpeech(entry.pos)
-          : null;
-      if (!pos) return null;
+  // WiktAPI/Kaikki already orders lexical entries in dictionary order.
+  // Preserve that order instead of promoting any later verb merely because
+  // it exposes rich inflection metadata. The previous morphology bonus made
+  // ordinary nouns/adjectives such as "apple", "baby", "bad", "book" and
+  // "angry" become verbs whenever a secondary verb sense existed.
+  //
+  // Inflection metadata is useful for displaying forms, but it is not
+  // evidence that the verb sense is the primary sense of an ambiguous lemma.
+  for (const entry of entries) {
+    const pos =
+      typeof entry.pos === "string"
+        ? normalizePartOfSpeech(entry.pos)
+        : null;
+    if (pos) return pos;
+  }
 
-      const tags = entryFormTags(entry).map((tag) => tag.toLowerCase());
-      let score = 100 - index;
-
-      if (
-        pos === "verb" &&
-        tags.some((tag) =>
-          [
-            "past",
-            "past-tense",
-            "participle",
-            "present-participle",
-            "third-person",
-            "singular",
-            "gerund",
-            "infinitive",
-          ].includes(tag),
-        )
-      ) {
-        score += 120;
-      }
-
-      if (
-        pos === "adjective" &&
-        tags.some((tag) =>
-          ["comparative", "superlative"].includes(tag),
-        )
-      ) {
-        score += 80;
-      }
-
-      if (
-        pos === "noun" &&
-        tags.some((tag) => ["plural"].includes(tag))
-      ) {
-        score += 35;
-      }
-
-      return { pos, score };
-    })
-    .filter(
-      (item): item is { pos: string; score: number } => item != null,
-    );
-
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0]!.pos;
+  return null;
 }
 
 function normalizeLanguage(value: string) {
