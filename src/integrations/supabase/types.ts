@@ -2030,6 +2030,71 @@ export type Database = {
         }
         Relationships: []
       }
+      student_personal_vocabulary: {
+        Row: {
+          antonyms: string[]
+          created_at: string
+          definition: string | null
+          examples: Json
+          id: string
+          ipa: string | null
+          learning_language: string
+          level: string | null
+          lexical_metadata: Json
+          part_of_speech: string | null
+          source: string
+          student_id: string
+          synonyms: string[]
+          translations: Json
+          updated_at: string
+          word: string
+        }
+        Insert: {
+          antonyms?: string[]
+          created_at?: string
+          definition?: string | null
+          examples?: Json
+          id?: string
+          ipa?: string | null
+          learning_language?: string
+          level?: string | null
+          lexical_metadata?: Json
+          part_of_speech?: string | null
+          source?: string
+          student_id: string
+          synonyms?: string[]
+          translations?: Json
+          updated_at?: string
+          word: string
+        }
+        Update: {
+          antonyms?: string[]
+          created_at?: string
+          definition?: string | null
+          examples?: Json
+          id?: string
+          ipa?: string | null
+          learning_language?: string
+          level?: string | null
+          lexical_metadata?: Json
+          part_of_speech?: string | null
+          source?: string
+          student_id?: string
+          synonyms?: string[]
+          translations?: Json
+          updated_at?: string
+          word?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_personal_vocabulary_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_vocabulary_state: {
         Row: {
           student_id: string
