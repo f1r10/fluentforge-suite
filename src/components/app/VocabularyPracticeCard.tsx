@@ -21,6 +21,23 @@ export type VocabularyPracticeEntry = {
   level: string | null;
   translations: Array<{ language: string; value: string }>;
   examples: Array<{ sentence: string; translation: string | null }>;
+  lexical_metadata?: {
+    source?: {
+      name?: string | null;
+      url?: string | null;
+      license?: string | null;
+    } | null;
+    pronunciations?: Array<{
+      ipa?: string | null;
+      audio?: string | null;
+      region?: string | null;
+      tags?: string[];
+    }>;
+    forms?: Array<{
+      form?: string;
+      tags?: string[];
+    }>;
+  } | null;
   learner_state: {
     state: VocabularyLearnerState;
     correct_count: number;
@@ -389,6 +406,52 @@ function Meaning({ entry }: { entry: VocabularyPracticeEntry }) {
 
       {entry.definition && <p className="text-sm">{entry.definition}</p>}
 
+      {(entry.lexical_metadata?.pronunciations ?? []).some(
+        (item) => item.audio || item.ipa,
+      ) && (
+        <div className="flex flex-wrap gap-2">
+          {(entry.lexical_metadata?.pronunciations ?? [])
+            .filter((item) => item.audio || item.ipa)
+            .slice(0, 4)
+            .map((item, index) => (
+              <div
+                key={`${item.ipa ?? ""}:${item.audio ?? ""}:${index}`}
+                className="rounded-md border border-border px-2 py-1 text-xs"
+              >
+                <div>
+                  {item.region ? `${item.region} · ` : ""}
+                  {item.ipa || "audio"}
+                </div>
+                {item.audio && (
+                  <audio
+                    className="mt-1 h-7 max-w-52"
+                    controls
+                    preload="none"
+                    src={item.audio}
+                  />
+                )}
+              </div>
+            ))}
+        </div>
+      )}
+
+      {(entry.lexical_metadata?.forms ?? []).length > 0 && (
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Forms: </span>
+          {(entry.lexical_metadata?.forms ?? [])
+            .slice(0, 12)
+            .map((item) =>
+              item.form
+                ? item.tags?.length
+                  ? `${item.form} (${item.tags.join(", ")})`
+                  : item.form
+                : "",
+            )
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      )}
+
       {entry.examples.length > 0 && (
         <ul className="space-y-1 text-sm">
           {entry.examples.map((example, index) => (
@@ -403,6 +466,14 @@ function Meaning({ entry }: { entry: VocabularyPracticeEntry }) {
             </li>
           ))}
         </ul>
+      )}
+      {entry.lexical_metadata?.source?.name && (
+        <div className="text-[11px] text-muted-foreground">
+          Source: {entry.lexical_metadata.source.name}
+          {entry.lexical_metadata.source.license
+            ? ` · ${entry.lexical_metadata.source.license}`
+            : ""}
+        </div>
       )}
     </div>
   );
