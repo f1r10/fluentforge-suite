@@ -9,12 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { saveQuestion, type QuestionInput } from "@/lib/questions.functions";
+import { addCatalogItems } from "@/lib/catalog.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions, type TopicRow } from "@/components/app/topics";
 import { QuestionLabellingEditor, type SpatialLabel } from "@/components/app/QuestionLabellingEditor";
 import { QuestionMediaAttachment } from "@/components/app/QuestionMediaAttachment";
 import { useI18n } from "@/lib/i18n";
 import { useContentLanguages } from "@/lib/content-languages";
+import { CatalogTargetSelect } from "@/components/app/CatalogTargetSelect";
 
 type Opt = { id: string; text: string };
 type Pair = { left: string; right: string };
@@ -170,6 +172,7 @@ export function QuestionEditor({
   const [f, setF] = useState<Form>(initial ?? empty());
   const [busy, setBusy] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState("");
   const def = TYPE_BY_ID[f.question_type]!;
   const set = (patch: Partial<Form>) => setF({ ...f, ...patch });
 
@@ -198,6 +201,22 @@ export function QuestionEditor({
       const r = await saveQuestion({ data: { ...toInput(f, id), force } });
       if (r.duplicateOf) { setDup(r.duplicateOf); return; }
       setDup(null);
+
+      if (!onSaved && catalogTarget && r.id) {
+        await addCatalogItems({
+          data: {
+            catalogId: catalogTarget,
+            items: [
+              {
+                entity_type: "question",
+                entity_id: r.id,
+              },
+            ],
+          },
+        });
+        qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
+      }
+
       qc.invalidateQueries({ queryKey: ["questions"] });
       toast.success(t("save"));
 
@@ -234,7 +253,7 @@ export function QuestionEditor({
       onSubmit={(e) => { e.preventDefault(); save(false); }}
       onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); save(true); } }}
     >
-      <div className="max-w-xl">
+      <div className="grid max-w-3xl gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label>{t("type")}</Label>
           <select value={f.question_type} onChange={(e) => set({ question_type: e.target.value, correct: [], grading_mode: TYPE_BY_ID[e.target.value]?.defaultGrading ?? "automatic" })} className={sel}>
@@ -242,6 +261,12 @@ export function QuestionEditor({
           </select>
         </div>
 
+        {!onSaved && (
+          <CatalogTargetSelect
+            value={catalogTarget}
+            onChange={setCatalogTarget}
+          />
+        )}
       </div>
 
       <div className="space-y-2">
