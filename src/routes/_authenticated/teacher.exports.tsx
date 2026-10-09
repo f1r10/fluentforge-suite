@@ -12,6 +12,10 @@ import {
   type ExportFormat,
   type ExportKind,
 } from "@/lib/export.functions";
+import {
+  EXPORT_FORMATS,
+  defaultExportFormat,
+} from "@/lib/export-formats";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 
@@ -104,12 +108,8 @@ function ExportCenter() {
                 type="button"
                 onClick={() => {
                   setKind(option.kind);
-                  if (
-                    format === "pdf" &&
-                    option.kind !== "analytics" &&
-                    option.kind !== "questions"
-                  ) {
-                    setFormat("xlsx");
+                  if (!EXPORT_FORMATS[option.kind].includes(format)) {
+                    setFormat(defaultExportFormat(option.kind));
                   }
                 }}
                 className={[
@@ -136,23 +136,34 @@ function ExportCenter() {
               value={format}
               onChange={(event) => setFormat(event.target.value as ExportFormat)}
             >
-              <option value="xlsx">Excel (.xlsx)</option>
-              <option value="json">Portable JSON</option>
-              {kind !== "content_package" && <option value="csv">CSV</option>}
-              {(kind === "analytics" || kind === "questions") && (
-                <option value="pdf">
-                  {kind === "questions" ? "PDF" : "PDF report"}
+              {EXPORT_FORMATS[kind].map((value) => (
+                <option key={value} value={value}>
+                  {value === "xlsx"
+                    ? "Excel (.xlsx)"
+                    : value === "json"
+                      ? "Portable JSON"
+                      : value === "csv"
+                        ? "CSV"
+                        : value === "docx"
+                          ? "Word (.docx)"
+                          : value === "pdf" && kind === "analytics"
+                            ? "PDF report"
+                            : "PDF"}
                 </option>
-              )}
+              ))}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
-              {format === "csv"
-                ? t("csv_primary_table_hint")
-                : format === "pdf"
-                  ? kind === "questions"
-                    ? t("export_questions_hint")
-                    : t("pdf_report_hint")
-                  : t("full_export_format_hint")}
+              {kind === "readings"
+                ? t("export_readings_hint")
+                : format === "csv"
+                  ? t("csv_primary_table_hint")
+                  : format === "pdf"
+                    ? kind === "questions"
+                      ? t("export_questions_hint")
+                      : kind === "vocabulary"
+                        ? t("export_vocabulary_hint")
+                        : t("pdf_report_hint")
+                    : t("full_export_format_hint")}
             </p>
           </div>
 
@@ -196,7 +207,7 @@ function ExportCenter() {
               <FileSpreadsheet className="h-4 w-4" />
             ) : format === "json" ? (
               <FileJson2 className="h-4 w-4" />
-            ) : format === "pdf" ? (
+            ) : format === "pdf" || format === "docx" ? (
               <FileText className="h-4 w-4" />
             ) : (
               <FileArchive className="h-4 w-4" />
