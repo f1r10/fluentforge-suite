@@ -153,6 +153,8 @@ export function parseDictionaryVocabularyResponse(
   );
 
   return {
+    level: null,
+    level_estimate: null,
     definition:
       firstDefinition &&
       typeof firstDefinition.definition === "string"
@@ -355,6 +357,8 @@ export function parseWiktApiVocabularyResponse(
   ).slice(0, 20);
 
   return {
+    level: null,
+    level_estimate: null,
     definition,
     ipa,
     part_of_speech: partOfSpeech,
@@ -534,9 +538,10 @@ export async function fetchBestDictionaryVocabularySuggestion(
 ): Promise<VocabularyEnrichmentSuggestion> {
   const language = normalizeLanguage(options.language ?? "en") || "en";
   let wiktError: unknown;
+  let suggestion: VocabularyEnrichmentSuggestion | null = null;
 
   try {
-    return await fetchWiktApiVocabularySuggestion(
+    suggestion = await fetchWiktApiVocabularySuggestion(
       word,
       { ...options, language },
       fetcher,
@@ -545,10 +550,10 @@ export async function fetchBestDictionaryVocabularySuggestion(
     wiktError = error;
   }
 
-  if (language === "en") {
+  if (!suggestion && language === "en") {
     try {
       const fallback = await fetchDictionaryVocabularySuggestion(word, fetcher);
-      return {
+      suggestion = {
         ...fallback,
         notes: [
           fallback.notes,
@@ -571,9 +576,111 @@ export async function fetchBestDictionaryVocabularySuggestion(
     }
   }
 
-  throw wiktError instanceof Error
-    ? wiktError
-    : new Error("Dictionary lookup failed.");
+  if (!suggestion) {
+    throw wiktError instanceof Error
+      ? wiktError
+      : new Error("Dictionary lookup failed.");
+  }
+
+  if (!suggestion.level && language === "en") {
+    const estimate = await fetchDatamuseCefrEstimate(word, fetcher).catch(
+      () => null,
+    );
+    if (estimate) {
+      suggestion = {
+        ...suggestion,
+        level: estimate.level,
+        level_estimate: {
+          source: "Datamuse frequency heuristic",
+          confidence: estimate.confidence,
+          frequency_per_million: estimate.frequencyPerMillion,
+        },
+        notes: [
+          suggestion.notes,
+          `CEFR ${estimate.level} is an automatic estimate from corpus frequency and can be changed by the teacher.`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      };
+    }
+  }
+
+  return suggestion;
+}
+
+export async function fetchDatamuseCefrEstimate(
+  word: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  confidence: number;
+  frequencyPerMillion: number;
+} | null> {
+  const cleaned = word.trim().toLowerCase();
+  if (!cleaned) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  const base = (
+    process.env["DATAMUSE_BASE_URL"] ?? "https://api.datamuse.com"
+  ).replace(/\/+$/, "");
+
+  try {
+    const response = await fetcher(
+      `${base}/words?sp=${encodeURIComponent(
+        cleaned,
+      )}&qe=sp&md=f&max=3`,
+      {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok) return null;
+
+    const body = await response.json();
+    if (!Array.isArray(body)) return null;
+    const row = body.find(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        typeof (item as Record<string, unknown>)["word"] === "string" &&
+        String((item as Record<string, unknown>)["word"])
+          .trim()
+          .toLowerCase() === cleaned,
+    ) as Record<string, unknown> | undefined;
+    if (!row) return null;
+
+    const tags = Array.isArray(row["tags"]) ? row["tags"] : [];
+    const frequencyTag = tags.find(
+      (tag) => typeof tag === "string" && tag.startsWith("f:"),
+    );
+    if (typeof frequencyTag !== "string") return null;
+    const frequency = Number(frequencyTag.slice(2));
+    if (!Number.isFinite(frequency) || frequency < 0) return null;
+
+    const level =
+      frequency >= 100
+        ? "A1"
+        : frequency >= 30
+          ? "A2"
+          : frequency >= 10
+            ? "B1"
+            : frequency >= 3
+              ? "B2"
+              : frequency >= 1
+                ? "C1"
+                : "C2";
+
+    return {
+      level,
+      confidence:
+        frequency >= 30 ? 0.72 : frequency >= 3 ? 0.64 : 0.56,
+      frequencyPerMillion: frequency,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeLanguage(value: string) {
