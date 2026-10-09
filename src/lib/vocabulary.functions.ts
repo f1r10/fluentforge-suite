@@ -726,6 +726,125 @@ export const autoFillMissingVocabularyLevels = createServerFn({
     };
   });
 
+export const repairVocabularyPartOfSpeech = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(50),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+
+    const { data: rows, error } = await admin
+      .from("vocabulary_entries")
+      .select("id,word,learning_language,part_of_speech,provenance")
+      .in("id", data.ids)
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
+
+    const failures: Array<{
+      id: string;
+      word: string;
+      error: string;
+    }> = [];
+    const changes: Array<{
+      id: string;
+      word: string;
+      before: string | null;
+      after: string;
+    }> = [];
+
+    for (let offset = 0; offset < (rows ?? []).length; offset += 4) {
+      const batch = (rows ?? []).slice(offset, offset + 4);
+      await Promise.all(
+        batch.map(async (row) => {
+          try {
+            const language = (row.learning_language || "en")
+              .toLowerCase()
+              .split("-")[0] || "en";
+            const resolved = await resolveStoredVocabularyDictionary(
+              row.word,
+              language,
+              [],
+            );
+            const next = resolved.suggestion.part_of_speech?.trim() || null;
+            if (!next || next === row.part_of_speech) return;
+
+            const provenance =
+              row.provenance && typeof row.provenance === "object"
+                ? (row.provenance as Record<string, unknown>)
+                : {};
+
+            const { error: updateError } = await admin
+              .from("vocabulary_entries")
+              .update({
+                part_of_speech: next,
+                provenance: {
+                  ...provenance,
+                  dictionary: {
+                    ...dictionaryMetadataFromSuggestion(
+                      resolved.suggestion,
+                      resolved.lookupWord,
+                    ),
+                    part_of_speech_repaired_at: new Date().toISOString(),
+                    previous_part_of_speech: row.part_of_speech,
+                  },
+                } as never,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", row.id)
+              .is("deleted_at", null);
+            if (updateError) throw new Error(updateError.message);
+
+            changes.push({
+              id: row.id,
+              word: row.word,
+              before: row.part_of_speech,
+              after: next,
+            });
+          } catch (repairError) {
+            failures.push({
+              id: row.id,
+              word: row.word,
+              error:
+                repairError instanceof Error
+                  ? repairError.message
+                  : String(repairError),
+            });
+          }
+        }),
+      );
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "vocabulary_part_of_speech_repaired",
+      entity_type: "vocabulary",
+      summary: `Rechecked part of speech for ${data.ids.length} vocabulary entries`,
+      details: {
+        requested: data.ids.length,
+        changed: changes.length,
+        failed: failures.length,
+        changes: changes.slice(0, 100),
+      },
+    });
+
+    return {
+      requested: data.ids.length,
+      changed: changes.length,
+      failed: failures.length,
+      changes: changes.slice(0, 100),
+      failures: failures.slice(0, 20),
+    };
+  });
+
 export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
