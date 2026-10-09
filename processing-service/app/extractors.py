@@ -1038,8 +1038,11 @@ def _is_usable_vocabulary_table(rows: list[list[Any]]) -> bool:
     multi_column_rows = sum(1 for count in nonempty_counts if count >= 2)
     max_columns = max((len(row) for row in clean_rows), default=0)
 
-    # A headerless two-column glossary is useful. A 16-column grid where 90%
-    # of rows contain a single text fragment is not.
+    # Headerless PDF vocabulary tables are only trusted when their physical
+    # layout is genuinely narrow. Wide grids are commonly decorative cells
+    # that split one logical line (for example the final "C1") across columns.
+    if max_columns > 3:
+        return False
     if multi_column_rows >= max(2, len(nonempty_counts) // 2):
         return True
     if max_columns <= 3 and multi_column_rows > 0:
@@ -1073,6 +1076,25 @@ def _parse_vocab_list_entry(
     if ipa_match:
         ipa = ipa_match.group(1)
         cleaned = f"{cleaned[:ipa_match.start()]} {cleaned[ipa_match.end():]}".strip()
+
+    # Preserve Oxford's compact dotted notation before the broader full-word
+    # matcher. Example: "about prep., adv. A1".
+    if re.search(
+        r"\b(?:n|v|adj|adv|prep|pron|det|conj|exclam)\.",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        compact_word, compact_ipa, compact_pos, compact_level = _parse_vocab_head(
+            f"{cleaned} {level or ''}".strip()
+        )
+        if compact_pos:
+            return (
+                compact_word,
+                ipa or compact_ipa,
+                compact_pos,
+                level or compact_level,
+                None,
+            )
 
     full_labels = [
         key
