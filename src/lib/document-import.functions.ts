@@ -7,6 +7,31 @@ import { getProcessingService, type ProcessingImportItem } from "./processing.se
 const SOURCE_BUCKET = "sources";
 const MiB = 1024 * 1024;
 
+const POSTGREST_ID_CHUNK = 150;
+
+function chunks<T>(values: T[], size = POSTGREST_ID_CHUNK) {
+  const output: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    output.push(values.slice(index, index + size));
+  }
+  return output;
+}
+
+async function updateImportItemDecisionInChunks(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  ids: string[],
+  decision: "pending" | "approved" | "rejected",
+) {
+  for (const batch of chunks(ids)) {
+    const { error } = await sb
+      .from("import_items")
+      .update({ decision })
+      .in("id", batch);
+    if (error) throw new Error(error.message);
+  }
+}
+
 const readingImportPayloadSchema = z.object({
   source_ref: z.string().trim().min(1).max(200),
   title: z.string().trim().min(1).max(300),
@@ -854,11 +879,11 @@ export const approveAllReadyItems = createServerFn({ method: "POST" })
       .map((item) => item.id);
 
     if (readyIds.length) {
-      const { error } = await context.supabase
-        .from("import_items")
-        .update({ decision: "approved" })
-        .in("id", readyIds);
-      if (error) throw new Error(error.message);
+      await updateImportItemDecisionInChunks(
+        context.supabase,
+        readyIds,
+        "approved",
+      );
     }
 
     return {
@@ -892,11 +917,11 @@ export const approveHighConfidenceItems = createServerFn({ method: "POST" })
       .map((item) => item.id);
 
     if (readyIds.length) {
-      const { error } = await context.supabase
-        .from("import_items")
-        .update({ decision: "approved" })
-        .in("id", readyIds);
-      if (error) throw new Error(error.message);
+      await updateImportItemDecisionInChunks(
+        context.supabase,
+        readyIds,
+        "approved",
+      );
     }
 
     return {
@@ -938,14 +963,11 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         validateImportItemPayload(item.item_type, item.payload).state !== "ready",
     );
     if (invalidApproved.length) {
-      const { error: resetError } = await admin
-        .from("import_items")
-        .update({ decision: "pending" })
-        .in(
-          "id",
-          invalidApproved.map((item) => item.id),
-        );
-      if (resetError) throw new Error(resetError.message);
+      await updateImportItemDecisionInChunks(
+        admin,
+        invalidApproved.map((item) => item.id),
+        "pending",
+      );
     }
 
     const approvedItems = approvedRows.filter(
