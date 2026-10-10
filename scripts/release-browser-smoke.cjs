@@ -277,6 +277,43 @@ async function gotoHydrated(page, path) {
     await page.keyboard.press("Escape");
     console.log("[ok] teacher previewed Question Bank item with student renderer");
 
+    // A document without a recognizable question used to be permanently
+    // stuck as raw_text/not_importable. The teacher must be able to convert
+    // it, supply the answer, approve it, and commit the result.
+    await gotoHydrated(page, "/teacher/sources");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "release-raw-text-smoke.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Which answer is correct?", "utf8"),
+    });
+    const rawImportDialog = page.getByRole("dialog");
+    await rawImportDialog.getByText(/^(needs_review|completed)$/)
+      .waitFor({ timeout: 60000 });
+    const rawReviewItem = rawImportDialog.locator("article")
+      .filter({ hasText: "Which answer is correct?" }).first();
+    await rawReviewItem.getByText("raw_text", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await rawReviewItem.getByRole("button", { name: "Suala çevir" }).click();
+    const choiceInputs = rawReviewItem.locator("input");
+    // The conversion editor has one input per answer option.
+    await choiceInputs.nth(0).fill("Correct");
+    await choiceInputs.nth(1).fill("Incorrect");
+    await choiceInputs.nth(2).fill("Other");
+    await choiceInputs.nth(3).fill("None");
+    await rawReviewItem.getByLabel("Düzgün cavab").selectOption("a");
+    await rawReviewItem.getByRole("button", { name: "Save", exact: true }).click();
+    const convertedItem = rawImportDialog.getByText("Which answer is correct?", { exact: true })
+      .locator("xpath=ancestor::article");
+    await convertedItem.getByText("question", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await convertedItem.getByRole("button", { name: "Approve", exact: true }).click();
+    await rawImportDialog.getByRole("button", { name: /Import approved \(1\)/ })
+      .click();
+    await rawImportDialog.getByText("completed", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    console.log("[ok] raw text converted, corrected, approved and committed as a real question");
+
     await gotoHydrated(page, "/teacher/sources");
     await page
       .getByRole("combobox", { name: "Import into", exact: true })

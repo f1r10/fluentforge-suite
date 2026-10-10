@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileUp, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -108,6 +108,10 @@ function VocabularyPage() {
   const [topicId, setTopicId] = useState("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
+  // A filtered result must never retain hidden rows in destructive bulk actions.
+  useEffect(() => {
+    setSelected([]);
+  }, [search, language, level, status, topicId]);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [catalogTarget, setCatalogTarget] = useState("");
   const [busyEditor, setBusyEditor] = useState(false);

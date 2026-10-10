@@ -1152,6 +1152,7 @@ function ImportItemCard({
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
+  const [converting, setConverting] = useState(false);
   const [draft, setDraft] = useState<Record<string, unknown>>(
     () => structuredClone(item.payload as Record<string, unknown>),
   );
@@ -1206,17 +1207,20 @@ function ImportItemCard({
   async function update(
     decision: "pending" | "approved" | "rejected",
     nextPayload?: Record<string, unknown>,
-  ) {
+    itemType?: "question",
+  ): Promise<boolean> {
     setBusy(true);
     try {
       await updateImportItem({
-        data: { id: item.id, decision, payload: nextPayload },
+        data: { id: item.id, decision, payload: nextPayload, itemType },
       });
       await onChanged();
       if (decision === "approved") toast.success(t("approved"));
       if (decision === "rejected") toast.success(t("rejected"));
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1233,6 +1237,9 @@ function ImportItemCard({
     }
     const nextPayload = {
       ...payload,
+      // The teacher has explicitly reviewed the answer. Do not keep stale
+      // extractor warnings after correcting it; structural validation remains.
+      import_warnings: [],
       answer_key: {
         ...(answerKey ?? {}),
         correct: [...current],
@@ -1242,8 +1249,37 @@ function ImportItemCard({
   }
 
   async function saveSimpleEdit() {
-    await update("pending", draft);
-    setEditing(false);
+    const reviewedDraft =
+      item.item_type === "question" || converting
+        ? { ...draft, import_warnings: [] }
+        : draft;
+    const saved = await update(
+      "pending",
+      reviewedDraft,
+      converting ? "question" : undefined,
+    );
+    // Retain the editor and unsaved values when the server rejects the write.
+    if (saved) {
+      setEditing(false);
+      setConverting(false);
+    }
+  }
+
+  function beginQuestionConversion() {
+    setDraft({
+      question_type: "single_choice",
+      prompt: String(payload["text"] ?? "").slice(0, 20_000),
+      payload: {
+        options: ["a", "b", "c", "d"].map((id) => ({ id, text: "" })),
+      },
+      answer_key: { correct: [] },
+      learning_language: "en",
+      grading_mode: "automatic",
+      status: "draft",
+      import_warnings: [],
+    });
+    setConverting(true);
+    setEditing(true);
   }
 
   function patchDraft(key: string, value: unknown) {
@@ -1337,7 +1373,7 @@ function ImportItemCard({
 
       {editing ? (
         <SimpleImportItemEditor
-          itemType={item.item_type}
+          itemType={converting ? "question" : item.item_type}
           draft={draft}
           onPatch={patchDraft}
           onPatchQuestionOption={patchQuestionOption}
@@ -1368,6 +1404,16 @@ function ImportItemCard({
             >
               {t("reject")}
             </Button>
+            {item.item_type === "raw_text" && !item.created_entity_id && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={beginQuestionConversion}
+              >
+                Suala çevir
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -1391,6 +1437,7 @@ function ImportItemCard({
                   structuredClone(item.payload as Record<string, unknown>),
                 );
                 setEditing(false);
+                setConverting(false);
               }}
             >
               {t("cancel")}
@@ -1447,11 +1494,11 @@ function SimpleImportItemEditor({
             }
           />
         </label>
-        {options.length > 0 && (
+        {["single_choice", "multiple_choice", "word_bank"].includes(String(draft["question_type"])) && options.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-medium">{t("options")}</div>
             {options.map((option, index) => (
-              <label key={String(option["id"] ?? index)} className="grid grid-cols-[32px_1fr] items-center gap-2">
+              <div key={String(option["id"] ?? index)} className="grid grid-cols-[32px_1fr_auto] items-center gap-2">
                 <strong className="text-sm uppercase">
                   {String(option["id"] ?? index + 1)}
                 </strong>
@@ -1462,8 +1509,76 @@ function SimpleImportItemEditor({
                     onPatchQuestionOption(index, event.target.value)
                   }
                 />
-              </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={options.length <= 2}
+                  onClick={() => onPatch("payload", {
+                    ...nested,
+                    options: options.filter((_, optionIndex) => optionIndex !== index),
+                  })}
+                >
+                  Sil
+                </Button>
+              </div>
             ))}
+            {options.length < 8 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onPatch("payload", {
+                  ...nested,
+                  options: [...options, {
+                    id: "abcdefgh".split("").find((id) => !options.some((option) => option["id"] === id)) ?? "h",
+                    text: "",
+                  }],
+                })}
+              >
+                Variant əlavə et
+              </Button>
+            )}
+            <SimpleField label="Düzgün cavab">
+              {draft["question_type"] === "multiple_choice" ? (
+                <div className="space-y-2">
+                  {options.map((option) => {
+                    const correct = Array.isArray((draft["answer_key"] as Record<string, unknown> | undefined)?.["correct"])
+                      ? (draft["answer_key"] as { correct: string[] }).correct
+                      : [];
+                    const id = String(option["id"]);
+                    return (
+                      <label key={id} className="flex items-center gap-2">
+                        <Checkbox
+                          checked={correct.includes(id)}
+                          onCheckedChange={(checked) => onPatch("answer_key", {
+                            correct: checked ? [...new Set([...correct, id])] : correct.filter((value) => value !== id),
+                          })}
+                        />
+                        {id.toUpperCase()})
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select
+                  className={inputClass}
+                  value={
+                    Array.isArray((draft["answer_key"] as Record<string, unknown> | undefined)?.["correct"])
+                      ? String(((draft["answer_key"] as Record<string, unknown>)["correct"] as string[])[0] ?? "")
+                      : ""
+                  }
+                  onChange={(event) => onPatch("answer_key", { correct: event.target.value ? [event.target.value] : [] })}
+                >
+                  <option value="">Cavabı seçin</option>
+                  {options.map((option) => (
+                    <option key={String(option["id"])} value={String(option["id"])}>
+                      {String(option["id"]).toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </SimpleField>
           </div>
         )}
         <label className="block space-y-1">
@@ -1499,6 +1614,18 @@ function SimpleImportItemEditor({
             }
           />
         </SimpleField>
+        <SimpleField label={t("level")}>
+          <select
+            className={inputClass}
+            value={String(draft["level"] ?? "")}
+            onChange={(event) => onPatch("level", event.target.value || null)}
+          >
+            <option value="">Səviyyəni seçin</option>
+            {["A1", "A2", "B1", "B2", "C1", "C2"].map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </SimpleField>
         <div className="sm:col-span-2">
           <SimpleField label={t("definition")}>
             <Textarea
@@ -1509,6 +1636,38 @@ function SimpleImportItemEditor({
               }
             />
           </SimpleField>
+        </div>
+        <div className="sm:col-span-2 space-y-2">
+          <span className="text-xs font-medium">{t("translations")}</span>
+          {(Array.isArray(draft["translations"]) ? draft["translations"] as Array<{ language: string; value: string }> : []).map((translation, index, translations) => (
+            <div className="grid grid-cols-[72px_1fr_auto] gap-2" key={index}>
+              <input
+                className={inputClass}
+                aria-label="Tərcümə dili"
+                value={translation.language}
+                onChange={(event) => onPatch("translations", translations.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, language: event.target.value } : row
+                ))}
+              />
+              <input
+                className={inputClass}
+                aria-label="Tərcümə"
+                value={translation.value}
+                onChange={(event) => onPatch("translations", translations.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, value: event.target.value } : row
+                ))}
+              />
+              <Button type="button" size="sm" variant="ghost" onClick={() => onPatch("translations", translations.filter((_, rowIndex) => rowIndex !== index))}>
+                Sil
+              </Button>
+            </div>
+          ))}
+          <Button type="button" size="sm" variant="outline" onClick={() => onPatch("translations", [
+            ...(Array.isArray(draft["translations"]) ? draft["translations"] : []),
+            { language: "az", value: "" },
+          ])}>
+            Tərcümə əlavə et
+          </Button>
         </div>
       </div>
     );
