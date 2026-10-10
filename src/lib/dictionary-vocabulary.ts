@@ -589,10 +589,14 @@ export async function fetchBestDictionaryVocabularySuggestion(
       const level = suggestion.level ?? lexical.level;
       suggestion = {
         ...suggestion,
+        // Datamuse is used only for CEFR/frequency estimation. Its single
+        // corpus POS tag is not authoritative for ambiguous dictionary words
+        // (e.g. "say", "sell", "shop", "apple") and must never replace the
+        // dictionary's primary lexical entry.
         part_of_speech:
           normalizePartOfSpeechForWord(
             word,
-            lexical.partOfSpeech ?? suggestion.part_of_speech,
+            suggestion.part_of_speech,
           ) ?? suggestion.part_of_speech,
         level,
         level_estimate:
@@ -607,7 +611,7 @@ export async function fetchBestDictionaryVocabularySuggestion(
         notes: [
           suggestion.notes,
           lexical.partOfSpeech
-            ? "Primary part of speech was cross-checked with Datamuse corpus popularity metadata."
+            ? "Datamuse corpus metadata was used for frequency/CEFR only; dictionary part of speech was preserved."
             : "",
           !suggestion.level && lexical.level
             ? `CEFR ${lexical.level} is an automatic estimate from corpus frequency and can be changed by the teacher.`
