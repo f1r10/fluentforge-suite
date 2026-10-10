@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { vocabularyMetadataWarning, isTeacherApprovableValidationState } from "./vocabulary-review-policy";
 import { requireTeacher } from "./teacher-middleware";
 import { validateQuestionInput } from "./question-schema";
 import { getProcessingService, type ProcessingImportItem } from "./processing.service";
@@ -225,6 +226,7 @@ function assertSourceType(filename: string) {
 
 type ImportItemValidation =
   | { state: "ready"; message: null }
+  | { state: "ready_with_warning"; message: string }
   | { state: "needs_fix"; message: string }
   | { state: "not_importable"; message: string };
 
@@ -310,22 +312,11 @@ function validateImportItemPayload(
         };
       }
 
-      const baseLanguage = parsed.learning_language.toLowerCase().split("-")[0];
-      if (baseLanguage === "en") {
-        if (!parsed.part_of_speech?.trim()) {
-          return {
-            state: "needs_fix",
-            message:
-              "Part of speech could not be determined automatically. Review this word before approving.",
-          };
-        }
-        if (!parsed.level?.trim()) {
-          return {
-            state: "needs_fix",
-            message:
-              "CEFR level could not be determined automatically. Review this word before approving.",
-          };
-        }
+      const warning = vocabularyMetadataWarning(parsed);
+      if (warning) {
+        // Metadata may be unavailable even when the word itself is valid.
+        // Only explicit per-item teacher approval may accept this state.
+        return { state: "ready_with_warning", message: warning };
       }
       return { state: "ready", message: null };
     }
@@ -1242,7 +1233,7 @@ export const updateImportItem = createServerFn({ method: "POST" })
         throw new Error("This item has already been imported.");
       }
       const validation = validateImportItemPayload(itemType, payload);
-      if (validation.state !== "ready") {
+      if (!isTeacherApprovableValidationState(validation.state)) {
         throw new Error(
           `Cannot approve this item yet: ${validation.message}`,
         );
@@ -1401,7 +1392,9 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     const invalidApproved = approvedRows.filter(
       (item) =>
         !!item.duplicate_of ||
-        validateImportItemPayload(item.item_type, item.payload).state !== "ready",
+        !isTeacherApprovableValidationState(
+          validateImportItemPayload(item.item_type, item.payload).state,
+        ),
     );
     if (invalidApproved.length) {
       await updateImportItemDecisionInChunks(
@@ -1414,7 +1407,9 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     const approvedItems = approvedRows.filter(
       (item) =>
         !item.duplicate_of &&
-        validateImportItemPayload(item.item_type, item.payload).state === "ready",
+        isTeacherApprovableValidationState(
+          validateImportItemPayload(item.item_type, item.payload).state,
+        ),
     );
 
     const unimportedApproved = approvedItems.filter(

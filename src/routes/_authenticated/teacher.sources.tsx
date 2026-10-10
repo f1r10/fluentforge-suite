@@ -1001,10 +1001,19 @@ function ReviewWorkspace({
   const needsFix = data.items.filter(
     (item) => item.validation.state === "needs_fix",
   ).length;
+  const warnings = data.items.filter(
+    (item) => item.validation.state === "ready_with_warning" &&
+      item.decision !== "rejected" && !item.created_entity_id,
+  ).length;
+  const bulkReady = data.items.filter(
+    (item) => item.decision === "pending" &&
+      item.validation.state === "ready" && !item.duplicate_of &&
+      !item.created_entity_id,
+  ).length;
   const ready = data.items.filter(
     (item) =>
       item.decision === "approved" &&
-      item.validation.state === "ready" &&
+      ["ready", "ready_with_warning"].includes(item.validation.state) &&
       !item.created_entity_id,
   ).length;
   const rejected = data.items.filter((item) => item.decision === "rejected").length;
@@ -1032,7 +1041,7 @@ function ReviewWorkspace({
     if (filter === "ready") {
       return (
         item.decision === "approved" &&
-        item.validation.state === "ready" &&
+        ["ready", "ready_with_warning"].includes(item.validation.state) &&
         !item.created_entity_id
       );
     }
@@ -1061,6 +1070,7 @@ function ReviewWorkspace({
             <span>{t("progress")}: <strong>{data.job.progress}%</strong></span>
             <span>{t("pending")}: <strong>{pending}</strong></span>
             <span>{t("needs_review")}: <strong>{needsFix}</strong></span>
+            <span>{t("review_warnings")}: <strong>{warnings}</strong></span>
             <span>{t("approved")}: <strong>{approved}</strong></span>
             <span>{t("duplicates")}: <strong>{duplicates}</strong></span>
           </div>
@@ -1074,10 +1084,10 @@ function ReviewWorkspace({
             <Button
               size="sm"
               variant="outline"
-              disabled={busy || pending === 0}
+              disabled={busy || bulkReady === 0}
               onClick={onApproveAll}
             >
-              {t("approve_all_ready")} ({pending - needsFix})
+              {t("approve_all_ready")} ({bulkReady})
             </Button>
             <Button size="sm" variant="outline" disabled={busy || data.items.length === 0} onClick={onApproveHigh}>
               {t("approve_high_confidence")}
@@ -1328,11 +1338,13 @@ function ImportItemCard({
         </div>
       </div>
 
-      {item.validation.state === "needs_fix" && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          {item.item_type === "question" && options.length > 0 && correct.length === 0
-            ? t("select_correct_answer_before_approve")
-            : item.validation.message}
+      {(item.validation.state === "needs_fix" || item.validation.state === "ready_with_warning") && (
+        <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          {item.validation.state === "ready_with_warning"
+            ? t("vocabulary_optional_metadata_warning")
+            : item.item_type === "question" && options.length > 0 && correct.length === 0
+              ? t("select_correct_answer_before_approve")
+              : item.validation.message}
         </div>
       )}
 
@@ -1390,11 +1402,19 @@ function ImportItemCard({
                 busy ||
                 !!item.duplicate_of ||
                 !!item.created_entity_id ||
-                item.validation.state !== "ready"
+                !["ready", "ready_with_warning"].includes(item.validation.state)
               }
-              onClick={() => update("approved")}
+              onClick={() => {
+                if (
+                  item.validation.state === "ready_with_warning" &&
+                  !window.confirm(t("vocabulary_approve_missing_metadata_confirm"))
+                ) return;
+                void update("approved");
+              }}
             >
-              {t("approve")}
+              {item.validation.state === "ready_with_warning"
+                ? t("approve_with_warning")
+                : t("approve")}
             </Button>
             <Button
               size="sm"

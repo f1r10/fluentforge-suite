@@ -368,6 +368,43 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] teacher promoted imported vocabulary to active");
 
+    // Optional POS must not block a deliberate teacher-approved import.
+    // The high-confidence/bulk path must leave unknown metadata for review.
+    await gotoHydrated(page, "/teacher/sources");
+    await page
+      .getByRole("combobox", { name: "Import into", exact: true })
+      .selectOption("vocabulary");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "release-unknown-pos.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(
+        "word,definition,part_of_speech,az,level\n" +
+        "releaseunknownpos,unknown category,,sınaq sözü,A1\n",
+        "utf8",
+      ),
+    });
+    const unknownPosDialog = page.getByRole("dialog");
+    await unknownPosDialog.getByText(/^(needs_review|completed)$/)
+      .waitFor({ timeout: 60000 });
+    const unknownPosRow = unknownPosDialog.locator("article")
+      .filter({ hasText: "releaseunknownpos" }).first();
+    await unknownPosRow.getByText("ready with warning", { exact: true })
+      .waitFor({ timeout: 20000 });
+    assert(
+      await unknownPosDialog.getByRole("button", { name: "Approve all valid (0)" }).isDisabled(),
+      "Bulk approval must exclude missing-POS review items.",
+    );
+    page.once("dialog", (confirmation) => confirmation.accept());
+    await unknownPosRow.getByRole("button", { name: "Approve with warning" }).click();
+    await unknownPosDialog.getByRole("button", { name: /Import approved \(1\)/ }).click();
+    await unknownPosDialog.getByText("completed", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    await gotoHydrated(page, "/teacher/vocabulary");
+    await page.getByText("releaseunknownpos", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] teacher approved vocabulary with missing POS; bulk auto-approval was blocked");
+
     await gotoHydrated(page, "/teacher/catalogs");
     await page
       .getByRole("button", { name: /^(New catalog|Add catalog)$/ })
