@@ -910,7 +910,7 @@ VOCAB_POS_ALIASES = {
 VOCAB_LEVEL_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$", re.IGNORECASE)
 VOCAB_BOILERPLATE_RE = re.compile(
     r"(?:https?://|www\.|©|copyright|page\s+\d+|vocabulary\s+list|"
-    r"word\s+list|table\s+of\s+contents|introduction|how\s+the\s+list|"
+    r"word\s+list|table\s+of\s+contents|^\s*introduction\s*$|how\s+the\s+list|"
     r"^\s*#?\s*(?:english|ingilis(?:cə|ce)?|azərbaycanca|azerbaycanca)"
     r"\s+(?:azerbaijani|azərbaycanca|azerbaycanca|english|ingilis(?:cə|ce)?)\s*$)",
     re.IGNORECASE,
@@ -1263,6 +1263,7 @@ def _vocabulary_from_text(
         notes: str | None = None,
         translations: list[dict[str, str]] | None = None,
         confidence: float,
+        dedupe: bool = True,
     ) -> None:
         clean = _clean_vocab_word(word)
         if not _looks_like_vocab_term(clean):
@@ -1275,9 +1276,10 @@ def _vocabulary_from_text(
                 (definition or "").casefold(),
             ]
         )
-        if key in seen:
+        if dedupe and key in seen:
             return
-        seen.add(key)
+        if dedupe:
+            seen.add(key)
         out.append(
             {
                 "item_type": "vocabulary",
@@ -1340,6 +1342,7 @@ def _vocabulary_from_text(
                 level=level,
                 notes=source_note,
                 confidence=0.96 if level and pos else 0.88,
+                dedupe=not had_row_number,
             )
             continue
 
@@ -1360,6 +1363,7 @@ def _vocabulary_from_text(
                         }
                     ],
                     confidence=0.94,
+                    dedupe=False,
                 )
                 continue
 
@@ -1402,6 +1406,7 @@ def _vocabulary_from_text(
                     else 0.82
                     if (pos or level or ipa)
                     else 0.76,
+                    dedupe=not had_row_number,
                 )
                 continue
 
@@ -1428,7 +1433,11 @@ def _vocabulary_from_text(
         # such as Cambridge category word lists. These stay lower-confidence so
         # the teacher reviews them before committing.
         if _looks_like_vocab_term(line):
-            add(line, confidence=0.6)
+            add(
+                line,
+                confidence=0.6,
+                dedupe=not had_row_number,
+            )
 
     return out
 
