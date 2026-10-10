@@ -581,22 +581,37 @@ export async function fetchBestDictionaryVocabularySuggestion(
       : new Error("Dictionary lookup failed.");
   }
 
-  if (!suggestion.level && language === "en") {
-    const estimate = await fetchDatamuseCefrEstimate(word, fetcher).catch(
+  if (language === "en") {
+    const lexical = await fetchDatamuseLexicalMetadata(word, fetcher).catch(
       () => null,
     );
-    if (estimate) {
+    if (lexical) {
+      const level = suggestion.level ?? lexical.level;
       suggestion = {
         ...suggestion,
-        level: estimate.level,
-        level_estimate: {
-          source: "Datamuse frequency heuristic",
-          confidence: estimate.confidence,
-          frequency_per_million: estimate.frequencyPerMillion,
-        },
+        part_of_speech:
+          normalizePartOfSpeechForWord(
+            word,
+            lexical.partOfSpeech ?? suggestion.part_of_speech,
+          ) ?? suggestion.part_of_speech,
+        level,
+        level_estimate:
+          suggestion.level_estimate ??
+          (lexical.level && lexical.frequencyPerMillion != null
+            ? {
+                source: "Datamuse frequency heuristic",
+                confidence: lexical.confidence,
+                frequency_per_million: lexical.frequencyPerMillion,
+              }
+            : null),
         notes: [
           suggestion.notes,
-          `CEFR ${estimate.level} is an automatic estimate from corpus frequency and can be changed by the teacher.`,
+          lexical.partOfSpeech
+            ? "Primary part of speech was cross-checked with Datamuse corpus popularity metadata."
+            : "",
+          !suggestion.level && lexical.level
+            ? `CEFR ${lexical.level} is an automatic estimate from corpus frequency and can be changed by the teacher.`
+            : "",
         ]
           .filter(Boolean)
           .join(" "),
@@ -607,13 +622,14 @@ export async function fetchBestDictionaryVocabularySuggestion(
   return suggestion;
 }
 
-export async function fetchDatamuseCefrEstimate(
+export async function fetchDatamuseLexicalMetadata(
   word: string,
   fetcher: typeof fetch = fetch,
 ): Promise<{
-  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  partOfSpeech: string | null;
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2" | null;
   confidence: number;
-  frequencyPerMillion: number;
+  frequencyPerMillion: number | null;
 } | null> {
   const cleaned = word.trim().toLowerCase();
   if (!cleaned) return null;
@@ -628,7 +644,7 @@ export async function fetchDatamuseCefrEstimate(
     const response = await fetcher(
       `${base}/words?sp=${encodeURIComponent(
         cleaned,
-      )}&qe=sp&md=f&max=3`,
+      )}&qe=sp&md=pf&max=3`,
       {
         method: "GET",
         headers: { accept: "application/json" },
@@ -650,16 +666,21 @@ export async function fetchDatamuseCefrEstimate(
     ) as Record<string, unknown> | undefined;
     if (!row) return null;
 
-    const tags = Array.isArray(row["tags"]) ? row["tags"] : [];
-    const frequencyTag = tags.find(
-      (tag) => typeof tag === "string" && tag.startsWith("f:"),
-    );
-    if (typeof frequencyTag !== "string") return null;
-    const frequency = Number(frequencyTag.slice(2));
-    if (!Number.isFinite(frequency) || frequency < 0) return null;
+    const tags = Array.isArray(row["tags"])
+      ? row["tags"].filter((tag): tag is string => typeof tag === "string")
+      : [];
+    const posTag = tags.find((tag) => Object.hasOwn(DATAMUSE_POS, tag));
+    const partOfSpeech = posTag ? DATAMUSE_POS[posTag] ?? null : null;
 
-    const level =
-      frequency >= 100
+    const frequencyTag = tags.find((tag) => tag.startsWith("f:"));
+    const frequency =
+      typeof frequencyTag === "string"
+        ? Number(frequencyTag.slice(2))
+        : Number.NaN;
+    const hasFrequency = Number.isFinite(frequency) && frequency >= 0;
+
+    const level = hasFrequency
+      ? frequency >= 100
         ? "A1"
         : frequency >= 30
           ? "A2"
@@ -669,17 +690,48 @@ export async function fetchDatamuseCefrEstimate(
               ? "B2"
               : frequency >= 1
                 ? "C1"
-                : "C2";
+                : "C2"
+      : null;
 
     return {
+      partOfSpeech,
       level,
-      confidence:
-        frequency >= 30 ? 0.72 : frequency >= 3 ? 0.64 : 0.56,
-      frequencyPerMillion: frequency,
+      confidence: hasFrequency
+        ? frequency >= 30
+          ? 0.76
+          : frequency >= 3
+            ? 0.68
+            : 0.6
+        : partOfSpeech
+          ? 0.72
+          : 0.5,
+      frequencyPerMillion: hasFrequency ? frequency : null,
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function fetchDatamuseCefrEstimate(
+  word: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  confidence: number;
+  frequencyPerMillion: number;
+} | null> {
+  const metadata = await fetchDatamuseLexicalMetadata(word, fetcher);
+  if (
+    !metadata?.level ||
+    metadata.frequencyPerMillion == null
+  ) {
+    return null;
+  }
+  return {
+    level: metadata.level,
+    confidence: metadata.confidence,
+    frequencyPerMillion: metadata.frequencyPerMillion,
+  };
 }
 
 const NUMBER_WORDS = new Set([
@@ -692,6 +744,13 @@ const NUMBER_WORDS = new Set([
   "twentieth","thirtieth","fortieth","fiftieth","sixtieth","seventieth","eightieth","ninetieth",
   "hundredth","thousandth","millionth","billionth",
 ]);
+
+const DATAMUSE_POS: Record<string, string> = {
+  n: "noun",
+  v: "verb",
+  adj: "adjective",
+  adv: "adverb",
+};
 
 const POS_ALIASES: Record<string, string> = {
   adj: "adjective",
