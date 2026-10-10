@@ -949,6 +949,52 @@ def test_listening_target_splits_multiple_tasks_on_one_page():
     }
 
 
+def test_btu_c1_metadata_beats_configured_translation_language():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "pdf_layout_native",
+        [
+            {
+                "page": 1,
+                "text": (
+                    "3) aboard adverb, preposition C1\n"
+                    "5) Absolutely! C1\n"
+                    "6) absorb verb REMEMBER C1\n"
+                ),
+                "tables": [],
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+            "translation_language": "az",
+        },
+    )
+    payloads = [item["payload"] for item in items]
+
+    assert [item["word"] for item in payloads] == [
+        "aboard",
+        "Absolutely!",
+        "absorb",
+    ]
+    assert payloads[0]["part_of_speech"] == "adverb, preposition"
+    assert payloads[0]["level"] == "C1"
+    assert payloads[0]["translations"] == []
+    assert payloads[1]["level"] == "C1"
+    assert payloads[1]["translations"] == []
+    assert payloads[2]["part_of_speech"] == "verb"
+    assert payloads[2]["notes"] == "Source sense: REMEMBER"
+    assert payloads[2]["translations"] == []
+
+
 def test_btu_c1_vocabulary_rows_parse_word_pos_level_and_sense():
     from app.extractors import Extraction
 
