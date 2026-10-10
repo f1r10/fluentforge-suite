@@ -308,6 +308,7 @@ export const saveImportProfile = createServerFn({ method: "POST" })
           level: z.string().max(20).nullable().default(null),
           status: z.enum(["draft", "active"]).default("draft"),
           auto_approve_confidence: z.number().min(0.5).max(1).default(0.95),
+          auto_enrich_vocabulary: z.boolean().default(false),
           spreadsheet_mapping: spreadsheetMappingSchema.nullable().default(null),
         }),
       })
@@ -523,6 +524,7 @@ export const startDocumentImport = createServerFn({ method: "POST" })
           .default("auto"),
         learningLanguage: z.string().trim().min(2).max(10).nullable().default(null),
         translationLanguage: z.string().trim().min(2).max(10).nullable().default(null),
+        autoEnrichVocabulary: z.boolean().default(false),
       })
       .parse(d),
   )
@@ -574,6 +576,10 @@ export const startDocumentImport = createServerFn({ method: "POST" })
           : { ...savedProfile, expected_content: data.expectedContent };
     }
 
+    const autoEnrichVocabulary =
+      data.autoEnrichVocabulary ||
+      (profile?.["auto_enrich_vocabulary"] === true);
+
     const { data: signed, error: signedError } = await admin.storage
       .from(SOURCE_BUCKET)
       .createSignedUrl(source.storage_path, 60 * 60);
@@ -605,7 +611,13 @@ export const startDocumentImport = createServerFn({ method: "POST" })
         mode: data.mode,
         progress: submitted.progress ?? 0,
         processor_job_id: submitted.jobId,
-        stats: {},
+        stats: {
+          import_options: {
+            auto_determine_vocabulary_metadata: true,
+            auto_enrich_vocabulary: autoEnrichVocabulary,
+          },
+          vocabulary_metadata_cursor: 0,
+        },
       })
       .select("id")
       .single();
@@ -616,6 +628,250 @@ export const startDocumentImport = createServerFn({ method: "POST" })
     return { jobId: job.id };
   });
 
+type ImportStats = Record<string, unknown>;
+
+function importJobStats(value: unknown): ImportStats {
+  return value && typeof value === "object"
+    ? (value as ImportStats)
+    : {};
+}
+
+function importJobOptions(stats: ImportStats) {
+  const raw =
+    stats["import_options"] && typeof stats["import_options"] === "object"
+      ? (stats["import_options"] as Record<string, unknown>)
+      : {};
+  return {
+    autoDetermineVocabularyMetadata:
+      raw["auto_determine_vocabulary_metadata"] !== false,
+    autoEnrichVocabulary: raw["auto_enrich_vocabulary"] === true,
+  };
+}
+
+function mergeImportVocabularySuggestion(
+  raw: z.infer<typeof vocabularyImportPayloadSchema>,
+  suggestion: Awaited<
+    ReturnType<
+      typeof import("./dictionary-vocabulary").fetchBestDictionaryVocabularySuggestion
+    >
+  >,
+) {
+  const translationMap = new Map(
+    raw.translations.map((item) => [
+      item.language.toLowerCase(),
+      { ...item, language: item.language.toLowerCase() },
+    ]),
+  );
+  for (const item of suggestion.translations) {
+    const language = item.language.toLowerCase();
+    if (!translationMap.has(language) && item.value.trim()) {
+      translationMap.set(language, {
+        language,
+        value: item.value,
+      });
+    }
+  }
+
+  const exampleMap = new Map(
+    raw.examples.map((item) => [
+      item.sentence.trim().toLowerCase(),
+      item,
+    ]),
+  );
+  for (const item of suggestion.examples) {
+    const key = item.sentence.trim().toLowerCase();
+    if (key && !exampleMap.has(key)) {
+      exampleMap.set(key, item);
+    }
+  }
+
+  return {
+    ...raw,
+    definition: raw.definition?.trim()
+      ? raw.definition
+      : suggestion.definition,
+    ipa: raw.ipa?.trim() ? raw.ipa : suggestion.ipa,
+    part_of_speech: raw.part_of_speech?.trim()
+      ? raw.part_of_speech
+      : suggestion.part_of_speech,
+    level: raw.level?.trim() ? raw.level : suggestion.level,
+    synonyms: [
+      ...new Set([...raw.synonyms, ...suggestion.synonyms]),
+    ].slice(0, 100),
+    antonyms: [
+      ...new Set([...raw.antonyms, ...suggestion.antonyms]),
+    ].slice(0, 100),
+    translations: [...translationMap.values()].slice(0, 50),
+    examples: [...exampleMap.values()].slice(0, 100),
+    import_mapping: {
+      ...(raw.import_mapping ?? {}),
+      automatic_metadata: {
+        status: "done",
+        provider: suggestion.provider,
+        model: suggestion.model,
+        generated_at: suggestion.generated_at,
+        full_enrichment: true,
+      },
+    },
+  };
+}
+
+async function processVocabularyImportMetadataBatch(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  jobId: string,
+  statsValue: unknown,
+) {
+  const stats = importJobStats(statsValue);
+  const options = importJobOptions(stats);
+  if (!options.autoDetermineVocabularyMetadata) {
+    return { done: true, stats };
+  }
+
+  const cursorRaw = Number(stats["vocabulary_metadata_cursor"] ?? 0);
+  const cursor =
+    Number.isFinite(cursorRaw) && cursorRaw >= 0
+      ? Math.floor(cursorRaw)
+      : 0;
+
+  const { count, error: countError } = await admin
+    .from("import_items")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("item_type", "vocabulary");
+  if (countError) throw new Error(countError.message);
+  const total = count ?? 0;
+  if (cursor >= total) {
+    return {
+      done: true,
+      stats: {
+        ...stats,
+        vocabulary_metadata_cursor: total,
+        vocabulary_metadata_total: total,
+      },
+    };
+  }
+
+  const { data: rows, error } = await admin
+    .from("import_items")
+    .select("id,payload")
+    .eq("job_id", jobId)
+    .eq("item_type", "vocabulary")
+    .order("created_at")
+    .range(cursor, Math.min(total - 1, cursor + 199));
+  if (error) throw new Error(error.message);
+
+  const parsedRows = (rows ?? []).flatMap(
+    (row: { id: string; payload: unknown }) => {
+      const parsed = vocabularyImportPayloadSchema.safeParse(row.payload);
+      return parsed.success ? [{ id: row.id, raw: parsed.data }] : [];
+    },
+  );
+
+  const work: typeof parsedRows = [];
+  let scanned = 0;
+  for (const row of parsedRows) {
+    const language = row.raw.learning_language.toLowerCase().split("-")[0];
+    const needsBasic =
+      language === "en" &&
+      (!row.raw.part_of_speech?.trim() || !row.raw.level?.trim());
+    const needsLookup =
+      needsBasic ||
+      (options.autoEnrichVocabulary && language === "en");
+    scanned += 1;
+    if (needsLookup) work.push(row);
+    if (work.length >= 16) break;
+  }
+
+  // If parsing skipped any rows, still advance through the fetched slice.
+  if (scanned === 0 && (rows?.length ?? 0) > 0) {
+    scanned = rows!.length;
+  } else if (work.length < 16 && scanned < (rows?.length ?? 0)) {
+    // No lookup pressure: advance across the rest of this 200-row window.
+    scanned = rows!.length;
+  }
+
+  if (work.length) {
+    const { fetchBestDictionaryVocabularySuggestion, fetchDatamuseLexicalMetadata } =
+      await import("./dictionary-vocabulary");
+
+    const { data: languageRows, error: languageError } = await admin
+      .from("languages")
+      .select("code")
+      .eq("is_translation", true)
+      .order("sort_order");
+    if (languageError) throw new Error(languageError.message);
+    const targetLanguages = (languageRows ?? [])
+      .map((row: { code: string }) => row.code.toLowerCase())
+      .filter(Boolean);
+
+    for (let offset = 0; offset < work.length; offset += 4) {
+      const batch = work.slice(offset, offset + 4);
+      await Promise.all(
+        batch.map(async ({ id, raw }) => {
+          const language = raw.learning_language.toLowerCase().split("-")[0];
+          let next = raw;
+
+          if (options.autoEnrichVocabulary) {
+            const suggestion = await fetchBestDictionaryVocabularySuggestion(
+              raw.word,
+              {
+                language,
+                targetLanguages,
+              },
+            ).catch(() => null);
+            if (suggestion) {
+              next = mergeImportVocabularySuggestion(raw, suggestion);
+            }
+          } else {
+            const lexical = await fetchDatamuseLexicalMetadata(raw.word).catch(
+              () => null,
+            );
+            if (lexical) {
+              next = {
+                ...raw,
+                part_of_speech: raw.part_of_speech?.trim()
+                  ? raw.part_of_speech
+                  : lexical.partOfSpeech,
+                level: raw.level?.trim() ? raw.level : lexical.level,
+                import_mapping: {
+                  ...(raw.import_mapping ?? {}),
+                  automatic_metadata: {
+                    status: "done",
+                    provider: "datamuse",
+                    generated_at: new Date().toISOString(),
+                    full_enrichment: false,
+                  },
+                },
+              };
+            }
+          }
+
+          if (next !== raw) {
+            const { error: updateError } = await admin
+              .from("import_items")
+              .update({ payload: next as never })
+              .eq("id", id);
+            if (updateError) throw new Error(updateError.message);
+          }
+        }),
+      );
+    }
+  }
+
+  const nextCursor = Math.min(total, cursor + scanned);
+  return {
+    done: nextCursor >= total,
+    stats: {
+      ...stats,
+      vocabulary_metadata_cursor: nextCursor,
+      vocabulary_metadata_total: total,
+      vocabulary_metadata_full_enrichment:
+        options.autoEnrichVocabulary,
+    },
+  };
+}
+
 export const syncDocumentImport = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ jobId: z.string().uuid() }).parse(d))
@@ -625,7 +881,7 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
 
     const { data: job, error: jobError } = await admin
       .from("import_jobs")
-      .select("id,processor_job_id,status")
+      .select("id,processor_job_id,status,stats")
       .eq("id", data.jobId)
       .maybeSingle();
     if (jobError) throw new Error(jobError.message);
@@ -660,17 +916,52 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
       }
     }
 
-    // Persist the terminal job state only after extracted review items are
-    // durable. Otherwise a transient item-write failure would leave a
-    // needs_review/completed job that future syncs refuse to retry.
+    const currentStats = importJobStats(job.stats);
+    let nextStats: ImportStats = {
+      ...currentStats,
+      processor_stats: state.stats ?? {},
+    };
+    let finalStatus = mappedStatus;
+    let finalProgress = state.progress ?? 0;
+
+    if (
+      (mappedStatus === "needs_review" || mappedStatus === "completed") &&
+      importJobOptions(currentStats).autoDetermineVocabularyMetadata
+    ) {
+      const metadata = await processVocabularyImportMetadataBatch(
+        admin,
+        job.id,
+        currentStats,
+      );
+      nextStats = {
+        ...metadata.stats,
+        processor_stats: state.stats ?? {},
+      };
+      if (!metadata.done) {
+        finalStatus = "processing";
+        const cursor = Number(
+          metadata.stats["vocabulary_metadata_cursor"] ?? 0,
+        );
+        const total = Number(
+          metadata.stats["vocabulary_metadata_total"] ?? 0,
+        );
+        finalProgress =
+          total > 0
+            ? Math.min(99, 80 + Math.floor((cursor / total) * 19))
+            : 99;
+      }
+    }
+
+    // Persist the terminal job state only after extracted review items and
+    // automatic vocabulary metadata are durable.
     const { error: updateError } = await admin
       .from("import_jobs")
       .update({
-        status: mappedStatus,
-        progress: state.progress ?? 0,
+        status: finalStatus,
+        progress: finalProgress,
         extraction_method: state.extractionMethod ?? null,
         error: state.error ?? state.message ?? null,
-        stats: (state.stats ?? {}) as never,
+        stats: nextStats as never,
         updated_at: new Date().toISOString(),
       })
       .eq("id", job.id);
@@ -711,7 +1002,7 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
       });
     }
 
-    return { status: mappedStatus };
+    return { status: finalStatus };
   });
 
 export const listDocumentImports = createServerFn({ method: "GET" })
