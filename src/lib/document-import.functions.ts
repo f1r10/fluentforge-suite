@@ -968,37 +968,37 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
     if (updateError) throw new Error(updateError.message);
 
     if (
-      mappedStatus === "needs_review" ||
-      mappedStatus === "completed" ||
-      mappedStatus === "failed"
+      finalStatus === "needs_review" ||
+      finalStatus === "completed" ||
+      finalStatus === "failed"
     ) {
       const { notifyTeacher } = await import("./notifications.functions");
       const itemCount = state.items?.length ?? 0;
       await notifyTeacher(admin, {
         kind:
-          mappedStatus === "failed"
+          finalStatus === "failed"
             ? "import_failed"
-            : mappedStatus === "needs_review"
+            : finalStatus === "needs_review"
               ? "import_review_required"
               : "import_processing_completed",
         title:
-          mappedStatus === "failed"
+          finalStatus === "failed"
             ? "Document import failed"
-            : mappedStatus === "needs_review"
+            : finalStatus === "needs_review"
               ? "Document import is ready for review"
               : "Document processing completed",
         body:
-          mappedStatus === "failed"
+          finalStatus === "failed"
             ? state.error ?? state.message ?? "The processing worker reported an error."
             : `${itemCount} extracted item(s) are available.`,
         link: "/teacher/sources",
         data: {
           import_job_id: job.id,
           processor_job_id: job.processor_job_id,
-          status: mappedStatus,
+          status: finalStatus,
           item_count: itemCount,
         },
-        dedupeKey: `import-job:${job.id}:${mappedStatus}`,
+        dedupeKey: `import-job:${job.id}:${finalStatus}`,
       });
     }
 
