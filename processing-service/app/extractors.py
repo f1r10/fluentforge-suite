@@ -1300,8 +1300,31 @@ def _vocabulary_from_text(
             }
         )
 
-    source_lines: list[str] = []
+    # Some PDFs place the list number and the lexical row in separate text
+    # objects/lines even though they are visually one table row:
+    #   "225)"
+    #   "bump into sb C1"
+    # Join those pairs before parsing so source-row identity and sense
+    # preservation work consistently across every page.
+    logical_lines: list[str] = []
+    pending_number: str | None = None
     for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if re.fullmatch(r"(?:#\s*)?\d{1,4}[.)]", stripped):
+            if pending_number:
+                logical_lines.append(pending_number)
+            pending_number = stripped
+            continue
+        if pending_number and stripped:
+            logical_lines.append(f"{pending_number} {stripped}")
+            pending_number = None
+        else:
+            logical_lines.append(raw_line)
+    if pending_number:
+        logical_lines.append(pending_number)
+
+    source_lines: list[str] = []
+    for raw_line in logical_lines:
         segments = [raw_line]
         if ";" in raw_line:
             possible = [
