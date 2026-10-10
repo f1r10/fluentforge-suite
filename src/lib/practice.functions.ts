@@ -20,6 +20,22 @@ import {
 
 type Admin = Awaited<ReturnType<typeof import("./security.server")["adminClient"]>>;
 
+const POSTGREST_IN_CHUNK = 120;
+
+async function loadInChunks<T>(
+  ids: string[],
+  loader: (ids: string[]) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const rows: T[] = [];
+  for (let index = 0; index < ids.length; index += POSTGREST_IN_CHUNK) {
+    const batch = ids.slice(index, index + POSTGREST_IN_CHUNK);
+    const result = await loader(batch);
+    if (result.error) throw new Error(result.error.message);
+    rows.push(...(result.data ?? []));
+  }
+  return rows;
+}
+
 type CatalogPracticeSettings = {
   shuffle_questions: boolean;
   shuffle_vocabulary: boolean;
@@ -253,148 +269,144 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const readingIds = items.filter((x) => x.entity_type === "reading").map((x) => x.entity_id);
     const listeningIds = items.filter((x) => x.entity_type === "listening").map((x) => x.entity_id);
 
-    const [directQuestionsResult, vocabularyResult, readingsResult, listeningsResult] = await Promise.all([
-      directQuestionIds.length
-        ? admin
-            .from("questions")
-            .select(
-              "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id",
-            )
-            .in("id", directQuestionIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-        : Promise.resolve({ data: [], error: null }),
-      vocabularyIds.length
-        ? admin
-            .from("vocabulary_entries")
-            .select(
-              "id,word,definition,ipa,part_of_speech,learning_language,level,vocabulary_translations(language,value),vocabulary_examples(sentence,translation,sort_order)",
-            )
-            .in("id", vocabularyIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-        : Promise.resolve({ data: [], error: null }),
-      readingIds.length
-        ? admin
-            .from("readings")
-            .select("id,title,body,learning_language,level,word_count,display_layout")
-            .in("id", readingIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-        : Promise.resolve({ data: [], error: null }),
-      listeningIds.length
-        ? admin
-            .from("listenings")
-            .select("id,title,media_id,transcript,learning_language,level,playback_rules")
-            .in("id", listeningIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-        : Promise.resolve({ data: [], error: null }),
+    const [
+      directQuestionRowsRaw,
+      vocabularyRowsRaw,
+      readingRowsRaw,
+      listeningRowsRaw,
+    ] = await Promise.all([
+      loadInChunks(directQuestionIds, (batch) =>
+        admin
+          .from("questions")
+          .select(
+            "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id",
+          )
+          .in("id", batch)
+          .eq("status", "active")
+          .is("deleted_at", null),
+      ),
+      loadInChunks(vocabularyIds, (batch) =>
+        admin
+          .from("vocabulary_entries")
+          .select(
+            "id,word,definition,ipa,part_of_speech,learning_language,level,vocabulary_translations(language,value),vocabulary_examples(sentence,translation,sort_order)",
+          )
+          .in("id", batch)
+          .eq("status", "active")
+          .is("deleted_at", null),
+      ),
+      loadInChunks(readingIds, (batch) =>
+        admin
+          .from("readings")
+          .select("id,title,body,learning_language,level,word_count,display_layout")
+          .in("id", batch)
+          .eq("status", "active")
+          .is("deleted_at", null),
+      ),
+      loadInChunks(listeningIds, (batch) =>
+        admin
+          .from("listenings")
+          .select("id,title,media_id,transcript,learning_language,level,playback_rules")
+          .in("id", batch)
+          .eq("status", "active")
+          .is("deleted_at", null),
+      ),
     ]);
 
-    for (const result of [directQuestionsResult, vocabularyResult, readingsResult, listeningsResult]) {
-      if (result.error) throw new Error(result.error.message);
-    }
-
-    const vocabularyStateResult = vocabularyIds.length
-      ? await admin
+    const [
+      vocabularyStateRows,
+      readingSetRows,
+      listeningSectionRows,
+      listeningSetRows,
+    ] = await Promise.all([
+      loadInChunks(vocabularyIds, (batch) =>
+        admin
           .from("student_vocabulary_state")
           .select(
             "entry_id,state,correct_count,incorrect_count,correct_streak,last_result,last_mode,last_practiced_at",
           )
           .eq("student_id", studentId)
-          .in("entry_id", vocabularyIds)
-      : { data: [], error: null };
-    if (vocabularyStateResult.error) {
-      throw new Error(vocabularyStateResult.error.message);
-    }
-
-    const readingSetResult = readingIds.length
-      ? await admin
+          .in("entry_id", batch),
+      ),
+      loadInChunks(readingIds, (batch) =>
+        admin
           .from("reading_question_sets")
           .select("id,reading_id,title,instructions,sort_order")
-          .in("reading_id", readingIds)
-          .order("sort_order")
-      : { data: [], error: null };
-    if (readingSetResult.error) throw new Error(readingSetResult.error.message);
-
-    const listeningSectionResult = listeningIds.length
-      ? await admin
+          .in("reading_id", batch)
+          .order("sort_order"),
+      ),
+      loadInChunks(listeningIds, (batch) =>
+        admin
           .from("listening_sections")
           .select("id,listening_id,title,start_seconds,end_seconds,sort_order")
-          .in("listening_id", listeningIds)
-          .order("sort_order")
-      : { data: [], error: null };
-    if (listeningSectionResult.error) throw new Error(listeningSectionResult.error.message);
-
-    const listeningSetResult = listeningIds.length
-      ? await admin
+          .in("listening_id", batch)
+          .order("sort_order"),
+      ),
+      loadInChunks(listeningIds, (batch) =>
+        admin
           .from("listening_question_sets")
           .select("id,listening_id,section_id,title,instructions,sort_order")
-          .in("listening_id", listeningIds)
-          .order("sort_order")
-      : { data: [], error: null };
-    if (listeningSetResult.error) throw new Error(listeningSetResult.error.message);
-
-    const readingSetIds = (readingSetResult.data ?? []).map((x) => x.id);
-    const listeningSetIds = (listeningSetResult.data ?? []).map((x) => x.id);
-
-    const [readingQuestionsResult, listeningQuestionsResult] = await Promise.all([
-      readingSetIds.length
-        ? admin
-            .from("questions")
-            .select(
-              "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id,context_sort",
-            )
-            .in("reading_question_set_id", readingSetIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-            .order("context_sort")
-        : Promise.resolve({ data: [], error: null }),
-      listeningSetIds.length
-        ? admin
-            .from("questions")
-            .select(
-              "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id,context_sort",
-            )
-            .in("listening_question_set_id", listeningSetIds)
-            .eq("status", "active")
-            .is("deleted_at", null)
-            .order("context_sort")
-        : Promise.resolve({ data: [], error: null }),
+          .in("listening_id", batch)
+          .order("sort_order"),
+      ),
     ]);
 
-    if (readingQuestionsResult.error) throw new Error(readingQuestionsResult.error.message);
-    if (listeningQuestionsResult.error) throw new Error(listeningQuestionsResult.error.message);
+    const readingSetIds = readingSetRows.map((x) => x.id);
+    const listeningSetIds = listeningSetRows.map((x) => x.id);
+
+    const [readingQuestionRowsRaw, listeningQuestionRowsRaw] =
+      await Promise.all([
+        loadInChunks(readingSetIds, (batch) =>
+          admin
+            .from("questions")
+            .select(
+              "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id,context_sort",
+            )
+            .in("reading_question_set_id", batch)
+            .eq("status", "active")
+            .is("deleted_at", null)
+            .order("context_sort"),
+        ),
+        loadInChunks(listeningSetIds, (batch) =>
+          admin
+            .from("questions")
+            .select(
+              "id,question_type,prompt,instructions,payload,answer_key,scoring,normalization,explanation,grading_mode,current_version,context_kind,reading_question_set_id,listening_question_set_id,context_sort",
+            )
+            .in("listening_question_set_id", batch)
+            .eq("status", "active")
+            .is("deleted_at", null)
+            .order("context_sort"),
+        ),
+      ]);
 
     const listeningMediaIds = (listeningsResult.data ?? [])
       .map((x) => x.media_id)
       .filter((x): x is string => !!x);
 
-    const mediaResult = listeningMediaIds.length
-      ? await admin
-          .from("media_assets")
-          .select("id,kind,storage_path,external_url,mime_type,duration_seconds")
-          .in("id", listeningMediaIds)
-          .is("deleted_at", null)
-      : { data: [], error: null };
-    if (mediaResult.error) throw new Error(mediaResult.error.message);
+    const mediaRows = await loadInChunks(listeningMediaIds, (batch) =>
+      admin
+        .from("media_assets")
+        .select("id,kind,storage_path,external_url,mime_type,duration_seconds")
+        .in("id", batch)
+        .is("deleted_at", null),
+    );
 
     const { hydrateQuestionMedia, resolveMediaUrl } = await import("./media.server");
     const [directQuestionRows, readingQuestionRows, listeningQuestionRows] = await Promise.all([
       hydrateQuestionMedia(
         admin,
-        (directQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        directQuestionRowsRaw as unknown as LoadedQuestion[],
         60 * 60,
       ),
       hydrateQuestionMedia(
         admin,
-        (readingQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        readingQuestionRowsRaw as unknown as LoadedQuestion[],
         60 * 60,
       ),
       hydrateQuestionMedia(
         admin,
-        (listeningQuestionsResult.data ?? []) as unknown as LoadedQuestion[],
+        listeningQuestionRowsRaw as unknown as LoadedQuestion[],
         60 * 60,
       ),
     ]);
@@ -405,14 +417,14 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
         publicQuestion(question),
       ]),
     );
-    const vocabulary = new Map((vocabularyResult.data ?? []).map((entry) => [entry.id, entry]));
+    const vocabulary = new Map(vocabularyRowsRaw.map((entry) => [entry.id, entry]));
     const vocabularyState = new Map(
-      (vocabularyStateResult.data ?? []).map((row) => [row.entry_id, row]),
+      vocabularyStateRows.map((row) => [row.entry_id, row]),
     );
-    const readings = new Map((readingsResult.data ?? []).map((reading) => [reading.id, reading]));
-    const listenings = new Map((listeningsResult.data ?? []).map((listening) => [listening.id, listening]));
+    const readings = new Map(readingRowsRaw.map((reading) => [reading.id, reading]));
+    const listenings = new Map(listeningRowsRaw.map((listening) => [listening.id, listening]));
     const resolvedMedia = await Promise.all(
-      (mediaResult.data ?? []).map(async (asset) => ({
+      mediaRows.map(async (asset) => ({
         ...asset,
         external_url: await resolveMediaUrl(admin as never, asset, 60 * 60),
       })),
@@ -436,7 +448,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     }
 
     const readingSetsByReading = new Map<string, Array<Record<string, unknown>>>();
-    for (const set of readingSetResult.data ?? []) {
+    for (const set of readingSetRows) {
       const list = readingSetsByReading.get(set.reading_id) ?? [];
       list.push({
         id: set.id,
@@ -448,7 +460,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     }
 
     const sectionsByListening = new Map<string, Array<Record<string, unknown>>>();
-    for (const section of listeningSectionResult.data ?? []) {
+    for (const section of listeningSectionRows) {
       const list = sectionsByListening.get(section.listening_id) ?? [];
       list.push({
         id: section.id,
@@ -460,7 +472,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     }
 
     const listeningSetsByListening = new Map<string, Array<Record<string, unknown>>>();
-    for (const set of listeningSetResult.data ?? []) {
+    for (const set of listeningSetRows) {
       const list = listeningSetsByListening.get(set.listening_id) ?? [];
       list.push({
         id: set.id,
