@@ -215,10 +215,11 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
     const antonyms = [...new Set(data.antonyms.map((x) => x.trim()).filter(Boolean))];
 
     let currentProvenance: Record<string, unknown> = {};
-    if (data.id && data.enrichment_metadata) {
+    let currentPartOfSpeech: string | null = null;
+    if (data.id) {
       const { data: current, error: provenanceError } = await sb
         .from("vocabulary_entries")
-        .select("provenance")
+        .select("provenance,part_of_speech")
         .eq("id", data.id)
         .is("deleted_at", null)
         .maybeSingle();
@@ -226,24 +227,53 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
       if (current?.provenance && typeof current.provenance === "object") {
         currentProvenance = current.provenance as Record<string, unknown>;
       }
+      currentPartOfSpeech = current?.part_of_speech ?? null;
     }
+
+    const nextPartOfSpeech = data.part_of_speech || null;
+    const manualFields =
+      currentProvenance["manual_fields"] &&
+      typeof currentProvenance["manual_fields"] === "object"
+        ? {
+            ...(currentProvenance["manual_fields"] as Record<string, unknown>),
+          }
+        : {};
+    if (
+      data.id &&
+      (currentPartOfSpeech ?? "") !== (nextPartOfSpeech ?? "")
+    ) {
+      manualFields["part_of_speech"] = {
+        value: nextPartOfSpeech,
+        updated_at: new Date().toISOString(),
+        source: "teacher",
+      };
+    }
+
+    const shouldPersistProvenance =
+      data.enrichment_metadata != null ||
+      Object.keys(manualFields).length > 0;
 
     const core = {
       word: data.word,
       learning_language: data.learning_language,
       definition: data.definition || null,
       ipa: data.ipa || null,
-      part_of_speech: data.part_of_speech || null,
+      part_of_speech: nextPartOfSpeech,
       synonyms,
       antonyms,
       level: data.level || null,
       notes: data.notes || null,
       status: data.status,
-      ...(data.enrichment_metadata
+      ...(shouldPersistProvenance
         ? {
             provenance: {
               ...currentProvenance,
-              dictionary: data.enrichment_metadata,
+              ...(Object.keys(manualFields).length
+                ? { manual_fields: manualFields }
+                : {}),
+              ...(data.enrichment_metadata
+                ? { dictionary: data.enrichment_metadata }
+                : {}),
             } as never,
           }
         : {}),
@@ -780,6 +810,25 @@ export const repairVocabularyPartOfSpeech = createServerFn({
               typeof provenance["dictionary"] === "object"
                 ? (provenance["dictionary"] as Record<string, unknown>)
                 : {};
+            const manualFields =
+              provenance["manual_fields"] &&
+              typeof provenance["manual_fields"] === "object"
+                ? (provenance["manual_fields"] as Record<string, unknown>)
+                : {};
+            const manualPartOfSpeech =
+              manualFields["part_of_speech"] &&
+              typeof manualFields["part_of_speech"] === "object"
+                ? (manualFields["part_of_speech"] as Record<string, unknown>)
+                : null;
+            if (
+              manualPartOfSpeech &&
+              Object.prototype.hasOwnProperty.call(
+                manualPartOfSpeech,
+                "value",
+              )
+            ) {
+              return;
+            }
             const previousWasRecorded =
               typeof dictionary["part_of_speech_repaired_at"] === "string" &&
               !dictionary["part_of_speech_repair_rolled_back_at"] &&
