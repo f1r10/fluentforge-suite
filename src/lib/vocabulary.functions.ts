@@ -216,6 +216,33 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
 
     let currentProvenance: Record<string, unknown> = {};
     let currentPartOfSpeech: string | null = null;
+
+    let automaticClassification:
+      | Awaited<
+          ReturnType<
+            typeof import("./dictionary-vocabulary").fetchDatamuseLexicalMetadata
+          >
+        >
+      | null = null;
+    const baseLearningLanguage =
+      data.learning_language.toLowerCase().split("-")[0] ??
+      data.learning_language.toLowerCase();
+
+    // New English vocabulary gets safe, best-effort basic classification
+    // before the first database write. Explicit teacher values always win,
+    // and provider failure never blocks manual creation.
+    if (
+      !data.id &&
+      baseLearningLanguage === "en" &&
+      (!data.part_of_speech?.trim() || !data.level?.trim())
+    ) {
+      const { fetchDatamuseLexicalMetadata } = await import(
+        "./dictionary-vocabulary"
+      );
+      automaticClassification =
+        await fetchDatamuseLexicalMetadata(data.word).catch(() => null);
+    }
+
     if (data.id) {
       const { data: current, error: provenanceError } = await sb
         .from("vocabulary_entries")
@@ -230,7 +257,14 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
       currentPartOfSpeech = current?.part_of_speech ?? null;
     }
 
-    const nextPartOfSpeech = data.part_of_speech || null;
+    const nextPartOfSpeech =
+      data.part_of_speech ||
+      automaticClassification?.partOfSpeech ||
+      null;
+    const nextLevel =
+      data.level ||
+      automaticClassification?.level ||
+      null;
     const manualFields =
       currentProvenance["manual_fields"] &&
       typeof currentProvenance["manual_fields"] === "object"
@@ -251,6 +285,7 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
 
     const shouldPersistProvenance =
       data.enrichment_metadata != null ||
+      automaticClassification != null ||
       Object.keys(manualFields).length > 0;
 
     const core = {
@@ -261,7 +296,7 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
       part_of_speech: nextPartOfSpeech,
       synonyms,
       antonyms,
-      level: data.level || null,
+      level: nextLevel,
       notes: data.notes || null,
       status: data.status,
       ...(shouldPersistProvenance
@@ -273,6 +308,20 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
                 : {}),
               ...(data.enrichment_metadata
                 ? { dictionary: data.enrichment_metadata }
+                : {}),
+              ...(automaticClassification
+                ? {
+                    automatic_classification: {
+                      source: "datamuse",
+                      generated_at: new Date().toISOString(),
+                      part_of_speech:
+                        automaticClassification.partOfSpeech,
+                      level: automaticClassification.level,
+                      confidence: automaticClassification.confidence,
+                      frequency_per_million:
+                        automaticClassification.frequencyPerMillion,
+                    },
+                  }
                 : {}),
             } as never,
           }
