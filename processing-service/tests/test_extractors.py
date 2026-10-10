@@ -949,6 +949,48 @@ def test_listening_target_splits_multiple_tasks_on_one_page():
     }
 
 
+def test_split_pdf_row_numbers_are_rejoined_before_vocabulary_parsing():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "pdf_layout_native",
+        [
+            {
+                "page": 5,
+                "text": (
+                    "225)\n"
+                    "bump into sb C1\n"
+                    "226)\n"
+                    "bump noun BODY C1\n"
+                    "227)\n"
+                    "bump noun SURFACE C1\n"
+                ),
+                "tables": [],
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+    payloads = [item["payload"] for item in items]
+
+    assert len(payloads) == 3
+    assert payloads[0]["word"] == "bump into sb"
+    assert payloads[0]["level"] == "C1"
+    assert payloads[1]["word"] == "bump"
+    assert payloads[1]["part_of_speech"] == "noun"
+    assert payloads[1]["notes"] == "Source sense: BODY"
+    assert payloads[2]["notes"] == "Source sense: SURFACE"
+
+
 def test_numbered_dictionary_rows_preserve_repeated_senses_and_introduction_word():
     from app.extractors import Extraction
 
