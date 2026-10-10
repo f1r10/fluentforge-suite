@@ -1,6 +1,7 @@
 import {
   fetchBestDictionaryVocabularySuggestion,
   fetchDictionaryVocabularySuggestion,
+  fetchDatamuseLexicalMetadata,
   parseDictionaryVocabularyResponse,
   parseWiktApiVocabularyResponse,
 } from "./dictionary-vocabulary";
@@ -86,6 +87,63 @@ describe("dictionary vocabulary fallback", () => {
         fetcher as typeof fetch,
       ),
     ).rejects.toThrow("No English dictionary entry was found");
+  });
+});
+
+
+describe("Datamuse lexical metadata", () => {
+  it("uses the most popular corpus POS and frequency level for an exact word", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        JSON.stringify([
+          {
+            word: "say",
+            tags: ["v", "n", "f:84.2"],
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await fetchDatamuseLexicalMetadata(
+      "say",
+      fetcher as typeof fetch,
+    );
+
+    expect(result).toMatchObject({
+      partOfSpeech: "verb",
+      level: "A2",
+      frequencyPerMillion: 84.2,
+    });
+  });
+
+  it("maps common adjective and noun tags without promoting rare secondary senses", async () => {
+    const responses: Record<string, unknown[]> = {
+      apple: [{ word: "apple", tags: ["n", "v", "f:18"] }],
+      bad: [{ word: "bad", tags: ["adj", "n", "f:95"] }],
+    };
+    const fetcher = vi.fn(async (url: string) => {
+      const word = new URL(url).searchParams.get("sp") ?? "";
+      return new Response(JSON.stringify(responses[word] ?? []), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const apple = await fetchDatamuseLexicalMetadata(
+      "apple",
+      fetcher as typeof fetch,
+    );
+    const bad = await fetchDatamuseLexicalMetadata(
+      "bad",
+      fetcher as typeof fetch,
+    );
+
+    expect(apple?.partOfSpeech).toBe("noun");
+    expect(bad?.partOfSpeech).toBe("adjective");
   });
 });
 
