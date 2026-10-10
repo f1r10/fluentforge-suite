@@ -1214,7 +1214,11 @@ export const updateImportItem = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: current, error: currentError } = await context.supabase
+    // requireTeacher has authorized this request. Use the service-side client
+    // for review decisions so an RLS no-op cannot masquerade as a saved write.
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const { data: current, error: currentError } = await admin
       .from("import_items")
       .select("item_type,payload,duplicate_of,created_entity_id")
       .eq("id", data.id)
@@ -1250,7 +1254,7 @@ export const updateImportItem = createServerFn({ method: "POST" })
       ...(data.payload ? { payload: data.payload } : {}),
       ...(data.itemType ? { item_type: data.itemType } : {}),
     };
-    const { data: updated, error } = await context.supabase
+    const { data: updated, error } = await admin
       .from("import_items")
       .update(update as never)
       .eq("id", data.id)
@@ -1260,6 +1264,15 @@ export const updateImportItem = createServerFn({ method: "POST" })
     if (!updated || updated.decision !== data.decision || updated.item_type !== itemType) {
       throw new Error("The import item was not updated. Refresh the review and try again.");
     }
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: data.itemType ? "document_import_item_converted" : "document_import_item_reviewed",
+      entity_type: "import_item",
+      entity_id: data.id,
+      summary: `Teacher ${data.decision} import item`,
+      details: { decision: data.decision, item_type: itemType },
+    });
     return { ok: true };
   });
 
