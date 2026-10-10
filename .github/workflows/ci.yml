@@ -1,0 +1,362 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "chatgpt/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: bun run test
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Build
+        run: bun run build
+
+      - name: Check migration runner syntax
+        run: node --check scripts/migrate.mjs
+
+
+  processing-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: processing-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install processing dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile processing service
+        run: python -m compileall app
+
+      - name: Test processing service
+        run: pytest -q
+
+
+  production-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production Compose
+        run: |
+          cp .env.production.example .env.production
+          docker compose \
+            --env-file .env.production \
+            -f docker-compose.production.yml \
+            config >/tmp/fluentforge-compose.yml
+
+      - name: Build production web image
+        run: |
+          docker build \
+            --target runtime \
+            --build-arg VITE_SUPABASE_URL=https://example.supabase.co \
+            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci \
+            -t fluentforge-web-ci \
+            .
+
+      - name: Smoke test production web image
+        run: |
+          docker run -d --rm \
+            --name fluentforge-web-ci \
+            -p 127.0.0.1:3300:3000 \
+            -e SUPABASE_URL=https://example.supabase.co \
+            -e SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci \
+            -e SUPABASE_SERVICE_ROLE_KEY=sb_secret_ci \
+            -e SETUP_TOKEN=ci-setup-token-not-used \
+            -e PROCESSING_SERVICE_URL=http://127.0.0.1:8001 \
+            -e PROCESSING_SHARED_SECRET=ci-processing-secret \
+            fluentforge-web-ci
+
+          ok=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS -D /tmp/health.headers \
+              http://127.0.0.1:3300/api/health \
+              >/tmp/health.json; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            docker logs fluentforge-web-ci || true
+            exit 1
+          fi
+
+          grep -qi '^x-content-type-options: nosniff' /tmp/health.headers
+          grep -qi '^x-frame-options: SAMEORIGIN' /tmp/health.headers
+          grep -qi '^referrer-policy: strict-origin-when-cross-origin' /tmp/health.headers
+          grep -qi '^permissions-policy:' /tmp/health.headers
+          grep -qi '^content-security-policy:' /tmp/health.headers
+
+          cat /tmp/health.json
+          docker stop fluentforge-web-ci
+
+
+  database-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_DB_PORT: "15432"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v1
+        with:
+          # Pin the CLI so CI does not need a GitHub "latest release" lookup,
+          # which can fail under API rate limiting.
+          version: 2.120.0
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Apply all FluentForge migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:15432/postgres
+          DATABASE_SSL: disable
+        run: bun run migrate
+
+      - name: Run database security/performance acceptance
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:15432/postgres
+          DATABASE_SSL: disable
+          ACCEPTANCE_QUERY_BUDGET_MS: "500"
+        run: bun run acceptance:db
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
+
+
+  plain-postgres-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create plain-runtime CI environment
+        run: |
+          cat >.env.postgres.ci <<'EOF'
+          POSTGRES_DB=fluentforge
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=ci-postgres-password-6c8357d85d454b47
+          APP_JWT_SECRET=ci-jwt-secret-2fef91657ac84675802bbd8c82553d03
+          APP_STORAGE_SECRET=ci-storage-secret-6e103818623349ecb119164711975e48
+          SETUP_TOKEN=ci-setup-token-cfbb3ba406844682
+          PROCESSING_SHARED_SECRET=ci-processing-secret-6469f35399b348af
+          SCHEDULED_JOB_SECRET=ci-scheduled-backup-secret-356fcd98e2f84277
+          APP_BIND_ADDRESS=127.0.0.1
+          APP_PORT=3400
+          AI_PROVIDER=disabled
+          WHISPER_LOCAL_FILES_ONLY=true
+          EOF
+
+      - name: Validate plain PostgreSQL Compose
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            config >/tmp/fluentforge-postgres-compose.yml
+
+      - name: Start Supabase-free stack
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            up -d --build app scheduler
+
+      - name: Verify plain runtime readiness
+        run: |
+          ok=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS \
+              http://127.0.0.1:3400/api/ready \
+              >/tmp/plain-ready.json; then
+              if grep -q '"database":"ok"' /tmp/plain-ready.json; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 2
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              ps || true
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              logs --no-color || true
+            exit 1
+          fi
+
+          cat /tmp/plain-ready.json
+          curl -fsS http://127.0.0.1:3400/setup >/tmp/plain-setup.html
+          test -s /tmp/plain-setup.html
+
+      - name: Verify local object storage upload and Range download
+        env:
+          APP_STORAGE_SECRET: ci-storage-secret-6e103818623349ecb119164711975e48
+        run: |
+          upload_token="$(node - <<'NODE'
+          const crypto = require('node:crypto');
+          const value = {
+            op: 'upload',
+            bucket: 'media',
+            path: 'ci/smoke.txt',
+            exp: Date.now() + 120000,
+          };
+          const payload = Buffer.from(JSON.stringify(value)).toString('base64url');
+          const sig = crypto.createHmac('sha256', process.env.APP_STORAGE_SECRET)
+            .update(payload, 'utf8').digest('base64url');
+          process.stdout.write(payload + '.' + sig);
+          NODE
+          )"
+
+          printf 'fluentforge-runtime-smoke' >/tmp/runtime-smoke.txt
+          curl -fsS -X PUT \
+            -H 'content-type: text/plain' \
+            -H 'x-runtime-storage-bucket: media' \
+            -H 'x-runtime-storage-path: ci/smoke.txt' \
+            --data-binary @/tmp/runtime-smoke.txt \
+            "http://127.0.0.1:3400/api/runtime-storage/upload?token=$upload_token" \
+            >/tmp/runtime-upload.json
+
+          read_token="$(node - <<'NODE'
+          const crypto = require('node:crypto');
+          const value = {
+            op: 'read',
+            bucket: 'media',
+            path: 'ci/smoke.txt',
+            exp: Date.now() + 120000,
+          };
+          const payload = Buffer.from(JSON.stringify(value)).toString('base64url');
+          const sig = crypto.createHmac('sha256', process.env.APP_STORAGE_SECRET)
+            .update(payload, 'utf8').digest('base64url');
+          process.stdout.write(payload + '.' + sig);
+          NODE
+          )"
+
+          curl -fsS \
+            -H 'Range: bytes=0-10' \
+            -D /tmp/runtime-range.headers \
+            "http://127.0.0.1:3400/api/runtime-storage/object?token=$read_token" \
+            >/tmp/runtime-range.bin
+
+          grep -qi '^content-range: bytes 0-10/25' /tmp/runtime-range.headers
+          test "$(cat /tmp/runtime-range.bin)" = "fluentforge"
+
+      - name: Verify plain PostgreSQL bootstrap invariants
+        run: |
+          dc() {
+            docker compose \
+              --env-file .env.postgres.ci \
+              -f docker-compose.postgres.yml \
+              exec -T postgres \
+              psql -U postgres -d fluentforge -Atqc "$1"
+          }
+
+          test "$(dc "select count(*) from pg_roles where rolname = 'authenticated'")" = "1"
+          test "$(dc "select count(*) from pg_roles where rolname = 'service_role' and rolbypassrls")" = "1"
+          test "$(dc "select (to_regclass('public.runtime_auth_users') is not null)::int")" = "1"
+          test "$(dc "select (to_regclass('public.runtime_refresh_tokens') is not null)::int")" = "1"
+
+      - name: Verify scheduled-backup trigger security
+        run: |
+          unauthorized="$(
+            curl -sS -o /tmp/scheduled-unauthorized.json -w '%{http_code}' \
+              -X POST http://127.0.0.1:3400/api/scheduled-backup
+          )"
+          test "$unauthorized" = "401"
+
+          set -a
+          . ./.env.postgres.ci
+          set +a
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $SCHEDULED_JOB_SECRET" \
+            http://127.0.0.1:3400/api/scheduled-backup \
+            >/tmp/scheduled-authorized.json
+
+          grep -q '"status":"disabled"' /tmp/scheduled-authorized.json
+
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            ps --status running --services \
+            | grep -qx scheduler
+
+      - name: Install Chromium acceptance runner
+        run: |
+          mkdir -p "$RUNNER_TEMP/fluentforge-playwright"
+          cd "$RUNNER_TEMP/fluentforge-playwright"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run teacher and student browser acceptance
+        run: |
+          set -a
+          . ./.env.postgres.ci
+          set +a
+          export NODE_PATH="$RUNNER_TEMP/fluentforge-playwright/node_modules"
+          export E2E_BASE_URL="http://127.0.0.1:3400"
+          export E2E_SETUP_TOKEN="$SETUP_TOKEN"
+          export E2E_TEACHER_USERNAME="release.teacher"
+          export E2E_TEACHER_PASSWORD="Ci-$(openssl rand -hex 12)-Aa1!"
+          export E2E_SCREENSHOT_PATH="$RUNNER_TEMP/fluentforge-release-smoke-failure.png"
+          node scripts/release-browser-smoke.cjs
+
+      - name: Upload browser failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-smoke-failure
+          path: ${{ runner.temp }}/fluentforge-release-smoke-failure.png
+          if-no-files-found: ignore
+
+      - name: Stop Supabase-free stack
+        if: always()
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            down -v --remove-orphans

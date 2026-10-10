@@ -1,11 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthLayout, ErrorText, setTokens } from "@/components/app/common";
 import { teacherLogin } from "@/lib/auth.functions";
 import { useI18n } from "@/lib/i18n";
+import { brandingQuery } from "@/routes/__root";
 
 export const Route = createFileRoute("/teacher-login")({
   head: () => ({
@@ -21,6 +23,7 @@ export const Route = createFileRoute("/teacher-login")({
 
 function TeacherLogin() {
   const { t } = useI18n();
+  const { data: b } = useSuspenseQuery(brandingQuery);
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -50,7 +53,7 @@ function TeacherLogin() {
           <Input id="p" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-11" required />
         </div>
         <ErrorText>{error}</ErrorText>
-        <Button type="submit" className="h-11 w-full" disabled={busy}>{t("sign_in")}</Button>
+        <Button type="submit" className="h-11 w-full" disabled={busy}>{b.teacher_login_button || t("sign_in")}</Button>
       </form>
       <div className="mt-6 flex justify-between text-sm text-muted-foreground">
         <Link to="/recover" className="hover:underline">{t("forgot_password")}</Link>

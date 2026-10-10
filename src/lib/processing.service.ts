@@ -1,0 +1,369 @@
+/**
+ * Boundary for CPU/GPU-heavy document, OCR, AI, transcription and media work.
+ * The core application depends only on this contract.
+ */
+export type ProcessingJobStatus =
+  | "queued"
+  | "processing"
+  | "needs_review"
+  | "completed"
+  | "failed"
+  | "not_implemented";
+
+export type ProcessingImportItem = {
+  item_type: "question" | "vocabulary" | "reading" | "listening" | "raw_text";
+  page?: number | null;
+  sheet?: string | null;
+  payload: Record<string, unknown>;
+  crop?: { x: number; y: number; width: number; height: number } | null;
+  confidence?: number | null;
+};
+
+export type ProcessingJobRef = {
+  jobId: string;
+  status: ProcessingJobStatus;
+  progress?: number;
+  extractionMethod?: string | null;
+  message?: string;
+  error?: string | null;
+  stats?: Record<string, unknown>;
+  items?: ProcessingImportItem[];
+  result?: Record<string, unknown>;
+};
+
+export interface ProcessingService {
+  submitDocumentImport(input: {
+    sourceFileId: string;
+    sourceUrl: string;
+    filename: string;
+    mimeType?: string | null;
+    profile?: Record<string, unknown> | null;
+    mode?: "review" | "auto";
+  }): Promise<ProcessingJobRef>;
+
+  getImportStatus(jobId: string): Promise<ProcessingJobRef>;
+
+  runOCR(input: {
+    mediaId: string;
+    languages?: string[];
+  }): Promise<ProcessingJobRef>;
+
+  extractQuestions(input: {
+    sourceFileId: string;
+    importJobId?: string;
+  }): Promise<ProcessingJobRef>;
+
+  extractVocabulary(input: {
+    sourceFileId: string;
+    importJobId?: string;
+  }): Promise<ProcessingJobRef>;
+
+  transcribeMedia(input: {
+    mediaId: string;
+    sourceUrl: string;
+    filename: string;
+    language?: string;
+  }): Promise<ProcessingJobRef>;
+
+  importYouTube(input: {
+    sourceUrl: string;
+    uploadUrl: string;
+    maxBytes: number;
+    preferredHeight?: number;
+  }): Promise<ProcessingJobRef>;
+
+  renderPdfReport(input: {
+    html: string;
+  }): Promise<Uint8Array>;
+
+  renderDocxReport(input: {
+    html: string;
+  }): Promise<Uint8Array>;
+
+  enrichVocabulary(input: {
+    entryIds: string[];
+    targetLanguages?: string[];
+  }): Promise<ProcessingJobRef>;
+
+  analyzeDuplicates(input: {
+    questionIds: string[];
+  }): Promise<ProcessingJobRef>;
+
+  processMedia(input: {
+    mediaId: string;
+    operations: string[];
+  }): Promise<ProcessingJobRef>;
+}
+
+const notImplemented = async (): Promise<ProcessingJobRef> => ({
+  jobId: "",
+  status: "not_implemented",
+  message: "External processing service is not configured.",
+});
+
+export class PlaceholderProcessingService implements ProcessingService {
+  submitDocumentImport = notImplemented;
+  getImportStatus = notImplemented;
+  runOCR = notImplemented;
+  extractQuestions = notImplemented;
+  extractVocabulary = notImplemented;
+
+  transcribeMedia = notImplemented;
+  importYouTube = notImplemented;
+  async renderPdfReport(): Promise<Uint8Array> {
+    throw new Error("External processing service is not configured.");
+  }
+  async renderDocxReport(): Promise<Uint8Array> {
+    throw new Error("External processing service is not configured.");
+  }
+  enrichVocabulary = notImplemented;
+  analyzeDuplicates = notImplemented;
+  processMedia = notImplemented;
+}
+
+class HttpProcessingService implements ProcessingService {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly sharedSecret: string | null,
+  ) {}
+
+  private sourceUrl(value: string) {
+    if (/^https?:\/\//i.test(value)) return value;
+    if (!value.startsWith("/")) {
+      throw new Error("Processing source URL is not valid.");
+    }
+    const internalBase =
+      process.env["RUNTIME_INTERNAL_URL"]?.trim() ||
+      process.env["APP_PUBLIC_URL"]?.trim();
+    if (!internalBase) {
+      throw new Error(
+        "RUNTIME_INTERNAL_URL is required for relative storage URLs.",
+      );
+    }
+    return new URL(value, internalBase).toString();
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const headers = new Headers(init?.headers);
+      headers.set("content-type", "application/json");
+      if (this.sharedSecret) {
+        headers.set("x-processing-key", this.sharedSecret);
+      }
+
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+          `Processing service error ${response.status}: ${body.slice(0, 1000)}`,
+        );
+      }
+      return (await response.json()) as T;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async requestBinary(
+    path: string,
+    expectedContentType: string,
+    init?: RequestInit,
+  ): Promise<Uint8Array> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const headers = new Headers(init?.headers);
+      headers.set("content-type", "application/json");
+      if (this.sharedSecret) {
+        headers.set("x-processing-key", this.sharedSecret);
+      }
+
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+          `Processing service error ${response.status}: ${body.slice(0, 1000)}`,
+        );
+      }
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.toLowerCase().includes(expectedContentType.toLowerCase())) {
+        throw new Error(
+          `Processing service returned unexpected content type: ${contentType || "unknown"}`,
+        );
+      }
+
+      return new Uint8Array(await response.arrayBuffer());
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async submitDocumentImport(input: {
+    sourceFileId: string;
+    sourceUrl: string;
+    filename: string;
+    mimeType?: string | null;
+    profile?: Record<string, unknown> | null;
+    mode?: "review" | "auto";
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/document-import", {
+      method: "POST",
+      body: JSON.stringify({
+        source_file_id: input.sourceFileId,
+        source_url: this.sourceUrl(input.sourceUrl),
+        filename: input.filename,
+        mime_type: input.mimeType ?? null,
+        mode: input.mode ?? "review",
+        profile: input.profile ?? null,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
+  async getImportStatus(jobId: string) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+      progress: number;
+      extraction_method?: string | null;
+      error?: string | null;
+      stats?: Record<string, unknown>;
+      items?: ProcessingImportItem[];
+      result?: Record<string, unknown>;
+    }>(`/v1/jobs/${encodeURIComponent(jobId)}`);
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+      progress: result.progress,
+      extractionMethod: result.extraction_method ?? null,
+      error: result.error ?? null,
+      stats: result.stats ?? {},
+      items: result.items ?? [],
+      result: result.result ?? {},
+    };
+  }
+
+  runOCR = notImplemented;
+  extractQuestions = notImplemented;
+  extractVocabulary = notImplemented;
+
+  async transcribeMedia(input: {
+    mediaId: string;
+    sourceUrl: string;
+    filename: string;
+    language?: string;
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/transcription", {
+      method: "POST",
+      body: JSON.stringify({
+        media_id: input.mediaId,
+        source_url: this.sourceUrl(input.sourceUrl),
+        filename: input.filename,
+        language: input.language ?? null,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
+  async importYouTube(input: {
+    sourceUrl: string;
+    uploadUrl: string;
+    maxBytes: number;
+    preferredHeight?: number;
+  }) {
+    const result = await this.request<{
+      job_id: string;
+      status: ProcessingJobStatus;
+    }>("/v1/jobs/youtube-import", {
+      method: "POST",
+      body: JSON.stringify({
+        source_url: input.sourceUrl,
+        upload_url: this.sourceUrl(input.uploadUrl),
+        max_bytes: input.maxBytes,
+        preferred_height: input.preferredHeight ?? 1080,
+      }),
+    });
+
+    return {
+      jobId: result.job_id,
+      status: result.status,
+    };
+  }
+
+  async renderPdfReport(input: { html: string }) {
+    if (!input.html.trim()) {
+      throw new Error("PDF report HTML must not be empty.");
+    }
+    if (input.html.length > 8_000_000) {
+      throw new Error("PDF report HTML exceeds the 8 MB safety limit.");
+    }
+
+    return this.requestBinary(
+      "/v1/reports/pdf",
+      "application/pdf",
+      {
+        method: "POST",
+        body: JSON.stringify({ html: input.html }),
+      },
+    );
+  }
+
+  async renderDocxReport(input: { html: string }) {
+    if (!input.html.trim()) {
+      throw new Error("DOCX report HTML must not be empty.");
+    }
+    if (input.html.length > 8_000_000) {
+      throw new Error("DOCX report HTML exceeds the 8 MB safety limit.");
+    }
+
+    return this.requestBinary(
+      "/v1/reports/docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      {
+        method: "POST",
+        body: JSON.stringify({ html: input.html }),
+      },
+    );
+  }
+
+  enrichVocabulary = notImplemented;
+  analyzeDuplicates = notImplemented;
+  processMedia = notImplemented;
+}
+
+export function getProcessingService(): ProcessingService {
+  const rawUrl = process.env.PROCESSING_SERVICE_URL?.trim();
+  if (!rawUrl) return new PlaceholderProcessingService();
+
+  const baseUrl = rawUrl.replace(/\/+$/, "");
+  return new HttpProcessingService(
+    baseUrl,
+    process.env.PROCESSING_SHARED_SECRET?.trim() || null,
+  );
+}

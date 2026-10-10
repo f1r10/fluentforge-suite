@@ -229,28 +229,46 @@ export type Database = {
       }
       backups: {
         Row: {
+          checksum_sha256: string | null
+          completed_at: string | null
           created_at: string
           error: string | null
           id: string
           kind: string
+          last_restored_at: string | null
+          manifest: Json
+          mime_type: string | null
+          restore_state: Json
           size_bytes: number | null
           status: Database["public"]["Enums"]["job_status"]
           storage_path: string | null
         }
         Insert: {
+          checksum_sha256?: string | null
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
           kind?: string
+          last_restored_at?: string | null
+          manifest?: Json
+          mime_type?: string | null
+          restore_state?: Json
           size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
         }
         Update: {
+          checksum_sha256?: string | null
+          completed_at?: string | null
           created_at?: string
           error?: string | null
           id?: string
           kind?: string
+          last_restored_at?: string | null
+          manifest?: Json
+          mime_type?: string | null
+          restore_state?: Json
           size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
@@ -441,6 +459,8 @@ export type Database = {
           max_score: number | null
           passed: boolean | null
           result_released: boolean
+          reset_at: string | null
+          reset_by: string | null
           score: number | null
           snapshot: Json
           started_at: string
@@ -458,6 +478,8 @@ export type Database = {
           max_score?: number | null
           passed?: boolean | null
           result_released?: boolean
+          reset_at?: string | null
+          reset_by?: string | null
           score?: number | null
           snapshot: Json
           started_at?: string
@@ -475,6 +497,8 @@ export type Database = {
           max_score?: number | null
           passed?: boolean | null
           result_released?: boolean
+          reset_at?: string | null
+          reset_by?: string | null
           score?: number | null
           snapshot?: Json
           started_at?: string
@@ -544,6 +568,60 @@ export type Database = {
             columns: ["section_id"]
             isOneToOne: false
             referencedRelation: "exam_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      exam_listening_plays: {
+        Row: {
+          attempt_id: string
+          completed_at: string | null
+          expires_at: string
+          id: string
+          listening_id: string
+          play_number: number
+          request_id: string
+          started_at: string
+          stream_token_hash: string | null
+          student_id: string
+        }
+        Insert: {
+          attempt_id: string
+          completed_at?: string | null
+          expires_at: string
+          id?: string
+          listening_id: string
+          play_number: number
+          request_id: string
+          started_at?: string
+          stream_token_hash?: string | null
+          student_id: string
+        }
+        Update: {
+          attempt_id?: string
+          completed_at?: string | null
+          expires_at?: string
+          id?: string
+          listening_id?: string
+          play_number?: number
+          request_id?: string
+          started_at?: string
+          stream_token_hash?: string | null
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_listening_plays_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_listening_plays_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
             referencedColumns: ["id"]
           },
         ]
@@ -633,34 +711,52 @@ export type Database = {
       }
       export_jobs: {
         Row: {
+          completed_at: string | null
           created_at: string
           error: string | null
+          expires_at: string
           format: string
           id: string
+          include_trash: boolean
           kind: string
+          mime_type: string | null
           params: Json
+          row_counts: Json
+          size_bytes: number | null
           status: Database["public"]["Enums"]["job_status"]
           storage_path: string | null
           updated_at: string
         }
         Insert: {
+          completed_at?: string | null
           created_at?: string
           error?: string | null
+          expires_at?: string
           format: string
           id?: string
+          include_trash?: boolean
           kind: string
+          mime_type?: string | null
           params?: Json
+          row_counts?: Json
+          size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
           updated_at?: string
         }
         Update: {
+          completed_at?: string | null
           created_at?: string
           error?: string | null
+          expires_at?: string
           format?: string
           id?: string
+          include_trash?: boolean
           kind?: string
+          mime_type?: string | null
           params?: Json
+          row_counts?: Json
+          size_bytes?: number | null
           status?: Database["public"]["Enums"]["job_status"]
           storage_path?: string | null
           updated_at?: string
@@ -821,6 +917,7 @@ export type Database = {
           mode: string
           profile_id: string | null
           progress: number
+          processor_job_id: string | null
           source_file_id: string | null
           stats: Json
           status: Database["public"]["Enums"]["job_status"]
@@ -834,6 +931,7 @@ export type Database = {
           mode?: string
           profile_id?: string | null
           progress?: number
+          processor_job_id?: string | null
           source_file_id?: string | null
           stats?: Json
           status?: Database["public"]["Enums"]["job_status"]
@@ -847,6 +945,7 @@ export type Database = {
           mode?: string
           profile_id?: string | null
           progress?: number
+          processor_job_id?: string | null
           source_file_id?: string | null
           stats?: Json
           status?: Database["public"]["Enums"]["job_status"]
@@ -1154,6 +1253,53 @@ export type Database = {
           },
         ]
       }
+      media_upload_sessions: {
+        Row: {
+          id: string
+          storage_path: string
+          kind: Database["public"]["Enums"]["media_kind"]
+          original_filename: string
+          mime_type: string | null
+          expected_size_bytes: number
+          created_at: string
+          expires_at: string
+          finalized_at: string | null
+          media_asset_id: string | null
+        }
+        Insert: {
+          id?: string
+          storage_path: string
+          kind: Database["public"]["Enums"]["media_kind"]
+          original_filename: string
+          mime_type?: string | null
+          expected_size_bytes: number
+          created_at?: string
+          expires_at: string
+          finalized_at?: string | null
+          media_asset_id?: string | null
+        }
+        Update: {
+          id?: string
+          storage_path?: string
+          kind?: Database["public"]["Enums"]["media_kind"]
+          original_filename?: string
+          mime_type?: string | null
+          expected_size_bytes?: number
+          created_at?: string
+          expires_at?: string
+          finalized_at?: string | null
+          media_asset_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_upload_sessions_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "media_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_assets: {
         Row: {
           checksum: string | null
@@ -1205,11 +1351,71 @@ export type Database = {
         }
         Relationships: []
       }
+      media_import_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          media_asset_id: string | null
+          processor_job_id: string | null
+          progress: number
+          result: Json
+          rights_confirmed_at: string
+          source_kind: string
+          source_url: string
+          status: string
+          storage_path: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          media_asset_id?: string | null
+          processor_job_id?: string | null
+          progress?: number
+          result?: Json
+          rights_confirmed_at: string
+          source_kind: string
+          source_url: string
+          status?: string
+          storage_path: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          media_asset_id?: string | null
+          processor_job_id?: string | null
+          progress?: number
+          result?: Json
+          rights_confirmed_at?: string
+          source_kind?: string
+          source_url?: string
+          status?: string
+          storage_path?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_import_jobs_media_asset_id_fkey"
+            columns: ["media_asset_id"]
+            isOneToOne: false
+            referencedRelation: "media_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           body: string | null
           created_at: string
           data: Json
+          dedupe_key: string | null
           id: string
           kind: string
           link: string | null
@@ -1222,6 +1428,7 @@ export type Database = {
           body?: string | null
           created_at?: string
           data?: Json
+          dedupe_key?: string | null
           id?: string
           kind: string
           link?: string | null
@@ -1234,6 +1441,7 @@ export type Database = {
           body?: string | null
           created_at?: string
           data?: Json
+          dedupe_key?: string | null
           id?: string
           kind?: string
           link?: string | null
@@ -1385,6 +1593,51 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      processing_jobs: {
+        Row: {
+          id: string
+          kind: string
+          entity_type: string | null
+          entity_id: string | null
+          processor_job_id: string
+          status: Database["public"]["Enums"]["job_status"]
+          progress: number
+          params: Json
+          result: Json
+          error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          kind: string
+          entity_type?: string | null
+          entity_id?: string | null
+          processor_job_id: string
+          status?: Database["public"]["Enums"]["job_status"]
+          progress?: number
+          params?: Json
+          result?: Json
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          kind?: string
+          entity_type?: string | null
+          entity_id?: string | null
+          processor_job_id?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          progress?: number
+          params?: Json
+          result?: Json
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       questions: {
         Row: {
@@ -1688,6 +1941,53 @@ export type Database = {
           },
         ]
       }
+      source_upload_sessions: {
+        Row: {
+          id: string
+          storage_path: string
+          original_filename: string
+          mime_type: string | null
+          expected_size_bytes: number
+          keep_original: boolean
+          created_at: string
+          expires_at: string
+          finalized_at: string | null
+          source_file_id: string | null
+        }
+        Insert: {
+          id?: string
+          storage_path: string
+          original_filename: string
+          mime_type?: string | null
+          expected_size_bytes: number
+          keep_original?: boolean
+          created_at?: string
+          expires_at: string
+          finalized_at?: string | null
+          source_file_id?: string | null
+        }
+        Update: {
+          id?: string
+          storage_path?: string
+          original_filename?: string
+          mime_type?: string | null
+          expected_size_bytes?: number
+          keep_original?: boolean
+          created_at?: string
+          expires_at?: string
+          finalized_at?: string | null
+          source_file_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_upload_sessions_source_file_id_fkey"
+            columns: ["source_file_id"]
+            isOneToOne: false
+            referencedRelation: "source_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       source_files: {
         Row: {
           created_at: string
@@ -1729,6 +2029,179 @@ export type Database = {
           storage_path?: string | null
         }
         Relationships: []
+      }
+      student_personal_vocabulary: {
+        Row: {
+          antonyms: string[]
+          created_at: string
+          definition: string | null
+          examples: Json
+          id: string
+          ipa: string | null
+          learning_language: string
+          level: string | null
+          lexical_metadata: Json
+          part_of_speech: string | null
+          source: string
+          student_id: string
+          synonyms: string[]
+          translations: Json
+          updated_at: string
+          word: string
+        }
+        Insert: {
+          antonyms?: string[]
+          created_at?: string
+          definition?: string | null
+          examples?: Json
+          id?: string
+          ipa?: string | null
+          learning_language?: string
+          level?: string | null
+          lexical_metadata?: Json
+          part_of_speech?: string | null
+          source?: string
+          student_id: string
+          synonyms?: string[]
+          translations?: Json
+          updated_at?: string
+          word: string
+        }
+        Update: {
+          antonyms?: string[]
+          created_at?: string
+          definition?: string | null
+          examples?: Json
+          id?: string
+          ipa?: string | null
+          learning_language?: string
+          level?: string | null
+          lexical_metadata?: Json
+          part_of_speech?: string | null
+          source?: string
+          student_id?: string
+          synonyms?: string[]
+          translations?: Json
+          updated_at?: string
+          word?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_personal_vocabulary_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_review_schedules: {
+        Row: {
+          due_at: string
+          entity_id: string
+          entity_type: string
+          interval_days: number
+          lapses: number
+          last_event_id: number | null
+          last_reviewed_at: string | null
+          step: number
+          student_id: string
+          updated_at: string
+        }
+        Insert: {
+          due_at?: string
+          entity_id: string
+          entity_type: string
+          interval_days?: number
+          lapses?: number
+          last_event_id?: number | null
+          last_reviewed_at?: string | null
+          step?: number
+          student_id: string
+          updated_at?: string
+        }
+        Update: {
+          due_at?: string
+          entity_id?: string
+          entity_type?: string
+          interval_days?: number
+          lapses?: number
+          last_event_id?: number | null
+          last_reviewed_at?: string | null
+          step?: number
+          student_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_review_schedules_last_event_id_fkey"
+            columns: ["last_event_id"]
+            isOneToOne: false
+            referencedRelation: "activity_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_review_schedules_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_vocabulary_state: {
+        Row: {
+          student_id: string
+          entry_id: string
+          state: string
+          correct_count: number
+          incorrect_count: number
+          correct_streak: number
+          last_result: boolean | null
+          last_mode: string | null
+          last_practiced_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          student_id: string
+          entry_id: string
+          state?: string
+          correct_count?: number
+          incorrect_count?: number
+          correct_streak?: number
+          last_result?: boolean | null
+          last_mode?: string | null
+          last_practiced_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          student_id?: string
+          entry_id?: string
+          state?: string
+          correct_count?: number
+          incorrect_count?: number
+          correct_streak?: number
+          last_result?: boolean | null
+          last_mode?: string | null
+          last_practiced_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_vocabulary_state_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_vocabulary_state_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "vocabulary_entries"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       student_access_keys: {
         Row: {
@@ -2291,6 +2764,14 @@ export type Database = {
     }
     Functions: {
       current_student_id: { Args: never; Returns: string }
+      record_review_from_event: {
+        Args: { p_event_id: number }
+        Returns: undefined
+      }
+      claim_scheduled_backup: {
+        Args: { p_interval_hours: number }
+        Returns: string | null
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2299,6 +2780,179 @@ export type Database = {
         Returns: boolean
       }
       is_teacher: { Args: never; Returns: boolean }
+      reorder_catalog_items: {
+        Args: { p_catalog_id: string; p_item_ids: string[] }
+        Returns: undefined
+      }
+      select_self_practice_question_ids: {
+        Args: {
+          p_student_id: string
+          p_count: number
+          p_language?: string | null
+          p_level?: string | null
+          p_types?: string[] | null
+          p_topic_ids?: string[] | null
+          p_catalog_id?: string | null
+          p_source_file_id?: string | null
+          p_history_mode?: string
+          p_exclude_answered?: boolean
+        }
+        Returns: { question_id: string }[]
+      }
+      save_language_settings: {
+        Args: { p_languages: Json }
+        Returns: undefined
+      }
+      storage_usage_summary: {
+        Args: never
+        Returns: {
+          category: string
+          bytes: number
+          items: number
+        }[]
+      }
+      teacher_question_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          question_id: string
+          prompt: string
+          question_type: string
+          attempts: number
+          correct: number
+          incorrect: number
+          manual: number
+          skips: number
+          accuracy: number | null
+          skip_rate: number | null
+          avg_time_ms: number | null
+          difficulty_suggestion: string | null
+        }[]
+      }
+      teacher_catalog_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          catalog_id: string
+          catalog_name: string
+          content_items: number
+          question_items: number
+          vocabulary_items: number
+          reading_items: number
+          listening_items: number
+          students_practiced: number
+          sessions: number
+          answer_attempts: number
+          avg_accuracy: number | null
+          avg_time_ms: number | null
+          last_activity: string | null
+          weak_topics: Json
+        }[]
+      }
+      teacher_student_analytics: {
+        Args: { p_limit?: number }
+        Returns: {
+          student_id: string
+          student_name: string
+          username: string
+          status: Database["public"]["Enums"]["student_status"]
+          last_active_at: string | null
+          practice_answers: number
+          practice_accuracy: number | null
+          study_time_ms: number
+          exam_attempts: number
+          exam_accuracy_percent: number | null
+          last_activity: string | null
+        }[]
+      }
+      student_practice_stats: {
+        Args: { p_student_id: string }
+        Returns: {
+          total_answers: number
+          correct_answers: number
+          wrong_answers: number
+          manual_answers: number
+          questions_seen: number
+          total_time_ms: number
+          today_answers: number
+          week_answers: number
+          current_mistakes: number
+        }[]
+      }
+      student_streak_stats: {
+        Args: { p_student_id: string }
+        Returns: {
+          current_streak: number
+          longest_streak: number
+          last_active_day: string | null
+        }[]
+      }
+      student_domain_progress: {
+        Args: { p_student_id: string }
+        Returns: {
+          domain: string
+          attempts: number
+          correct: number
+          incorrect: number
+          accuracy: number | null
+        }[]
+      }
+      student_topic_practice_stats: {
+        Args: { p_student_id: string; p_limit?: number }
+        Returns: {
+          topic_id: string
+          topic_name: string
+          attempts: number
+          correct: number
+          accuracy: number | null
+        }[]
+      }
+      student_practice_daily_stats: {
+        Args: { p_student_id: string; p_days?: number }
+        Returns: {
+          day: string
+          attempts: number
+          correct: number
+        }[]
+      }
+      reorder_exam_sections: {
+        Args: { p_exam_id: string; p_section_ids: string[] }
+        Returns: undefined
+      }
+      reorder_exam_items: {
+        Args: { p_exam_id: string; p_section_id: string | null; p_item_ids: string[] }
+        Returns: undefined
+      }
+      save_attempt_answer: {
+        Args: {
+          p_attempt_id: string
+          p_item_key: string
+          p_question_id: string | null
+          p_question_version: number | null
+          p_response: Json | null
+          p_flagged: boolean
+          p_time_spent_ms: number
+        }
+        Returns: Database["public"]["Tables"]["attempt_answers"]["Row"]
+      }
+      claim_exam_listening_play: {
+        Args: {
+          p_attempt_id: string
+          p_lease_seconds: number
+          p_listening_id: string
+          p_max_plays: number | null
+          p_request_id: string
+          p_stream_token_hash: string
+          p_student_id: string
+        }
+        Returns: {
+          expires_at: string
+          id: string
+          play_number: number
+        }[]
+      }
+      append_exam_violation: {
+        Args: { p_attempt_id: string; p_event: Json }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "teacher" | "student"
