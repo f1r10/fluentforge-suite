@@ -63,6 +63,7 @@ function SourcesPage() {
   const [quickTranslationLanguage, setQuickTranslationLanguage] = useState(
     lang === "en" ? "az" : lang,
   );
+  const [autoEnrichVocabulary, setAutoEnrichVocabulary] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
 
@@ -152,6 +153,10 @@ function SourcesPage() {
             expectedContent === "vocabulary" && !profileId
               ? quickTranslationLanguage
               : null,
+          autoEnrichVocabulary:
+            expectedContent === "vocabulary" && !profileId
+              ? autoEnrichVocabulary
+              : false,
         },
       });
 
@@ -280,6 +285,23 @@ function SourcesPage() {
               Learning and translation languages must be different.
             </p>
           )}
+          <label className="flex items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={autoEnrichVocabulary}
+              onCheckedChange={(checked) =>
+                setAutoEnrichVocabulary(!!checked)
+              }
+            />
+            <span>
+              <span className="block font-medium">
+                {t("auto_enrich_vocabulary_import")}
+              </span>
+              <span className="block text-xs leading-5 text-muted-foreground">
+                {t("auto_enrich_vocabulary_import_hint")}
+              </span>
+            </span>
+          </label>
         </div>
       )}
 
@@ -386,6 +408,7 @@ function ImportProfileDialog({
   const [level, setLevel] = useState("");
   const [status, setStatus] = useState<"draft" | "active">("draft");
   const [confidence, setConfidence] = useState(0.95);
+  const [autoEnrichVocabulary, setAutoEnrichVocabulary] = useState(false);
   const [mappingEnabled, setMappingEnabled] = useState(false);
   const [mapping, setMapping] = useState({
     include_sheets: "",
@@ -460,6 +483,10 @@ function ImportProfileDialog({
             level: level || null,
             status,
             auto_approve_confidence: confidence,
+            auto_enrich_vocabulary:
+              expectedContent === "vocabulary"
+                ? autoEnrichVocabulary
+                : false,
             spreadsheet_mapping:
               mappingEnabled &&
               ["auto", "questions", "mixed"].includes(expectedContent)
@@ -585,6 +612,23 @@ function ImportProfileDialog({
                 <option value="ru">Русский</option>
                 <option value="tr">Türkçe</option>
               </select>
+              <label className="flex items-start gap-2 rounded-md bg-muted/30 p-3 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={autoEnrichVocabulary}
+                  onCheckedChange={(checked) =>
+                    setAutoEnrichVocabulary(!!checked)
+                  }
+                />
+                <span>
+                  <span className="block font-medium">
+                    {t("auto_enrich_vocabulary_import")}
+                  </span>
+                  <span className="block text-xs leading-5 text-muted-foreground">
+                    {t("auto_enrich_vocabulary_import_hint")}
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 
