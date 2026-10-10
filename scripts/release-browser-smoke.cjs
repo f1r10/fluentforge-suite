@@ -847,10 +847,26 @@ async function gotoHydrated(page, path) {
     console.log("[ok] student dashboard rendered for the created student");
 
     await gotoHydrated(studentPage, "/student/catalogs");
-    await studentPage
-      .getByText("Release Catalog", { exact: true })
-      .waitFor({ timeout: 20000 });
+    const assignedCatalog = studentPage.getByText("Release Catalog", {
+      exact: true,
+    });
+    await assignedCatalog.waitFor({ timeout: 20000 });
     console.log("[ok] directly assigned catalog is visible to the student");
+
+    await assignedCatalog.click();
+    await studentPage
+      .getByRole("heading", { name: "Release Catalog", level: 1 })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByText("New practice", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage
+      .getByRole("button", { name: "Generate practice", exact: true })
+      .click();
+    await studentPage
+      .getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] student can open an assigned catalog and generate catalog practice");
 
     await gotoHydrated(studentPage, "/student/library");
     await studentPage
