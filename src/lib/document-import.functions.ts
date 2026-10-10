@@ -63,6 +63,20 @@ async function upsertRowsInChunks(
   }
 }
 
+async function deleteByIdsInChunks(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  table: string,
+  column: string,
+  ids: string[],
+) {
+  for (const batch of chunks(ids, 120)) {
+    if (!batch.length) continue;
+    const { error } = await sb.from(table).delete().in(column, batch);
+    if (error) throw new Error(error.message);
+  }
+}
+
 const readingImportPayloadSchema = z.object({
   source_ref: z.string().trim().min(1).max(200),
   title: z.string().trim().min(1).max(300),
@@ -1349,26 +1363,23 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         };
       });
 
-      const createdRows: Array<{
-        id: string;
-        provenance: unknown;
-      }> = [];
-      for (const entryBatch of chunks(entryRows, 100)) {
-        const { data: created, error: createError } = await admin
-          .from("vocabulary_entries")
-          .insert(entryBatch as never)
-          .select("id,provenance");
-        if (createError) throw new Error(createError.message);
-        createdRows.push(
-          ...((created ?? []) as Array<{
-            id: string;
-            provenance: unknown;
-          }>),
-        );
+      // Recover any core entries left behind by an interrupted previous
+      // batch before creating new rows. Provenance carries the import-item ID,
+      // so retries do not duplicate vocabulary entries.
+      const { data: existingCreated, error: existingCreatedError } = await admin
+        .from("vocabulary_entries")
+        .select("id,provenance")
+        .eq("source_file_id", job.source_file_id)
+        .contains("provenance", {
+          import: { job_id: job.id },
+        } as never)
+        .is("deleted_at", null);
+      if (existingCreatedError) {
+        throw new Error(existingCreatedError.message);
       }
 
       const itemToEntity = new Map<string, string>();
-      for (const row of createdRows) {
+      const mapCreatedRow = (row: { id: string; provenance: unknown }) => {
         const provenance =
           row.provenance && typeof row.provenance === "object"
             ? (row.provenance as Record<string, unknown>)
@@ -1382,12 +1393,65 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
             ? importMeta["import_item_id"]
             : "";
         if (itemId) itemToEntity.set(itemId, row.id);
+      };
+      for (const row of (existingCreated ?? []) as Array<{
+        id: string;
+        provenance: unknown;
+      }>) {
+        mapCreatedRow(row);
       }
-      if (itemToEntity.size !== batch.length) {
-        throw new Error(
-          "Vocabulary bulk import could not map all created entries back to source rows.",
-        );
+
+      const rowsToCreate = entryRows.filter((_, index) => {
+        const item = batch[index]!;
+        return !itemToEntity.has(item.id);
+      });
+
+      for (const entryBatch of chunks(rowsToCreate, 100)) {
+        const { data: created, error: createError } = await admin
+          .from("vocabulary_entries")
+          .insert(entryBatch as never)
+          .select("id,provenance");
+        if (createError) throw new Error(createError.message);
+        for (const row of (created ?? []) as Array<{
+          id: string;
+          provenance: unknown;
+        }>) {
+          mapCreatedRow(row);
+        }
       }
+
+      for (const item of batch) {
+        if (!itemToEntity.has(item.id)) {
+          throw new Error(
+            `Vocabulary bulk import could not map source row ${item.id} to a created entry.`,
+          );
+        }
+      }
+
+      // Relations are rebuilt from the reviewed payload on every retry. This
+      // makes a partially failed batch idempotent without touching any entry
+      // outside the current import batch.
+      const batchEntryIds = batch.map((item) => itemToEntity.get(item.id)!);
+      await Promise.all([
+        deleteByIdsInChunks(
+          admin,
+          "vocabulary_translations",
+          "entry_id",
+          batchEntryIds,
+        ),
+        deleteByIdsInChunks(
+          admin,
+          "vocabulary_examples",
+          "entry_id",
+          batchEntryIds,
+        ),
+        deleteByIdsInChunks(
+          admin,
+          "vocabulary_tags",
+          "entry_id",
+          batchEntryIds,
+        ),
+      ]);
 
       const translationRows: Record<string, unknown>[] = [];
       const exampleRows: Record<string, unknown>[] = [];
