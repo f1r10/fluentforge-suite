@@ -378,8 +378,8 @@ async function gotoHydrated(page, path) {
       name: "release-unknown-pos.csv",
       mimeType: "text/csv",
       buffer: Buffer.from(
-        "word,definition,part_of_speech,az,level\\n" +
-        "releaseunknownpos,unknown category,,sınaq sözü,A1\\n",
+        "word,definition,part_of_speech,az,level\n" +
+        "releaseunknownpos,unknown category,,sınaq sözü,A1\n",
         "utf8",
       ),
     });
@@ -396,7 +396,7 @@ async function gotoHydrated(page, path) {
     );
     page.once("dialog", (confirmation) => confirmation.accept());
     await unknownPosRow.getByRole("button", { name: "Approve with warning" }).click();
-    await unknownPosDialog.getByRole("button", { name: /Import approved \\(1\\)/ }).click();
+    await unknownPosDialog.getByRole("button", { name: /Import approved \(1\)/ }).click();
     await unknownPosDialog.getByText("completed", { exact: true })
       .waitFor({ timeout: 20000 });
     await page.keyboard.press("Escape");
