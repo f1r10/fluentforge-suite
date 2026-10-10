@@ -910,7 +910,7 @@ VOCAB_POS_ALIASES = {
 VOCAB_LEVEL_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$", re.IGNORECASE)
 VOCAB_BOILERPLATE_RE = re.compile(
     r"(?:https?://|www\.|©|copyright|page\s+\d+|vocabulary\s+list|"
-    r"word\s+list|table\s+of\s+contents|^\s*introduction\s*$|how\s+the\s+list|"
+    r"word\s+list|table\s+of\s+contents|how\s+the\s+list|"
     r"^\s*#?\s*(?:english|ingilis(?:cə|ce)?|azərbaycanca|azerbaycanca)"
     r"\s+(?:azerbaijani|azərbaycanca|azerbaycanca|english|ingilis(?:cə|ce)?)\s*$)",
     re.IGNORECASE,
