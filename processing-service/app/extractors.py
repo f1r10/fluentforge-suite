@@ -1320,6 +1320,29 @@ def _vocabulary_from_text(
         if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
             continue
 
+        # Structured dictionary/CEFR metadata takes precedence over the
+        # configured translation language. A numbered source row such as
+        # "6) absorb verb REMEMBER C1" is a lexical metadata row, not
+        # "absorb" translated as "verb REMEMBER C1".
+        word, ipa, pos, level, source_note = _parse_vocab_list_entry(line)
+        has_definition_separator = bool(
+            re.search(r"\t+|\s+[—–-]\s+|\s*:\s+", line)
+        )
+        if (
+            (pos or level or ipa)
+            and not has_definition_separator
+            and _looks_like_vocab_term(word)
+        ):
+            add(
+                word,
+                ipa=ipa,
+                part_of_speech=pos,
+                level=level,
+                notes=source_note,
+                confidence=0.96 if level and pos else 0.88,
+            )
+            continue
+
         if had_row_number:
             bilingual = _split_numbered_bilingual_vocab(
                 line,
@@ -1339,28 +1362,6 @@ def _vocabulary_from_text(
                     confidence=0.94,
                 )
                 continue
-
-        # Recognize dictionary word-list metadata before comma-based
-        # term/definition parsing. This prevents entries such as
-        # "a, an indefinite article A1" from being split into a fake definition.
-        word, ipa, pos, level, source_note = _parse_vocab_list_entry(line)
-        has_definition_separator = bool(
-            re.search(r"\t+|\s+[—–-]\s+|\s*:\s+", line)
-        )
-        if (
-            (pos or level or ipa)
-            and not has_definition_separator
-            and _looks_like_vocab_term(word)
-        ):
-            add(
-                word,
-                ipa=ipa,
-                part_of_speech=pos,
-                level=level,
-                notes=source_note,
-                confidence=0.96 if level and pos else 0.88,
-            )
-            continue
 
         # Dictionary / teacher-list / Quizlet formats:
         # word<TAB>meaning, word — meaning, word - meaning, word: meaning,
