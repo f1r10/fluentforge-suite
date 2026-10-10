@@ -1494,7 +1494,7 @@ function SimpleImportItemEditor({
             }
           />
         </label>
-        {draft["question_type"] === "single_choice" && (
+        {["single_choice", "multiple_choice", "word_bank"].includes(String(draft["question_type"])) && options.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-medium">{t("options")}</div>
             {options.map((option, index) => (
@@ -1531,7 +1531,7 @@ function SimpleImportItemEditor({
                 onClick={() => onPatch("payload", {
                   ...nested,
                   options: [...options, {
-                    id: String.fromCharCode(97 + options.length),
+                    id: "abcdefgh".split("").find((id) => !options.some((option) => option["id"] === id)) ?? "h",
                     text: "",
                   }],
                 })}
@@ -1540,22 +1540,44 @@ function SimpleImportItemEditor({
               </Button>
             )}
             <SimpleField label="Düzgün cavab">
-              <select
-                className={inputClass}
-                value={
-                  Array.isArray((draft["answer_key"] as Record<string, unknown> | undefined)?.["correct"])
-                    ? String(((draft["answer_key"] as Record<string, unknown>)["correct"] as string[])[0] ?? "")
-                    : ""
-                }
-                onChange={(event) => onPatch("answer_key", { correct: event.target.value ? [event.target.value] : [] })}
-              >
-                <option value="">Cavabı seçin</option>
-                {options.map((option) => (
-                  <option key={String(option["id"])} value={String(option["id"])}>
-                    {String(option["id"]).toUpperCase()})
-                  </option>
-                ))}
-              </select>
+              {draft["question_type"] === "multiple_choice" ? (
+                <div className="space-y-2">
+                  {options.map((option) => {
+                    const correct = Array.isArray((draft["answer_key"] as Record<string, unknown> | undefined)?.["correct"])
+                      ? (draft["answer_key"] as { correct: string[] }).correct
+                      : [];
+                    const id = String(option["id"]);
+                    return (
+                      <label key={id} className="flex items-center gap-2">
+                        <Checkbox
+                          checked={correct.includes(id)}
+                          onCheckedChange={(checked) => onPatch("answer_key", {
+                            correct: checked ? [...new Set([...correct, id])] : correct.filter((value) => value !== id),
+                          })}
+                        />
+                        {id.toUpperCase()})
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select
+                  className={inputClass}
+                  value={
+                    Array.isArray((draft["answer_key"] as Record<string, unknown> | undefined)?.["correct"])
+                      ? String(((draft["answer_key"] as Record<string, unknown>)["correct"] as string[])[0] ?? "")
+                      : ""
+                  }
+                  onChange={(event) => onPatch("answer_key", { correct: event.target.value ? [event.target.value] : [] })}
+                >
+                  <option value="">Cavabı seçin</option>
+                  {options.map((option) => (
+                    <option key={String(option["id"])} value={String(option["id"])}>
+                      {String(option["id"]).toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              )}
             </SimpleField>
           </div>
         )}
