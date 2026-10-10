@@ -949,6 +949,46 @@ def test_listening_target_splits_multiple_tasks_on_one_page():
     }
 
 
+def test_numbered_dictionary_rows_preserve_repeated_senses_and_introduction_word():
+    from app.extractors import Extraction
+
+    extraction = Extraction(
+        "pdf_layout_native",
+        [
+            {
+                "page": 19,
+                "text": (
+                    "1015) introduce verb C1\n"
+                    "1016) introduction noun FIRST EXPERIENCE C1\n"
+                    "1017) introduction noun OPENING SECTION C1\n"
+                ),
+                "tables": [],
+            }
+        ],
+        [],
+        "",
+        {},
+    )
+
+    items = detect_candidates(
+        extraction,
+        profile={
+            "expected_content": "vocabulary",
+            "learning_language": "en",
+        },
+    )
+    payloads = [item["payload"] for item in items]
+
+    assert [item["word"] for item in payloads] == [
+        "introduce",
+        "introduction",
+        "introduction",
+    ]
+    assert payloads[1]["part_of_speech"] == "noun"
+    assert payloads[1]["notes"] == "Source sense: FIRST EXPERIENCE"
+    assert payloads[2]["notes"] == "Source sense: OPENING SECTION"
+
+
 def test_btu_c1_metadata_beats_configured_translation_language():
     from app.extractors import Extraction
 
