@@ -1,0 +1,1224 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { FileUp, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { listTopics } from "@/lib/questions.functions";
+import {
+  autoFillMissingVocabularyLevels,
+  bulkEnrichVocabulary,
+  getVocabularyEntry,
+  getVocabularyEnrichmentStatus,
+  repairVocabularyPartOfSpeech,
+  listVocabulary,
+  saveVocabularyEntry,
+  setVocabularyStatus,
+  suggestVocabularyEnrichmentForEditor,
+  trashVocabulary,
+  type VocabularyInput,
+} from "@/lib/vocabulary.functions";
+import { LEVELS } from "@/lib/question-types";
+import { topicOptions } from "@/components/app/topics";
+import { useI18n } from "@/lib/i18n";
+import { useContentLanguages } from "@/lib/content-languages";
+import { addCatalogItems } from "@/lib/catalog.functions";
+import { CatalogTargetSelect } from "@/components/app/CatalogTargetSelect";
+
+const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
+
+export const Route = createFileRoute("/_authenticated/teacher/vocabulary")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(topicsQuery),
+  component: VocabularyPage,
+});
+
+type Status = "active" | "draft" | "archived" | "all";
+type Translation = { language: string; value: string };
+type Example = { sentence: string; translation: string | null };
+
+type EditorState = {
+  id?: string;
+  word: string;
+  learning_language: string;
+  definition: string;
+  ipa: string;
+  part_of_speech: string;
+  synonyms: string;
+  antonyms: string;
+  level: string;
+  notes: string;
+  status: "active" | "draft" | "archived";
+  translations: Translation[];
+  examples: Example[];
+  topicIds: string[];
+  tags: string;
+  enrichment_metadata: VocabularyInput["enrichment_metadata"];
+};
+
+const emptyEditor = (
+  learningLanguage = "",
+  translationLanguage = "",
+): EditorState => ({
+  word: "",
+  learning_language: learningLanguage,
+  definition: "",
+  ipa: "",
+  part_of_speech: "",
+  synonyms: "",
+  antonyms: "",
+  level: "",
+  notes: "",
+  status: "active",
+  translations: translationLanguage
+    ? [{ language: translationLanguage, value: "" }]
+    : [],
+  examples: [],
+  topicIds: [],
+  tags: "",
+  enrichment_metadata: null,
+});
+
+const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+
+function VocabularyPage() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const languages = useContentLanguages();
+
+  const defaultTranslationFor = (learningLanguage: string) =>
+    languages.translation.find(
+      (item) => item.code !== learningLanguage,
+    )?.code ?? "";
+  const { data: topics } = useSuspenseQuery(topicsQuery);
+  const topicOpts = topicOptions(topics);
+  const { data: enrichmentStatus } = useQuery({
+    queryKey: ["vocabulary-enrichment-status"],
+    queryFn: () => getVocabularyEnrichmentStatus(),
+    staleTime: 60_000,
+  });
+  const [search, setSearch] = useState("");
+  const [language, setLanguage] = useState("");
+  const [level, setLevel] = useState("");
+  const [status, setStatus] = useState<Status>("all");
+  const [topicId, setTopicId] = useState("");
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState("");
+  const [busyEditor, setBusyEditor] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [bulkEnriching, setBulkEnriching] = useState(false);
+  const [repairingPartOfSpeech, setRepairingPartOfSpeech] = useState(false);
+  const [fillingLevels, setFillingLevels] = useState(false);
+  const [enrichment, setEnrichment] = useState<
+    Awaited<ReturnType<typeof suggestVocabularyEnrichmentForEditor>> | null
+  >(null);
+
+  const dictionaryFallbackForEditor =
+    !!editor &&
+    enrichmentStatus?.dictionaryFallback === true &&
+    (enrichmentStatus.dictionaryLanguages ?? []).includes(
+      editor.learning_language.toLowerCase().split("-")[0] ||
+        editor.learning_language.toLowerCase(),
+    );
+  const enrichmentAvailable =
+    !!enrichmentStatus &&
+    (enrichmentStatus.available || dictionaryFallbackForEditor);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["vocabulary", search, language, level, status, topicId, page],
+    queryFn: () =>
+      listVocabulary({
+        data: {
+          search,
+          language,
+          level,
+          status,
+          topicId: topicId || undefined,
+          page,
+        },
+      }),
+    placeholderData: keepPreviousData,
+  });
+
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 50;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const allOnPage = rows.length > 0 && rows.every((row) => selected.includes(row.id));
+
+  async function openEdit(id: string) {
+    try {
+      const v = await getVocabularyEntry({ data: { id } });
+      setEnrichment(null);
+      setCatalogTarget("");
+      setEditor({
+        id: v.id,
+        word: v.word,
+        learning_language:
+          v.learning_language ?? languages.defaultLearningCode,
+        definition: v.definition ?? "",
+        ipa: v.ipa ?? "",
+        part_of_speech: v.part_of_speech ?? "",
+        synonyms: (v.synonyms ?? []).join(", "),
+        antonyms: (v.antonyms ?? []).join(", "),
+        level: v.level ?? "",
+        notes: v.notes ?? "",
+        status: v.status,
+        translations: v.translations.length
+          ? v.translations
+          : (() => {
+              const language = defaultTranslationFor(
+                v.learning_language ?? languages.defaultLearningCode,
+              );
+              return language ? [{ language, value: "" }] : [];
+            })(),
+        examples: v.examples,
+        topicIds: v.topicIds,
+        tags: v.tags.join(", "),
+        enrichment_metadata:
+          (v.enrichment_metadata as VocabularyInput["enrichment_metadata"]) ??
+          null,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function saveEditor(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editor) return;
+    setBusyEditor(true);
+    try {
+      const input: VocabularyInput = {
+        id: editor.id,
+        word: editor.word,
+        learning_language: editor.learning_language,
+        definition: editor.definition || null,
+        ipa: editor.ipa || null,
+        part_of_speech: editor.part_of_speech || null,
+        synonyms: editor.synonyms
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        antonyms: editor.antonyms
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        level: editor.level || null,
+        notes: editor.notes || null,
+        status: editor.status,
+        translations: editor.translations.filter((x) => x.language.trim() && x.value.trim()),
+        examples: editor.examples.filter((x) => x.sentence.trim()),
+        topicIds: editor.topicIds,
+        tags: editor.tags
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        enrichment_metadata: editor.enrichment_metadata,
+      };
+      const saved = await saveVocabularyEntry({ data: input });
+      if (catalogTarget) {
+        await addCatalogItems({
+          data: {
+            catalogId: catalogTarget,
+            items: [
+              {
+                entity_type: "vocabulary",
+                entity_id: saved.id,
+              },
+            ],
+          },
+        });
+        await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
+      }
+      setEditor(null);
+      setCatalogTarget("");
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      toast.success(t("save"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyEditor(false);
+    }
+  }
+
+  async function generateEnrichment() {
+    if (!editor?.word.trim()) {
+      toast.error(t("word_required_for_enrichment"));
+      return;
+    }
+
+    setEnriching(true);
+    try {
+      const currentTargets = editor.translations
+        .map((item) => item.language.trim().toLowerCase())
+        .filter(
+          (language) =>
+            language &&
+            language !== editor.learning_language.toLowerCase(),
+        );
+      const configuredTargets = languages.translation
+        .map((item) => item.code.toLowerCase())
+        .filter(
+          (language) =>
+            language !== editor.learning_language.toLowerCase(),
+        );
+      const fallbackTargets = configuredTargets.length
+        ? configuredTargets
+        : languages.all
+            .map((item) => item.code.toLowerCase())
+            .filter(
+              (language) =>
+                language !== editor.learning_language.toLowerCase(),
+            );
+
+      const suggestion = await suggestVocabularyEnrichmentForEditor({
+        data: {
+          word: editor.word,
+          learningLanguage: editor.learning_language,
+          targetLanguages: currentTargets.length
+            ? [...new Set(currentTargets)]
+            : fallbackTargets,
+          existing: {
+            definition: editor.definition || null,
+            ipa: editor.ipa || null,
+            partOfSpeech: editor.part_of_speech || null,
+            level: editor.level || null,
+            translations: editor.translations.filter(
+              (item) => item.language.trim() && item.value.trim(),
+            ),
+          },
+        },
+      });
+      setEnrichment(suggestion);
+      applyEnrichmentSuggestion(suggestion);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setEnriching(false);
+    }
+  }
+
+  function applyEnrichmentSuggestion(
+    suggestion: Awaited<
+      ReturnType<typeof suggestVocabularyEnrichmentForEditor>
+    >,
+  ) {
+    setEditor((current) => {
+      if (!current) return current;
+
+      const translationMap = new Map(
+        current.translations
+          .filter((item) => item.language.trim())
+          .map((item) => [item.language.toLowerCase(), item]),
+      );
+      for (const item of suggestion.translations) {
+        const key = item.language.toLowerCase();
+        const existing = translationMap.get(key);
+        if (!existing?.value.trim()) {
+          translationMap.set(key, item);
+        }
+      }
+
+      const exampleKeys = new Set(
+        current.examples.map((item) =>
+          item.sentence.trim().toLowerCase(),
+        ),
+      );
+      const examples = [...current.examples];
+      for (const item of suggestion.examples) {
+        const key = item.sentence.trim().toLowerCase();
+        if (!exampleKeys.has(key)) {
+          exampleKeys.add(key);
+          examples.push(item);
+        }
+      }
+
+      const mergeWords = (value: string, incoming: string[]) =>
+        [
+          ...new Set([
+            ...value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+            ...incoming
+              .map((item) => item.trim())
+              .filter(Boolean),
+          ]),
+        ].join(", ");
+
+      return {
+        ...current,
+        definition:
+          current.definition || suggestion.definition || "",
+        ipa: current.ipa || suggestion.ipa || "",
+        part_of_speech:
+          current.part_of_speech ||
+          suggestion.part_of_speech ||
+          "",
+        level: current.level || suggestion.level || "",
+        synonyms: mergeWords(
+          current.synonyms,
+          suggestion.synonyms,
+        ),
+        antonyms: mergeWords(
+          current.antonyms,
+          suggestion.antonyms,
+        ),
+        translations: [...translationMap.values()],
+        examples,
+        enrichment_metadata: {
+          provider: suggestion.provider,
+          model: suggestion.model,
+          fetched_at: suggestion.generated_at,
+          lookup_word: current.word.trim(),
+          level_estimate: suggestion.level_estimate,
+          source: suggestion.source,
+          pronunciations: suggestion.pronunciations,
+          forms: suggestion.forms,
+        },
+      };
+    });
+    toast.success(t("enrichment_applied"));
+  }
+
+  async function fillMissingLevels() {
+    setFillingLevels(true);
+    try {
+      const result = await autoFillMissingVocabularyLevels();
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      toast.success(t("levels_filled"), {
+        description: `${result.updated} / ${result.candidates}`,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFillingLevels(false);
+    }
+  }
+
+  async function bulkEnrich() {
+    if (!selected.length) return;
+    setBulkEnriching(true);
+    try {
+      const chunks: string[][] = [];
+      for (let index = 0; index < selected.length; index += 40) {
+        chunks.push(selected.slice(index, index + 40));
+      }
+
+      let updated = 0;
+      let failed = 0;
+      const failures: Array<{ id: string; word: string; error: string }> = [];
+      for (const ids of chunks) {
+        const result = await bulkEnrichVocabulary({
+          data: { ids, overwrite: false },
+        });
+        updated += result.updated;
+        failed += result.failed;
+        failures.push(...result.failures);
+      }
+
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      if (failed > 0) {
+        toast.warning(
+          `${updated} enriched · ${failed} failed`,
+          {
+            description: failures
+              .slice(0, 3)
+              .map((item) => `${item.word}: ${item.error}`)
+              .join("\n"),
+          },
+        );
+      } else {
+        toast.success(`${updated} vocabulary entries enriched`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkEnriching(false);
+    }
+  }
+
+  async function repairSelectedPartOfSpeech() {
+    if (!selected.length) return;
+    setRepairingPartOfSpeech(true);
+    try {
+      let changed = 0;
+      let failed = 0;
+      const failures: Array<{ word: string; error: string }> = [];
+
+      for (let index = 0; index < selected.length; index += 40) {
+        const result = await repairVocabularyPartOfSpeech({
+          data: { ids: selected.slice(index, index + 40) },
+        });
+        changed += result.changed;
+        failed += result.failed;
+        failures.push(...result.failures);
+      }
+
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+      if (failed > 0) {
+        toast.warning(
+          `${changed} updated · ${failed} failed`,
+          {
+            description: failures
+              .slice(0, 3)
+              .map((item) => `${item.word}: ${item.error}`)
+              .join("\n"),
+          },
+        );
+      } else {
+        toast.success(t("part_of_speech_repaired"), {
+          description: String(changed),
+        });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepairingPartOfSpeech(false);
+    }
+  }
+
+  async function bulkStatus(next: "active" | "draft" | "archived") {
+    if (!selected.length) return;
+    try {
+      await setVocabularyStatus({ data: { ids: selected, status: next } });
+      setSelected([]);
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
+
+  async function bulkTrash() {
+    if (!selected.length || !confirm(`${t("delete")} ${selected.length}?`)) return;
+    try {
+      await trashVocabulary({ data: { ids: selected } });
+      setSelected([]);
+      await qc.invalidateQueries({ queryKey: ["vocabulary"] });
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t("vocabulary")}</h1>
+          <p className="text-sm text-muted-foreground">{total} {t("items").toLowerCase()}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={fillingLevels}
+            onClick={() => void fillMissingLevels()}
+          >
+            <Sparkles className="h-4 w-4" />
+            {fillingLevels ? t("generating") : t("auto_fill_levels")}
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/teacher/sources" search={{ target: "vocabulary" }}>
+              <FileUp className="h-4 w-4" />
+              {t("import_vocabulary_documents")}
+            </Link>
+          </Button>
+          <Button
+            disabled={languages.isPending}
+            onClick={() => {
+              setEnrichment(null);
+              setCatalogTarget("");
+              setEditor(
+                emptyEditor(
+                  languages.defaultLearningCode,
+                  defaultTranslationFor(languages.defaultLearningCode),
+                ),
+              );
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            {t("add_vocabulary")}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-5">
+        <Input
+          value={search}
+          placeholder={t("search")}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+        />
+        <select
+          className={selectClass}
+          value={language}
+          onChange={(e) => {
+            setLanguage(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="">{t("all")} — {t("language")}</option>
+          {languages.all.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className={selectClass}
+          value={level}
+          onChange={(e) => {
+            setLevel(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="">{t("all")} — {t("level")}</option>
+          {LEVELS.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
+        <select
+          className={selectClass}
+          value={topicId}
+          onChange={(e) => {
+            setTopicId(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="">{t("all")} — {t("topics")}</option>
+          {topicOpts.map((x) => (
+            <option key={x.id} value={x.id}>{"—".repeat(x.depth)} {x.name}</option>
+          ))}
+        </select>
+        <select
+          className={selectClass}
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value as Status);
+            setPage(0);
+          }}
+        >
+          {(["active", "draft", "archived", "all"] as const).map((x) => (
+            <option key={x} value={x}>{t(x)}</option>
+          ))}
+        </select>
+      </div>
+
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <strong>{selected.length} {t("selected")}</strong>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulkEnriching}
+            onClick={() => void bulkEnrich()}
+          >
+            <Sparkles className="h-4 w-4" />
+            {bulkEnriching ? t("generating") : t("suggest_enrichment")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={repairingPartOfSpeech}
+            onClick={() => void repairSelectedPartOfSpeech()}
+          >
+            {repairingPartOfSpeech
+              ? t("generating")
+              : t("repair_part_of_speech")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => bulkStatus("active")}>{t("active")}</Button>
+          <Button size="sm" variant="outline" onClick={() => bulkStatus("draft")}>{t("draft")}</Button>
+          <Button size="sm" variant="outline" onClick={() => bulkStatus("archived")}>{t("archive")}</Button>
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={bulkTrash}>
+            <Trash2 className="h-4 w-4" />{t("delete")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected([])}>{t("clear")}</Button>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-md border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="w-10 px-3 py-2">
+                <Checkbox
+                  checked={allOnPage}
+                  onCheckedChange={(checked) => {
+                    const ids = rows.map((x) => x.id);
+                    setSelected(checked ? [...new Set([...selected, ...ids])] : selected.filter((id) => !ids.includes(id)));
+                  }}
+                  aria-label={t("select_all")}
+                />
+              </th>
+              <th className="px-3 py-2 font-medium">{t("word")}</th>
+              <th className="px-3 py-2 font-medium">{t("translations")}</th>
+              <th className="hidden px-3 py-2 font-medium md:table-cell">{t("level")}</th>
+              <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("type")}</th>
+              <th className="px-3 py-2 font-medium">{t("status")}</th>
+              <th className="w-14" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                  {isFetching ? "…" : t("no_results")}
+                </td>
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr key={row.id} className="hover:bg-muted/30">
+                <td className="px-3 py-2">
+                  <Checkbox
+                    checked={selected.includes(row.id)}
+                    onCheckedChange={(checked) =>
+                      setSelected(checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))
+                    }
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <button className="text-left font-medium hover:underline" onClick={() => openEdit(row.id)}>
+                    {row.word}
+                  </button>
+                  {row.ipa && <div className="text-xs text-muted-foreground">{row.ipa}</div>}
+                </td>
+                <td className="px-3 py-2">
+                  {row.vocabulary_translations.slice(0, 3).map((x) => x.value).join(" · ") || "—"}
+                </td>
+                <td className="hidden px-3 py-2 md:table-cell">{row.level ?? "—"}</td>
+                <td className="hidden px-3 py-2 lg:table-cell">{row.part_of_speech ?? "—"}</td>
+                <td className="px-3 py-2">{t(row.status)}</td>
+                <td className="px-2 py-1">
+                  <Button variant="ghost" size="icon" onClick={() => openEdit(row.id)} aria-label={t("edit")}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">
+          {page + 1} / {pages}
+        </span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((x) => x - 1)}>
+            ←
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page + 1 >= pages}
+            onClick={() => setPage((x) => x + 1)}
+          >
+            →
+          </Button>
+        </div>
+      </div>
+
+      {editor && (
+        <Dialog open onOpenChange={(open) => !open && setEditor(null)}>
+          <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editor.id ? t("edit_vocabulary") : t("add_vocabulary")}</DialogTitle>
+            </DialogHeader>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
+              <div>
+                <div className="text-sm font-medium">
+                  {t("vocabulary_enrichment")}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {enrichmentStatus?.available === false
+                    ? dictionaryFallbackForEditor
+                      ? t("vocabulary_dictionary_fallback_hint")
+                      : t("vocabulary_ai_required_hint")
+                    : t("vocabulary_enrichment_hint")}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={generateEnrichment}
+                disabled={
+                  enriching ||
+                  !editor.word.trim() ||
+                  !enrichmentAvailable
+                }
+              >
+                <Sparkles className="h-4 w-4" />
+                {enriching ? t("generating") : t("suggest_enrichment")}
+              </Button>
+            </div>
+
+            {enrichment && (
+              <div className="space-y-3 rounded-md border border-primary/30 bg-primary/[0.03] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{t("ai_suggestion")}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {enrichment.provider} · {enrichment.model} · {t("confidence")}:{" "}
+                      {Math.round(enrichment.confidence * 100)}%
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEnrichment(null)}
+                    >
+                      {t("dismiss")}
+                    </Button>
+                  </div>
+                </div>
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("definition")}
+                    </dt>
+                    <dd>{enrichment.definition || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">IPA / POS</dt>
+                    <dd>
+                      {enrichment.ipa || "—"} · {enrichment.part_of_speech || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("level")}
+                    </dt>
+                    <dd>
+                      {enrichment.level || "—"}
+                      {enrichment.level_estimate
+                        ? ` · auto ${Math.round(
+                            enrichment.level_estimate.confidence * 100,
+                          )}%`
+                        : ""}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("translations")}
+                    </dt>
+                    <dd>
+                      {enrichment.translations
+                        .map((item) => `${item.language}: ${item.value}`)
+                        .join(" · ") || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      {t("examples")}
+                    </dt>
+                    <dd>
+                      {enrichment.examples
+                        .map((item) => item.sentence)
+                        .slice(0, 3)
+                        .join(" · ") || "—"}
+                    </dd>
+                  </div>
+                </dl>
+                {enrichment.pronunciations.some(
+                  (item) => item.ipa || item.audio,
+                ) && (
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Pronunciation / audio
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {enrichment.pronunciations
+                        .slice(0, 4)
+                        .map((item, index) => (
+                          <div
+                            key={`${item.ipa ?? ""}:${item.audio ?? ""}:${index}`}
+                            className="rounded-md border border-border px-2 py-1 text-xs"
+                          >
+                            <span>
+                              {item.region ? `${item.region} · ` : ""}
+                              {item.ipa || "audio"}
+                            </span>
+                            {item.audio && (
+                              <audio
+                                className="mt-1 h-7 max-w-52"
+                                controls
+                                preload="none"
+                                src={item.audio}
+                              />
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+                {enrichment.forms.length > 0 && (
+                  <div className="border-t border-border pt-3 text-xs">
+                    <span className="font-medium text-muted-foreground">
+                      Forms:{" "}
+                    </span>
+                    {enrichment.forms
+                      .slice(0, 12)
+                      .map((item) =>
+                        item.tags.length
+                          ? `${item.form} (${item.tags.join(", ")})`
+                          : item.form,
+                      )
+                      .join(" · ")}
+                  </div>
+                )}
+                {enrichment.source && (
+                  <div className="text-xs text-muted-foreground">
+                    Source: {enrichment.source.name}
+                    {enrichment.source.license
+                      ? ` · ${enrichment.source.license}`
+                      : ""}
+                  </div>
+                )}
+                {enrichment.notes && (
+                  <p className="text-xs text-muted-foreground">
+                    {enrichment.notes}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <form className="space-y-5" onSubmit={saveEditor}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t("word")}>
+                  <Input
+                    value={editor.word}
+                    onChange={(e) => setEditor({ ...editor, word: e.target.value })}
+                    required
+                    autoFocus
+                  />
+                </Field>
+                <Field label={t("language")}>
+                  <select
+                    className={selectClass}
+                    value={editor.learning_language}
+                    onChange={(e) => setEditor({ ...editor, learning_language: e.target.value })}
+                  >
+                    {editor.learning_language &&
+                      !languages.learning.some(
+                        (item) =>
+                          item.code === editor.learning_language,
+                      ) && (
+                        <option value={editor.learning_language}>
+                          {editor.learning_language}
+                        </option>
+                      )}
+                    {languages.learning.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+
+              <Field label={t("definition")}>
+                <Textarea
+                  value={editor.definition}
+                  onChange={(e) => setEditor({ ...editor, definition: e.target.value })}
+                  rows={3}
+                />
+              </Field>
+
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>{t("translations")}</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setEditor({
+                        ...editor,
+                        translations: [
+                          ...editor.translations,
+                          {
+                            language:
+                              languages.translation.find(
+                                (item) =>
+                                  item.code !== editor.learning_language &&
+                                  !editor.translations.some(
+                                    (translation) =>
+                                      translation.language === item.code,
+                                  ),
+                              )?.code ?? "",
+                            value: "",
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4" />{t("add")}
+                  </Button>
+                </div>
+                {editor.translations.map((tr, index) => (
+                  <div key={index} className="grid grid-cols-[120px_1fr_auto] gap-2">
+                    <select
+                      className={selectClass}
+                      value={tr.language}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          translations: editor.translations.map((x, i) =>
+                            i === index
+                              ? { ...x, language: e.target.value }
+                              : x,
+                          ),
+                        })
+                      }
+                    >
+                      <option value="">—</option>
+                      {tr.language &&
+                        !languages.translation.some(
+                          (item) => item.code === tr.language,
+                        ) && (
+                          <option value={tr.language}>
+                            {tr.language}
+                          </option>
+                        )}
+                      {languages.translation
+                        .filter(
+                          (item) =>
+                            item.code !== editor.learning_language,
+                        )
+                        .map((item) => (
+                          <option key={item.code} value={item.code}>
+                            {item.label}
+                          </option>
+                        ))}
+                    </select>
+                    <Input
+                      value={tr.value}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          translations: editor.translations.map((x, i) =>
+                            i === index ? { ...x, value: e.target.value } : x,
+                          ),
+                        })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setEditor({
+                          ...editor,
+                          translations: editor.translations.filter((_, i) => i !== index),
+                        })
+                      }
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </section>
+
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>{t("examples")}</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setEditor({
+                        ...editor,
+                        examples: [...editor.examples, { sentence: "", translation: null }],
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4" />{t("add")}
+                  </Button>
+                </div>
+                {editor.examples.map((example, index) => (
+                  <div key={index} className="grid gap-2 rounded-md border border-border p-2 sm:grid-cols-[1fr_1fr_auto]">
+                    <Input
+                      value={example.sentence}
+                      placeholder={t("example_sentence")}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          examples: editor.examples.map((x, i) =>
+                            i === index ? { ...x, sentence: e.target.value } : x,
+                          ),
+                        })
+                      }
+                    />
+                    <Input
+                      value={example.translation ?? ""}
+                      placeholder={t("translation")}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          examples: editor.examples.map((x, i) =>
+                            i === index ? { ...x, translation: e.target.value || null } : x,
+                          ),
+                        })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setEditor({
+                          ...editor,
+                          examples: editor.examples.filter((_, i) => i !== index),
+                        })
+                      }
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </section>
+
+              <details className="rounded-md border border-border bg-muted/20 p-3">
+                <summary className="cursor-pointer select-none text-sm font-medium">
+                  {t("advanced")}
+                </summary>
+                <div className="mt-4 space-y-5">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="IPA">
+                  <Input value={editor.ipa} onChange={(e) => setEditor({ ...editor, ipa: e.target.value })} />
+                </Field>
+                <Field label={t("part_of_speech")}>
+                  <Input
+                    value={editor.part_of_speech}
+                    onChange={(e) => setEditor({ ...editor, part_of_speech: e.target.value })}
+                  />
+                </Field>
+                <Field label={t("level")}>
+                  <select
+                    className={selectClass}
+                    value={editor.level}
+                    onChange={(e) => setEditor({ ...editor, level: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {LEVELS.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label={t("status")}>
+                  <select
+                    className={selectClass}
+                    value={editor.status}
+                    onChange={(e) => setEditor({ ...editor, status: e.target.value as EditorState["status"] })}
+                  >
+                    {(["active", "draft", "archived"] as const).map((x) => <option key={x} value={x}>{t(x)}</option>)}
+                  </select>
+                </Field>
+
+                  </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t("synonyms")}>
+                  <Input
+                    value={editor.synonyms}
+                    onChange={(e) => setEditor({ ...editor, synonyms: e.target.value })}
+                    placeholder="quick, rapid"
+                  />
+                </Field>
+                <Field label={t("antonyms")}>
+                  <Input
+                    value={editor.antonyms}
+                    onChange={(e) => setEditor({ ...editor, antonyms: e.target.value })}
+                    placeholder="slow"
+                  />
+                </Field>
+              </div>
+
+              <Field label={t("topics")}>
+                <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                  {topicOpts.length === 0 && <span className="text-sm text-muted-foreground">—</span>}
+                  {topicOpts.map((x) => (
+                    <label
+                      key={x.id}
+                      className="flex items-center gap-2 text-sm"
+                      style={{ paddingLeft: x.depth * 16 }}
+                    >
+                      <Checkbox
+                        checked={editor.topicIds.includes(x.id)}
+                        onCheckedChange={(checked) =>
+                          setEditor({
+                            ...editor,
+                            topicIds: checked
+                              ? [...editor.topicIds, x.id]
+                              : editor.topicIds.filter((id) => id !== x.id),
+                          })
+                        }
+                      />
+                      {x.name}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Tags">
+                <Input
+                  value={editor.tags}
+                  placeholder="ielts, academic"
+                  onChange={(e) => setEditor({ ...editor, tags: e.target.value })}
+                />
+              </Field>
+
+              <Field label={t("teacher_notes")}>
+                <Textarea
+                  value={editor.notes}
+                  onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
+                  rows={3}
+                />
+              </Field>
+
+                </div>
+              </details>
+
+              <CatalogTargetSelect
+                value={catalogTarget}
+                onChange={setCatalogTarget}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditor(null);
+                    setCatalogTarget("");
+                  }}
+                >
+                  {t("cancel")}
+                </Button>
+                <Button type="submit" disabled={busyEditor}>
+                  {t("save")}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}

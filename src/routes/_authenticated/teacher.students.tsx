@@ -1,16 +1,17 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { MoreHorizontal, Plus, StickyNote, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  createStudent, listGroups, listStudents, regenerateKey, setStudentStatus, suggestUsername, terminateSessions, updateStudent,
+  createStudent, createStudentNote, deleteStudentNote, listGroups, listStudentNotes, listStudents, regenerateKey, revokeStudentKey, setStudentStatus, suggestUsername, terminateSessions, updateStudent,
 } from "@/lib/teacher.functions";
 import { useI18n } from "@/lib/i18n";
 import { ErrorText, formatDateTime } from "@/components/app/common";
@@ -36,6 +37,7 @@ function StudentsPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [shownKey, setShownKey] = useState<{ name: string; key: string } | null>(null);
+  const [notesFor, setNotesFor] = useState<Row | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["students", search, status, groupId, page],
@@ -82,7 +84,15 @@ function StudentsPage() {
             {data?.rows.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">{t("no_results")}</td></tr>}
             {data?.rows.map((r) => (
               <tr key={r.id}>
-                <td className="px-3 py-2 font-medium">{r.first_name} {r.last_name}</td>
+                <td className="px-3 py-2 font-medium">
+                  <Link
+                    to="/teacher/student/$id"
+                    params={{ id: r.id }}
+                    className="hover:underline"
+                  >
+                    {r.first_name} {r.last_name}
+                  </Link>
+                </td>
                 <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{r.username}</td>
                 <td className="hidden px-3 py-2 md:table-cell">{r.groups.map((g) => g.name).join(", ")}</td>
                 <td className="px-3 py-2"><StatusLabel status={r.status} /></td>
@@ -91,12 +101,30 @@ function StudentsPage() {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem asChild>
+                        <Link to="/teacher/student/$id" params={{ id: r.id }}>
+                          {t("student_activity")}
+                        </Link>
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setEditing(r)}>{t("edit")}</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setNotesFor(r)}>
+                        <StickyNote className="mr-2 h-4 w-4" />
+                        {t("private_notes")}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={async () => {
                         if (!confirm(`${t("new_key")}? The old key will stop working.`)) return;
                         try { const res = await regenerateKey({ data: { studentId: r.id } }); setShownKey({ name: `${r.first_name} ${r.last_name}`, key: res.key }); }
                         catch (e) { toast.error(String(e)); }
                       }}>{t("new_key")}</DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() =>
+                          confirm(`${t("revoke_key")}?`) &&
+                          act(() => revokeStudentKey({ data: { studentId: r.id } }), t("revoke_key"))
+                        }
+                      >
+                        {t("revoke_key")}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => act(() => terminateSessions({ data: { studentId: r.id } }), t("end_sessions"))}>{t("end_sessions")}</DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {r.status !== "active" && <DropdownMenuItem onClick={() => act(() => setStudentStatus({ data: { studentId: r.id, status: "active" } }), t("active"))}>{t("enable")}</DropdownMenuItem>}
@@ -121,7 +149,134 @@ function StudentsPage() {
       {creating && <StudentForm groups={groups} onClose={() => setCreating(false)} onCreated={(name, key) => { setCreating(false); setShownKey({ name, key }); refresh(); }} />}
       {editing && <EditStudent row={editing} groups={groups} onClose={() => { setEditing(null); refresh(); }} />}
       {shownKey && <KeyDialog name={shownKey.name} accessKey={shownKey.key} onClose={() => setShownKey(null)} />}
+      {notesFor && (
+        <StudentNotesDialog
+          student={notesFor}
+          onClose={() => setNotesFor(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function StudentNotesDialog({
+  student,
+  onClose,
+}: {
+  student: Row;
+  onClose: () => void;
+}) {
+  const { t, lang } = useI18n();
+  const qc = useQueryClient();
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { data: notes = [], isLoading } = useQuery({
+    queryKey: ["student-notes", student.id],
+    queryFn: () => listStudentNotes({ data: { studentId: student.id } }),
+  });
+
+  async function addNote() {
+    if (!body.trim()) return;
+    setBusy(true);
+    try {
+      await createStudentNote({
+        data: {
+          studentId: student.id,
+          body,
+        },
+      });
+      setBody("");
+      await qc.invalidateQueries({ queryKey: ["student-notes", student.id] });
+      toast.success(t("note_saved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeNote(noteId: string) {
+    if (!confirm(t("delete_note_confirm"))) return;
+    try {
+      await deleteStudentNote({
+        data: { studentId: student.id, noteId },
+      });
+      await qc.invalidateQueries({ queryKey: ["student-notes", student.id] });
+      toast.success(t("note_deleted"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {t("private_notes")} — {student.first_name} {student.last_name}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <Label>{t("new_note")}</Label>
+          <Textarea
+            rows={4}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            placeholder={t("private_note_hint")}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={addNote}
+              disabled={busy || !body.trim()}
+            >
+              {t("save_note")}
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t border-border pt-4">
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">…</p>
+          ) : notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("no_notes")}</p>
+          ) : (
+            notes.map((note) => (
+              <article
+                key={note.id}
+                className="rounded-md border border-border p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    {formatDateTime(note.created_at, lang)}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    onClick={() => removeNote(note.id)}
+                    aria-label={t("delete")}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
+                  {note.body}
+                </p>
+              </article>
+            ))
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t("close")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

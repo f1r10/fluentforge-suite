@@ -5,15 +5,33 @@ import { LANGS, useI18n, type Lang } from "@/lib/i18n";
 import { supabase } from "@/integrations/supabase/client";
 
 export function LanguageSelect({ onChange }: { onChange?: (l: Lang) => void }) {
+  const { data: branding } = useSuspenseQuery(brandingQuery);
   const { lang, setLang, t } = useI18n();
+  const enabled = new Set(
+    branding.enabled_languages.filter((code): code is Lang =>
+      LANGS.some((item) => item.code === code),
+    ),
+  );
+  const available = LANGS.filter((item) => enabled.has(item.code));
+  const choices = available.length ? available : LANGS;
+
+  if (choices.length <= 1) return null;
+
   return (
     <select
       aria-label={t("language")}
-      value={lang}
-      onChange={(e) => { setLang(e.target.value as Lang); onChange?.(e.target.value as Lang); }}
+      value={choices.some((item) => item.code === lang) ? lang : choices[0]!.code}
+      onChange={(e) => {
+        setLang(e.target.value as Lang);
+        onChange?.(e.target.value as Lang);
+      }}
       className="h-9 rounded-md border border-input bg-background px-2 text-sm"
     >
-      {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+      {choices.map((l) => (
+        <option key={l.code} value={l.code}>
+          {l.label}
+        </option>
+      ))}
     </select>
   );
 }
