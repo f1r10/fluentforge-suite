@@ -903,16 +903,36 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
   async function commit() {
     setBusy(true);
     try {
-      const result = await commitDocumentImport({ data: { jobId: job.id } });
+      let totalImported = 0;
+      let result = await commitDocumentImport({ data: { jobId: job.id } });
+      totalImported += result.imported;
+
+      // Large vocabulary files are intentionally committed in bounded server
+      // batches. Continue those batches here instead of making the teacher
+      // click Import repeatedly or holding one request open for thousands of
+      // database writes.
+      let batches = 1;
+      while (
+        !result.completed &&
+        (result.remainingApproved ?? 0) > 0 &&
+        (result.remainingPending ?? 0) === 0 &&
+        batches < 20
+      ) {
+        result = await commitDocumentImport({ data: { jobId: job.id } });
+        totalImported += result.imported;
+        batches += 1;
+      }
+
       toast.success(
         result.completed
-          ? `${t("imported")}: ${result.imported}`
-          : `${t("imported")}: ${result.imported} · ${t("needs_review")}: ${result.remainingPending}`,
+          ? `${t("imported")}: ${totalImported}`
+          : `${t("imported")}: ${totalImported} · ${t("needs_review")}: ${result.remainingPending}`,
       );
       await Promise.all([
         refetch(),
         qc.invalidateQueries({ queryKey: ["document-imports"] }),
         qc.invalidateQueries({ queryKey: ["questions"] }),
+        qc.invalidateQueries({ queryKey: ["vocabulary"] }),
         qc.invalidateQueries({ queryKey: ["readings"] }),
         qc.invalidateQueries({ queryKey: ["listenings"] }),
       ]);
