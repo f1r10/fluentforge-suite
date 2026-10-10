@@ -32,6 +32,37 @@ async function updateImportItemDecisionInChunks(
   }
 }
 
+async function insertRowsInChunks(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  table: string,
+  rows: Record<string, unknown>[],
+  size = 400,
+) {
+  for (const batch of chunks(rows, size)) {
+    if (!batch.length) continue;
+    const { error } = await sb.from(table).insert(batch as never);
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function upsertRowsInChunks(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  table: string,
+  rows: Record<string, unknown>[],
+  options: { onConflict: string; ignoreDuplicates?: boolean },
+  size = 400,
+) {
+  for (const batch of chunks(rows, size)) {
+    if (!batch.length) continue;
+    const { error } = await sb
+      .from(table)
+      .upsert(batch as never, options);
+    if (error) throw new Error(error.message);
+  }
+}
+
 const readingImportPayloadSchema = z.object({
   source_ref: z.string().trim().min(1).max(200),
   title: z.string().trim().min(1).max(300),
@@ -1266,6 +1297,296 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         !item.duplicate_of &&
         validateImportItemPayload(item.item_type, item.payload).state === "ready",
     );
+
+    const unimportedApproved = approvedItems.filter(
+      (item) => !item.created_entity_id,
+    );
+    const pureVocabularyImport =
+      unimportedApproved.length > 0 &&
+      approvedItems.every((item) => item.item_type === "vocabulary");
+
+    if (pureVocabularyImport) {
+      const batch = unimportedApproved.slice(0, 500);
+      const entryRows = batch.map((item) => {
+        const raw = vocabularyImportPayloadSchema.parse(item.payload);
+        return {
+          word: raw.word,
+          learning_language: raw.learning_language.toLowerCase(),
+          definition: raw.definition || null,
+          ipa: raw.ipa || null,
+          part_of_speech: raw.part_of_speech || null,
+          synonyms: [
+            ...new Set(
+              raw.synonyms.map((value) => value.trim()).filter(Boolean),
+            ),
+          ],
+          antonyms: [
+            ...new Set(
+              raw.antonyms.map((value) => value.trim()).filter(Boolean),
+            ),
+          ],
+          level: raw.level || null,
+          notes: raw.notes || null,
+          source_file_id: job.source_file_id,
+          provenance: {
+            import: {
+              job_id: job.id,
+              import_item_id: item.id,
+              page: item.page ?? null,
+              sheet: item.sheet ?? null,
+              confidence: item.confidence ?? null,
+              original: {
+                word: raw.word,
+                definition: raw.definition || null,
+                ipa: raw.ipa || null,
+                part_of_speech: raw.part_of_speech || null,
+                level: raw.level || null,
+                notes: raw.notes || null,
+              },
+            },
+          },
+          status: raw.status,
+        };
+      });
+
+      const createdRows: Array<{
+        id: string;
+        provenance: unknown;
+      }> = [];
+      for (const entryBatch of chunks(entryRows, 100)) {
+        const { data: created, error: createError } = await admin
+          .from("vocabulary_entries")
+          .insert(entryBatch as never)
+          .select("id,provenance");
+        if (createError) throw new Error(createError.message);
+        createdRows.push(
+          ...((created ?? []) as Array<{
+            id: string;
+            provenance: unknown;
+          }>),
+        );
+      }
+
+      const itemToEntity = new Map<string, string>();
+      for (const row of createdRows) {
+        const provenance =
+          row.provenance && typeof row.provenance === "object"
+            ? (row.provenance as Record<string, unknown>)
+            : {};
+        const importMeta =
+          provenance["import"] && typeof provenance["import"] === "object"
+            ? (provenance["import"] as Record<string, unknown>)
+            : {};
+        const itemId =
+          typeof importMeta["import_item_id"] === "string"
+            ? importMeta["import_item_id"]
+            : "";
+        if (itemId) itemToEntity.set(itemId, row.id);
+      }
+      if (itemToEntity.size !== batch.length) {
+        throw new Error(
+          "Vocabulary bulk import could not map all created entries back to source rows.",
+        );
+      }
+
+      const translationRows: Record<string, unknown>[] = [];
+      const exampleRows: Record<string, unknown>[] = [];
+      const sourceRows: Record<string, unknown>[] = [];
+      const tagNames = new Set<string>();
+      const tagsByItem = new Map<string, string[]>();
+
+      for (const item of batch) {
+        const raw = vocabularyImportPayloadSchema.parse(item.payload);
+        const entryId = itemToEntity.get(item.id)!;
+
+        const translationMap = new Map(
+          raw.translations.map((translation) => [
+            translation.language.toLowerCase(),
+            {
+              language: translation.language.toLowerCase(),
+              value: translation.value,
+            },
+          ]),
+        );
+        for (const translation of translationMap.values()) {
+          translationRows.push({
+            entry_id: entryId,
+            language: translation.language,
+            value: translation.value,
+          });
+        }
+
+        raw.examples.forEach((example, index) => {
+          exampleRows.push({
+            entry_id: entryId,
+            sentence: example.sentence,
+            translation: example.translation || null,
+            sort_order: index,
+          });
+        });
+
+        const normalizedTags = [
+          ...new Set(
+            raw.tags
+              .map((value) => value.trim().toLowerCase())
+              .filter(Boolean),
+          ),
+        ];
+        tagsByItem.set(item.id, normalizedTags);
+        normalizedTags.forEach((name) => tagNames.add(name));
+
+        sourceRows.push({
+          source_file_id: job.source_file_id,
+          entity_type: "vocabulary",
+          entity_id: entryId,
+        });
+      }
+
+      await insertRowsInChunks(
+        admin,
+        "vocabulary_translations",
+        translationRows,
+      );
+      await insertRowsInChunks(admin, "vocabulary_examples", exampleRows);
+      await upsertRowsInChunks(
+        admin,
+        "source_collection_items",
+        sourceRows,
+        {
+          onConflict: "source_file_id,entity_type,entity_id",
+          ignoreDuplicates: true,
+        },
+      );
+
+      if (tagNames.size) {
+        await upsertRowsInChunks(
+          admin,
+          "tags",
+          [...tagNames].map((name) => ({ name })),
+          { onConflict: "name", ignoreDuplicates: true },
+        );
+
+        const tagIdByName = new Map<string, string>();
+        for (const nameBatch of chunks([...tagNames], 120)) {
+          const { data: tagRows, error: tagError } = await admin
+            .from("tags")
+            .select("id,name")
+            .in("name", nameBatch);
+          if (tagError) throw new Error(tagError.message);
+          for (const tag of tagRows ?? []) {
+            tagIdByName.set(tag.name, tag.id);
+          }
+        }
+
+        const relationRows: Record<string, unknown>[] = [];
+        for (const item of batch) {
+          const entryId = itemToEntity.get(item.id)!;
+          for (const name of tagsByItem.get(item.id) ?? []) {
+            const tagId = tagIdByName.get(name);
+            if (tagId) {
+              relationRows.push({
+                entry_id: entryId,
+                tag_id: tagId,
+              });
+            }
+          }
+        }
+        await insertRowsInChunks(admin, "vocabulary_tags", relationRows);
+      }
+
+      const links = batch.map((item) => ({
+        item_id: item.id,
+        entity_id: itemToEntity.get(item.id)!,
+      }));
+      const { error: linkError } = await admin.rpc(
+        "bulk_link_import_entities",
+        { _links: links as never },
+      );
+      if (linkError) throw new Error(linkError.message);
+
+      const [
+        { count: remainingPending, error: pendingError },
+        { count: remainingApproved, error: approvedError },
+      ] = await Promise.all([
+        admin
+          .from("import_items")
+          .select("id", { count: "exact", head: true })
+          .eq("job_id", job.id)
+          .eq("decision", "pending"),
+        admin
+          .from("import_items")
+          .select("id", { count: "exact", head: true })
+          .eq("job_id", job.id)
+          .eq("decision", "approved")
+          .is("created_entity_id", null),
+      ]);
+      if (pendingError) throw new Error(pendingError.message);
+      if (approvedError) throw new Error(approvedError.message);
+
+      const completed =
+        (remainingPending ?? 0) === 0 &&
+        (remainingApproved ?? 0) === 0;
+
+      await admin
+        .from("import_jobs")
+        .update({
+          status: completed ? "completed" : "needs_review",
+          progress: 100,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+
+      const source = job.source_files as unknown as {
+        storage_path: string | null;
+        keep_original: boolean;
+      } | null;
+      let originalDeleted = false;
+      if (completed && source?.storage_path && !source.keep_original) {
+        const { error: removeError } = await admin.storage
+          .from(SOURCE_BUCKET)
+          .remove([source.storage_path]);
+        if (removeError) throw new Error(removeError.message);
+        const { error: sourceUpdateError } = await admin
+          .from("source_files")
+          .update({
+            storage_path: null,
+            original_deleted_at: new Date().toISOString(),
+          })
+          .eq("id", job.source_file_id);
+        if (sourceUpdateError) throw new Error(sourceUpdateError.message);
+        originalDeleted = true;
+      }
+
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: context.userId,
+        action: "document_import_vocabulary_batch_committed",
+        entity_type: "import_job",
+        entity_id: job.id,
+        summary: `Imported ${batch.length} vocabulary item(s) from a large document batch`,
+        details: {
+          imported_vocabulary: batch.length,
+          remaining_pending: remainingPending ?? 0,
+          remaining_approved: remainingApproved ?? 0,
+          completed,
+        },
+      });
+
+      return {
+        imported: batch.length,
+        importedQuestions: 0,
+        importedVocabulary: batch.length,
+        importedReadings: 0,
+        importedListenings: 0,
+        skipped: 0,
+        needsFix: invalidApproved.length,
+        remainingPending: remainingPending ?? 0,
+        remainingApproved: remainingApproved ?? 0,
+        completed,
+        originalDeleted,
+      };
+    }
+
     const readingContexts = new Map<
       string,
       {
@@ -1765,14 +2086,30 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       importedReadings +
       importedListenings;
 
-    const { count: remainingPending, error: remainingError } = await admin
-      .from("import_items")
-      .select("id", { count: "exact", head: true })
-      .eq("job_id", job.id)
-      .eq("decision", "pending");
+    const [
+      { count: remainingPending, error: remainingError },
+      { count: remainingApproved, error: remainingApprovedError },
+    ] = await Promise.all([
+      admin
+        .from("import_items")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", job.id)
+        .eq("decision", "pending"),
+      admin
+        .from("import_items")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", job.id)
+        .eq("decision", "approved")
+        .is("created_entity_id", null),
+    ]);
     if (remainingError) throw new Error(remainingError.message);
+    if (remainingApprovedError) {
+      throw new Error(remainingApprovedError.message);
+    }
 
-    const completed = (remainingPending ?? 0) === 0;
+    const completed =
+      (remainingPending ?? 0) === 0 &&
+      (remainingApproved ?? 0) === 0;
     await admin
       .from("import_jobs")
       .update({
@@ -1821,6 +2158,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         skipped,
         needs_fix: invalidApproved.length,
         remaining_pending: remainingPending ?? 0,
+        remaining_approved: remainingApproved ?? 0,
         completed,
         original_deleted: originalDeleted,
       },
@@ -1854,6 +2192,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       skipped,
       needsFix: invalidApproved.length,
       remainingPending: remainingPending ?? 0,
+      remainingApproved: remainingApproved ?? 0,
       completed,
       originalDeleted,
     };
