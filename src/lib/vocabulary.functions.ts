@@ -217,13 +217,15 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
     let currentProvenance: Record<string, unknown> = {};
     let currentPartOfSpeech: string | null = null;
 
-    let automaticClassification:
+    let automaticPartOfSpeech: string | null = null;
+    let automaticLevel:
       | Awaited<
           ReturnType<
-            typeof import("./dictionary-vocabulary").fetchDatamuseLexicalMetadata
+            typeof import("./dictionary-vocabulary").fetchDatamuseCefrEstimate
           >
         >
       | null = null;
+    let automaticPosProvider: string | null = null;
     const baseLearningLanguage =
       data.learning_language.toLowerCase().split("-")[0] ??
       data.learning_language.toLowerCase();
@@ -236,11 +238,44 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
       baseLearningLanguage === "en" &&
       (!data.part_of_speech?.trim() || !data.level?.trim())
     ) {
-      const { fetchDatamuseLexicalMetadata } = await import(
-        "./dictionary-vocabulary"
-      );
-      automaticClassification =
-        await fetchDatamuseLexicalMetadata(data.word).catch(() => null);
+      const {
+        fetchBestDictionaryVocabularySuggestion,
+        fetchDatamuseCefrEstimate,
+      } = await import("./dictionary-vocabulary");
+
+      const [dictionarySuggestion, levelEstimate] = await Promise.all([
+        !data.part_of_speech?.trim()
+          ? fetchBestDictionaryVocabularySuggestion(data.word, {
+              language: "en",
+              targetLanguages: [],
+            }).catch(() => null)
+          : Promise.resolve(null),
+        !data.level?.trim()
+          ? fetchDatamuseCefrEstimate(data.word).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      automaticPartOfSpeech =
+        dictionarySuggestion?.part_of_speech ?? null;
+      automaticPosProvider = dictionarySuggestion?.provider ?? null;
+      automaticLevel =
+        levelEstimate ??
+        (dictionarySuggestion?.level &&
+        dictionarySuggestion.level_estimate?.frequency_per_million != null
+          ? {
+              level: dictionarySuggestion.level as
+                | "A1"
+                | "A2"
+                | "B1"
+                | "B2"
+                | "C1"
+                | "C2",
+              confidence:
+                dictionarySuggestion.level_estimate.confidence,
+              frequencyPerMillion:
+                dictionarySuggestion.level_estimate.frequency_per_million,
+            }
+          : null);
     }
 
     if (data.id) {
@@ -259,11 +294,11 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
 
     const nextPartOfSpeech =
       data.part_of_speech ||
-      automaticClassification?.partOfSpeech ||
+      automaticPartOfSpeech ||
       null;
     const nextLevel =
       data.level ||
-      automaticClassification?.level ||
+      automaticLevel?.level ||
       null;
     const manualFields =
       currentProvenance["manual_fields"] &&
@@ -285,7 +320,8 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
 
     const shouldPersistProvenance =
       data.enrichment_metadata != null ||
-      automaticClassification != null ||
+      automaticPartOfSpeech != null ||
+      automaticLevel != null ||
       Object.keys(manualFields).length > 0;
 
     const core = {
@@ -309,17 +345,19 @@ export const saveVocabularyEntry = createServerFn({ method: "POST" })
               ...(data.enrichment_metadata
                 ? { dictionary: data.enrichment_metadata }
                 : {}),
-              ...(automaticClassification
+              ...(automaticPartOfSpeech || automaticLevel
                 ? {
                     automatic_classification: {
-                      source: "datamuse",
                       generated_at: new Date().toISOString(),
-                      part_of_speech:
-                        automaticClassification.partOfSpeech,
-                      level: automaticClassification.level,
-                      confidence: automaticClassification.confidence,
+                      part_of_speech: automaticPartOfSpeech,
+                      part_of_speech_source: automaticPosProvider,
+                      level: automaticLevel?.level ?? null,
+                      level_source:
+                        automaticLevel ? "datamuse_frequency" : null,
+                      level_confidence:
+                        automaticLevel?.confidence ?? null,
                       frequency_per_million:
-                        automaticClassification.frequencyPerMillion,
+                        automaticLevel?.frequencyPerMillion ?? null,
                     },
                   }
                 : {}),
@@ -918,29 +956,42 @@ export const repairVocabularyPartOfSpeech = createServerFn({
                 .toLowerCase()
                 .split("-")[0] || "en";
 
-            // This action is explicitly requested by the teacher. When there
-            // is no authoritative source/import POS, re-evaluate English
-            // entries against corpus popularity metadata. This repairs older
-            // auto-filled values such as apple/baby/bad being assigned rare
-            // secondary verb senses, while source-provided POS remains intact.
+            // Only replace a non-empty value when provenance proves it
+            // came from an older Datamuse automatic classification. Manual and
+            // source/import POS values remain authoritative.
+            const automaticClassification =
+              provenance["automatic_classification"] &&
+              typeof provenance["automatic_classification"] === "object"
+                ? (provenance["automatic_classification"] as Record<
+                    string,
+                    unknown
+                  >)
+                : {};
+            const wasDatamuseAutoPos =
+              automaticClassification["source"] === "datamuse" ||
+              automaticClassification["part_of_speech_source"] ===
+                "datamuse" ||
+              dictionary["part_of_speech_recalculate_source"] ===
+                "datamuse_primary_corpus_pos";
+
             if (
               !decision &&
               !previousWasRecorded &&
               !imported &&
-              language === "en"
+              !manualPartOfSpeech &&
+              language === "en" &&
+              wasDatamuseAutoPos
             ) {
-              const { fetchDatamuseLexicalMetadata } = await import(
-                "./dictionary-vocabulary"
-              );
-              const lexical = await fetchDatamuseLexicalMetadata(row.word).catch(
-                () => null,
-              );
-              if (
-                lexical?.partOfSpeech &&
-                lexical.partOfSpeech !== row.part_of_speech
-              ) {
+              resolved = await resolveStoredVocabularyDictionary(
+                row.word,
+                language,
+                [],
+              ).catch(() => null);
+              const corrected =
+                resolved?.suggestion.part_of_speech?.trim() || null;
+              if (corrected && corrected !== row.part_of_speech) {
                 decision = {
-                  value: lexical.partOfSpeech,
+                  value: corrected,
                   reason: "recalculate_dictionary",
                 };
               }
@@ -1000,7 +1051,8 @@ export const repairVocabularyPartOfSpeech = createServerFn({
                           ? {
                               part_of_speech_recalculated_at: now,
                               part_of_speech_recalculate_source:
-                                "datamuse_primary_corpus_pos",
+                                resolved?.suggestion.provider ??
+                                "dictionary",
                               part_of_speech_value: decision.value,
                             }
                           : {}),
