@@ -762,7 +762,8 @@ export const repairVocabularyPartOfSpeech = createServerFn({
         | "restore_previous"
         | "restore_import"
         | "fill_missing_import"
-        | "fill_missing_dictionary";
+        | "fill_missing_dictionary"
+        | "recalculate_dictionary";
     }> = [];
 
     for (let offset = 0; offset < (entriesResult.data ?? []).length; offset += 4) {
@@ -793,7 +794,17 @@ export const repairVocabularyPartOfSpeech = createServerFn({
             const imported =
               originalImportPartOfSpeech.get(row.id) ?? null;
 
-            let decision = choosePartOfSpeechRepair({
+            let decision:
+              | {
+                  value: string | null;
+                  reason:
+                    | "restore_previous"
+                    | "restore_import"
+                    | "fill_missing_import"
+                    | "fill_missing_dictionary"
+                    | "recalculate_dictionary";
+                }
+              | null = choosePartOfSpeechRepair({
               current: row.part_of_speech,
               imported,
               dictionary: null,
@@ -804,18 +815,47 @@ export const repairVocabularyPartOfSpeech = createServerFn({
               | Awaited<ReturnType<typeof resolveStoredVocabularyDictionary>>
               | null = null;
 
-            // Dictionary lookup is a fallback for missing metadata only.
-            // It must never replace a non-empty teacher/import value.
+            const language =
+              (row.learning_language || "en")
+                .toLowerCase()
+                .split("-")[0] || "en";
+
+            // This action is explicitly requested by the teacher. When there
+            // is no authoritative source/import POS, re-evaluate English
+            // entries against corpus popularity metadata. This repairs older
+            // auto-filled values such as apple/baby/bad being assigned rare
+            // secondary verb senses, while source-provided POS remains intact.
+            if (
+              !decision &&
+              !previousWasRecorded &&
+              !imported &&
+              language === "en"
+            ) {
+              const { fetchDatamuseLexicalMetadata } = await import(
+                "./dictionary-vocabulary"
+              );
+              const lexical = await fetchDatamuseLexicalMetadata(row.word).catch(
+                () => null,
+              );
+              if (
+                lexical?.partOfSpeech &&
+                lexical.partOfSpeech !== row.part_of_speech
+              ) {
+                decision = {
+                  value: lexical.partOfSpeech,
+                  reason: "recalculate_dictionary",
+                };
+              }
+            }
+
+            // For genuinely empty non-English/unknown entries, retain the
+            // existing dictionary fallback. It never runs over source data.
             if (
               !decision &&
               !row.part_of_speech?.trim() &&
               !previousWasRecorded &&
               !imported
             ) {
-              const language =
-                (row.learning_language || "en")
-                  .toLowerCase()
-                  .split("-")[0] || "en";
               resolved = await resolveStoredVocabularyDictionary(
                 row.word,
                 language,
@@ -858,7 +898,14 @@ export const repairVocabularyPartOfSpeech = createServerFn({
                             part_of_speech_restored_at: now,
                             part_of_speech_restore_source: "import_payload",
                           }
-                        : {}),
+                        : decision.reason === "recalculate_dictionary"
+                          ? {
+                              part_of_speech_recalculated_at: now,
+                              part_of_speech_recalculate_source:
+                                "datamuse_primary_corpus_pos",
+                              part_of_speech_value: decision.value,
+                            }
+                          : {}),
                   };
 
             const { error: updateError } = await admin
@@ -916,6 +963,9 @@ export const repairVocabularyPartOfSpeech = createServerFn({
         ).length,
         filled_from_dictionary: changes.filter(
           (item) => item.reason === "fill_missing_dictionary",
+        ).length,
+        recalculated_from_corpus: changes.filter(
+          (item) => item.reason === "recalculate_dictionary",
         ).length,
         changes: changes.slice(0, 100),
       },
