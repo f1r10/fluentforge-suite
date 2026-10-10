@@ -305,6 +305,62 @@ describe("WiktAPI vocabulary enrichment", () => {
     expect(write.part_of_speech).toBe("verb");
   });
 
+  it("does not let Datamuse override the dictionary primary part of speech", async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes("api.datamuse.com")) {
+        return new Response(
+          JSON.stringify([
+            { word: "say", tags: ["adv", "v", "f:84.2"] },
+          ]),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.includes("/definitions")) {
+        return new Response(
+          JSON.stringify({
+            definitions: [
+              {
+                pos: "verb",
+                lang_code: "en",
+                senses: [{ glosses: ["to speak words"] }],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          entries: [
+            {
+              senses: [{ glosses: ["to speak words"] }],
+              forms: [{ form: "says", tags: ["third-person", "singular"] }],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    });
+
+    const result = await fetchBestDictionaryVocabularySuggestion(
+      "say",
+      { language: "en" },
+      fetcher as typeof fetch,
+    );
+
+    expect(result.part_of_speech).toBe("verb");
+    expect(result.level).toBe("A2");
+  });
+
   it("prefers WiktAPI before the free dictionary fallback", async () => {
     const fullResponse = {
       word: "improve",
