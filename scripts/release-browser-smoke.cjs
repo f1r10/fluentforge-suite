@@ -294,7 +294,7 @@ async function gotoHydrated(page, path) {
     await rawReviewItem.getByText("raw_text", { exact: true })
       .waitFor({ timeout: 20000 });
     await rawReviewItem.getByRole("button", { name: "Suala çevir" }).click();
-    const choiceInputs = rawReviewItem.locator('input[type="text"]');
+    const choiceInputs = rawReviewItem.locator("input");
     // The conversion editor has one input per answer option.
     await choiceInputs.nth(0).fill("Correct");
     await choiceInputs.nth(1).fill("Incorrect");
@@ -307,7 +307,7 @@ async function gotoHydrated(page, path) {
     await convertedItem.getByText("question", { exact: true })
       .waitFor({ timeout: 20000 });
     await convertedItem.getByRole("button", { name: "Approve", exact: true }).click();
-    await rawImportDialog.getByRole("button", { name: /Import approved \\(1\\)/ })
+    await rawImportDialog.getByRole("button", { name: /Import approved \(1\)/ })
       .click();
     await rawImportDialog.getByText("completed", { exact: true })
       .waitFor({ timeout: 20000 });
