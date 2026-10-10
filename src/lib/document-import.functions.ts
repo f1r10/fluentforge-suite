@@ -1010,10 +1010,7 @@ export const syncDocumentImport = createServerFn({ method: "POST" })
       if (!count) {
         const prepared = await prepareItems(admin, job.id, state.items, sha256);
         if (prepared.length) {
-          const { error } = await admin
-            .from("import_items")
-            .insert(prepared as never);
-          if (error) throw new Error(error.message);
+          await insertRowsInChunks(admin, "import_items", prepared, 200);
         }
       }
     }
@@ -2348,7 +2345,7 @@ async function prepareItems(
 ) {
   const out: Array<Record<string, unknown>> = [];
 
-  for (const item of items.slice(0, 2000)) {
+  for (const item of items) {
     let duplicateOf: string | null = null;
     let duplicateKind: string | null = null;
 
