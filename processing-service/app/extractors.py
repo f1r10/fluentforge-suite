@@ -1250,6 +1250,18 @@ def _vocabulary_from_text(
         text,
         _vocabulary_defaults(profile),
     )
+    # A level explicitly stated in a teacher's PDF title is source metadata,
+    # not an AI estimate. Do not override a profile's selected level.
+    heading = "\n".join(text.splitlines()[:12])
+    if not defaults.get("level"):
+        level_match = re.search(
+            r"\b(A1|A2|B1|B2|C1|C2)\s*(?:səviyyə|level|seviye)\b",
+            heading,
+            re.IGNORECASE,
+        )
+        if level_match:
+            defaults = {**defaults, "level": level_match.group(1).upper()}
+
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -1268,6 +1280,20 @@ def _vocabulary_from_text(
         clean = _clean_vocab_word(word)
         if not _looks_like_vocab_term(clean):
             return
+        if not part_of_speech and defaults["learning_language"] == "en":
+            # A bare Azerbaijani infinitive can identify a verb with higher
+            # certainty than WiktAPI's unrelated first dictionary sense.
+            # A longer phrase or parenthesized note is ambiguous and must
+            # remain unclassified until the teacher reviews it.
+            az_meanings = [
+                translation["value"].strip().casefold()
+                for translation in (translations or [])
+                if translation.get("language") == "az"
+            ]
+            if len(az_meanings) == 1 and re.fullmatch(
+                r"[a-zəğıöşçü]+(?:maq|mək)", az_meanings[0]
+            ):
+                part_of_speech = "verb"
         key = "::".join(
             [
                 clean.casefold(),
@@ -1343,6 +1369,12 @@ def _vocabulary_from_text(
         line = re.sub(r"^\s*[-•*▪◦]\s*", "", raw_line).strip()
         line, had_row_number = _strip_vocab_row_number(line)
         if not line or len(line) > 2_500 or VOCAB_BOILERPLATE_RE.search(line):
+            continue
+        if re.fullmatch(
+            r"(?:A1|A2|B1|B2|C1|C2)\s+səviyyə\s+üzrə\s+sözlər",
+            line,
+            re.IGNORECASE,
+        ):
             continue
 
         # Structured dictionary/CEFR metadata takes precedence over the
