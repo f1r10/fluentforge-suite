@@ -7,7 +7,7 @@ import { getProcessingService, type ProcessingImportItem } from "./processing.se
 const SOURCE_BUCKET = "sources";
 const MiB = 1024 * 1024;
 
-const POSTGREST_ID_CHUNK = 150;
+const POSTGREST_ID_CHUNK = 50;
 
 function chunks<T>(values: T[], size = POSTGREST_ID_CHUNK) {
   const output: T[][] = [];
@@ -304,6 +304,24 @@ function validateImportItemPayload(
           message:
             "The extracted vocabulary word still looks like an unparsed source row. Review the word, part of speech, level and source sense before approving.",
         };
+      }
+
+      const baseLanguage = parsed.learning_language.toLowerCase().split("-")[0];
+      if (baseLanguage === "en") {
+        if (!parsed.part_of_speech?.trim()) {
+          return {
+            state: "needs_fix",
+            message:
+              "Part of speech could not be determined automatically. Review this word before approving.",
+          };
+        }
+        if (!parsed.level?.trim()) {
+          return {
+            state: "needs_fix",
+            message:
+              "CEFR level could not be determined automatically. Review this word before approving.",
+          };
+        }
       }
       return { state: "ready", message: null };
     }
@@ -869,23 +887,62 @@ async function processVocabularyImportMetadataBatch(
               next = mergeImportVocabularySuggestion(raw, suggestion);
             }
           } else {
-            const lexical = await fetchDatamuseLexicalMetadata(raw.word).catch(
-              () => null,
-            );
-            if (lexical) {
+            const needsPartOfSpeech = !raw.part_of_speech?.trim();
+            const needsLevel = !raw.level?.trim();
+
+            const [dictionarySuggestion, levelEstimate] = await Promise.all([
+              needsPartOfSpeech
+                ? fetchBestDictionaryVocabularySuggestion(
+                    raw.word,
+                    {
+                      language,
+                      targetLanguages: [],
+                    },
+                  ).catch(() => null)
+                : Promise.resolve(null),
+              needsLevel
+                ? fetchDatamuseLexicalMetadata(raw.word).catch(() => null)
+                : Promise.resolve(null),
+            ]);
+
+            const nextPartOfSpeech =
+              raw.part_of_speech?.trim() ||
+              dictionarySuggestion?.part_of_speech ||
+              null;
+            const nextLevel =
+              raw.level?.trim() ||
+              levelEstimate?.level ||
+              dictionarySuggestion?.level ||
+              null;
+
+            if (
+              nextPartOfSpeech !== raw.part_of_speech ||
+              nextLevel !== raw.level
+            ) {
               next = {
                 ...raw,
-                part_of_speech: raw.part_of_speech?.trim()
-                  ? raw.part_of_speech
-                  : lexical.partOfSpeech,
-                level: raw.level?.trim() ? raw.level : lexical.level,
+                part_of_speech: nextPartOfSpeech,
+                level: nextLevel,
                 import_mapping: {
                   ...(raw.import_mapping ?? {}),
                   automatic_metadata: {
-                    status: "done",
-                    provider: "datamuse",
+                    status:
+                      nextPartOfSpeech && nextLevel ? "done" : "needs_review",
+                    provider: "dictionary+datamuse",
                     generated_at: new Date().toISOString(),
                     full_enrichment: false,
+                    part_of_speech_source:
+                      raw.part_of_speech?.trim()
+                        ? "source"
+                        : dictionarySuggestion?.provider ?? null,
+                    level_source:
+                      raw.level?.trim()
+                        ? "source"
+                        : levelEstimate?.level
+                          ? "datamuse"
+                          : dictionarySuggestion?.level
+                            ? dictionarySuggestion.provider
+                            : null,
                   },
                 },
               };
@@ -1196,36 +1253,56 @@ export const approveAllReadyItems = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z.object({ jobId: z.string().uuid() }).parse(d),
   )
-  .handler(async ({ data, context }) => {
-    const { data: candidates, error: candidateError } = await context.supabase
-      .from("import_items")
-      .select("id,item_type,payload,duplicate_of,created_entity_id")
-      .eq("job_id", data.jobId)
-      .eq("decision", "pending");
-    if (candidateError) throw new Error(candidateError.message);
+  .handler(async ({ data }) => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
 
-    const readyIds = (candidates ?? [])
-      .filter(
-        (item) =>
+    let approved = 0;
+    let skipped = 0;
+    let cursor: string | null = null;
+
+    while (true) {
+      let query = admin
+        .from("import_items")
+        .select("id,item_type,payload,duplicate_of,created_entity_id")
+        .eq("job_id", data.jobId)
+        .eq("decision", "pending")
+        .order("id")
+        .limit(200);
+      if (cursor) query = query.gt("id", cursor);
+
+      const { data: candidates, error } = await query;
+      if (error) throw new Error(error.message);
+      if (!candidates?.length) break;
+
+      const readyIds: string[] = [];
+      for (const item of candidates) {
+        if (
           !item.duplicate_of &&
           !item.created_entity_id &&
           validateImportItemPayload(item.item_type, item.payload).state ===
-            "ready",
-      )
-      .map((item) => item.id);
+            "ready"
+        ) {
+          readyIds.push(item.id);
+        } else {
+          skipped += 1;
+        }
+      }
 
-    if (readyIds.length) {
-      await updateImportItemDecisionInChunks(
-        context.supabase,
-        readyIds,
-        "approved",
-      );
+      if (readyIds.length) {
+        await updateImportItemDecisionInChunks(
+          admin,
+          readyIds,
+          "approved",
+        );
+        approved += readyIds.length;
+      }
+
+      cursor = candidates[candidates.length - 1]!.id;
+      if (candidates.length < 200) break;
     }
 
-    return {
-      approved: readyIds.length,
-      skipped: (candidates?.length ?? 0) - readyIds.length,
-    };
+    return { approved, skipped };
   });
 
 export const approveHighConfidenceItems = createServerFn({ method: "POST" })
