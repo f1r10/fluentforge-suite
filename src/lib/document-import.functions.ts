@@ -24,11 +24,15 @@ async function updateImportItemDecisionInChunks(
   decision: "pending" | "approved" | "rejected",
 ) {
   for (const batch of chunks(ids)) {
-    const { error } = await sb
+    const { data: updated, error } = await sb
       .from("import_items")
       .update({ decision })
-      .in("id", batch);
+      .in("id", batch)
+      .select("id");
     if (error) throw new Error(error.message);
+    if ((updated ?? []).length !== batch.length) {
+      throw new Error(`Only ${updated?.length ?? 0} of ${batch.length} import decisions were saved.`);
+    }
   }
 }
 
@@ -1205,6 +1209,7 @@ export const updateImportItem = createServerFn({ method: "POST" })
         id: z.string().uuid(),
         decision: z.enum(["pending", "approved", "rejected"]),
         payload: z.record(z.string(), z.unknown()).optional(),
+        itemType: z.literal("question").optional(),
       })
       .parse(d),
   )
@@ -1217,6 +1222,13 @@ export const updateImportItem = createServerFn({ method: "POST" })
     if (currentError) throw new Error(currentError.message);
     if (!current) throw new Error("Import item not found.");
 
+    if (data.itemType && (current.item_type !== "raw_text" || !data.payload)) {
+      throw new Error("Only an unimported raw text item can be converted to a question.");
+    }
+    if (data.itemType && current.created_entity_id) {
+      throw new Error("An imported item cannot be converted.");
+    }
+    const itemType = data.itemType ?? current.item_type;
     const payload = data.payload ?? current.payload;
     if (data.decision === "approved") {
       if (current.duplicate_of) {
@@ -1225,7 +1237,7 @@ export const updateImportItem = createServerFn({ method: "POST" })
       if (current.created_entity_id) {
         throw new Error("This item has already been imported.");
       }
-      const validation = validateImportItemPayload(current.item_type, payload);
+      const validation = validateImportItemPayload(itemType, payload);
       if (validation.state !== "ready") {
         throw new Error(
           `Cannot approve this item yet: ${validation.message}`,
@@ -1236,12 +1248,18 @@ export const updateImportItem = createServerFn({ method: "POST" })
     const update: Record<string, unknown> = {
       decision: data.decision,
       ...(data.payload ? { payload: data.payload } : {}),
+      ...(data.itemType ? { item_type: data.itemType } : {}),
     };
-    const { error } = await context.supabase
+    const { data: updated, error } = await context.supabase
       .from("import_items")
       .update(update as never)
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("id,decision,item_type")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!updated || updated.decision !== data.decision || updated.item_type !== itemType) {
+      throw new Error("The import item was not updated. Refresh the review and try again.");
+    }
     return { ok: true };
   });
 
