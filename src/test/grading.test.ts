@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesAccepted, scoreBlanks, scoreMultipleChoice } from "@/lib/grading";
+import { matchesAccepted, scoreBlanks, scoreMatching, scoreMultipleChoice, scoreOrdering } from "@/lib/grading";
 
 describe("answer normalization", () => {
   it("accepts every listed alternative spelling (color / colour)", () => {
@@ -34,5 +34,19 @@ describe("scoring", () => {
   });
   it("scores cloze blanks partially", () => {
     expect(scoreBlanks(["went", "x"], [["went"], ["home"]], {}, { points: 2, partial: true })).toBe(1);
+  });
+  it("scores matching pairs and supports partial scoring", () => {
+    expect(
+      scoreMatching(
+        [{ left: "A", right: "1" }, { left: "B", right: "x" }],
+        [{ left: "A", right: "1" }, { left: "B", right: "2" }],
+        {},
+        { points: 2, partial: true },
+      ),
+    ).toBe(1);
+  });
+  it("scores ordering exactly and partially", () => {
+    expect(scoreOrdering(["one", "two"], ["one", "two"], {}, { points: 2 })).toBe(2);
+    expect(scoreOrdering(["one", "x"], ["one", "two"], {}, { points: 2, partial: true })).toBe(1);
   });
 });
