@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, Headphones, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getWhoAmI } from "@/lib/teacher.functions";
 import {
   finishPractice,
