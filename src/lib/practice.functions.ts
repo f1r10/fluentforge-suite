@@ -380,7 +380,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
         ),
       ]);
 
-    const listeningMediaIds = (listeningsResult.data ?? [])
+    const listeningMediaIds = listeningRowsRaw
       .map((x) => x.media_id)
       .filter((x): x is string => !!x);
 
