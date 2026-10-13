@@ -995,6 +995,8 @@ function ReviewWorkspace({
     }
     return "all";
   });
+  const [reviewPage, setReviewPage] = useState(0);
+  const REVIEW_PAGE_SIZE = 60;
   const pending = data.items.filter((item) => item.decision === "pending").length;
   const approved = data.items.filter((item) => item.decision === "approved").length;
   const duplicates = data.items.filter((item) => item.duplicate_of).length;
@@ -1047,6 +1049,13 @@ function ReviewWorkspace({
     }
     return item.decision === "rejected";
   });
+
+  const pageCount = Math.max(1, Math.ceil(visibleItems.length / REVIEW_PAGE_SIZE));
+  const currentReviewPage = Math.min(reviewPage, pageCount - 1);
+  const pagedItems = visibleItems.slice(
+    currentReviewPage * REVIEW_PAGE_SIZE,
+    (currentReviewPage + 1) * REVIEW_PAGE_SIZE,
+  );
 
   return (
     <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[1fr_1.2fr]">
@@ -1111,7 +1120,7 @@ function ReviewWorkspace({
               type="button"
               size="sm"
               variant={filter === value ? "default" : "outline"}
-              onClick={() =>
+              onClick={() => {
                 setFilter(
                   value as
                     | "all"
@@ -1119,14 +1128,30 @@ function ReviewWorkspace({
                     | "needs_fix"
                     | "ready"
                     | "rejected",
-                )
-              }
+                );
+                setReviewPage(0);
+              }}
             >
               {String(label)} ({String(count)})
             </Button>
           ))}
         </div>
 
+        {pageCount > 1 && (
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs">
+            <span>{t("page")} {currentReviewPage + 1} / {pageCount} · {visibleItems.length} {t("items")}</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={currentReviewPage === 0}
+                onClick={() => setReviewPage((page) => Math.max(0, page - 1))}>
+                {t("previous")}
+              </Button>
+              <Button size="sm" variant="outline" disabled={currentReviewPage >= pageCount - 1}
+                onClick={() => setReviewPage((page) => Math.min(pageCount - 1, page + 1))}>
+                {t("next")}
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1">
           {data.items.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
@@ -1141,7 +1166,7 @@ function ReviewWorkspace({
                   {t("no_results")}
                 </div>
               ) : (
-                visibleItems.map((item) => (
+                pagedItems.map((item) => (
                   <ImportItemCard key={item.id} item={item} onChanged={onChanged} />
                 ))
               )}
