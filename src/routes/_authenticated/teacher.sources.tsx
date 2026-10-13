@@ -1211,12 +1211,14 @@ function ImportItemCard({
   const options = Array.isArray(questionPayload?.["options"])
     ? (questionPayload["options"] as Array<unknown>)
         .map((option) =>
-          option && typeof option === "object"
-            ? {
-                id: String((option as Record<string, unknown>)["id"] ?? ""),
-                text: String((option as Record<string, unknown>)["text"] ?? ""),
-              }
-            : null,
+          typeof option === "string"
+            ? { id: option.toLowerCase().replace(/ /g, "_"), text: option }
+            : option && typeof option === "object"
+              ? {
+                  id: String((option as Record<string, unknown>)["id"] ?? ""),
+                  text: String((option as Record<string, unknown>)["text"] ?? ""),
+                }
+              : null,
         )
         .filter(
           (option): option is { id: string; text: string } =>
@@ -1404,7 +1406,7 @@ function ImportItemCard({
               : t("select_correct_answer")}
           </div>
           {options.map((option) => {
-            const checked = correct.includes(option.id);
+            const checked = correct.includes(option.id) || correct.includes(option.text);
             return (
               <label
                 key={option.id}
@@ -1415,7 +1417,12 @@ function ImportItemCard({
                   checked={checked}
                   disabled={busy}
                   onCheckedChange={(value) =>
-                    void setCorrectAnswer(option.id, !!value)
+                    void setCorrectAnswer(
+                      ["true_false", "true_false_not_given", "yes_no_not_given"].includes(
+                        String(payload["question_type"]),
+                      ) ? option.text : option.id,
+                      !!value,
+                    )
                   }
                 />
                 <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
