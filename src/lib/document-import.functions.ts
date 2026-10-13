@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { Database } from "../integrations/supabase/types";
 import { z } from "zod";
 import { vocabularyMetadataWarning, isTeacherApprovableValidationState } from "./vocabulary-review-policy";
 import { requireTeacher } from "./teacher-middleware";
@@ -1129,7 +1130,7 @@ export const getDocumentImport = createServerFn({ method: "GET" })
 
     // PostgREST commonly limits a response to 1000 rows. A large source such
     // as a 1801-entry C1 vocabulary PDF must show every review candidate.
-    const items: Array<Record<string, unknown>> = [];
+    const items: Array<Database["public"]["Tables"]["import_items"]["Row"]> = [];
     const importPageSize = 200;
     for (let offset = 0; ; offset += importPageSize) {
       const pageResult = await context.supabase
@@ -1142,7 +1143,7 @@ export const getDocumentImport = createServerFn({ method: "GET" })
         .range(offset, offset + importPageSize - 1);
       if (pageResult.error) throw new Error(pageResult.error.message);
       const batch = pageResult.data ?? [];
-      items.push(...(batch as Array<Record<string, unknown>>));
+      items.push(...batch);
       if (batch.length < importPageSize) break;
       if (items.length >= 50_000) {
         throw new Error("Import review exceeds 50,000 items. Split the source file.");
