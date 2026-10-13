@@ -128,3 +128,79 @@ def test_1801_numbered_c1_entries_are_not_lost_or_deduplicated():
     assert vocabulary[-1]["word"] == "lexeme1801"
     assert all(item["level"] == "C1" and item["part_of_speech"] == "noun"
                for item in vocabulary)
+
+
+def test_beginner_100_exercise_table_ids_and_clock_questions_are_preserved():
+    documents = exam([
+        "BEGINNER\n100 QUESTIONS\nExercise 3: Prepositions.\n"
+        "11. ... in the summer\nA) In B) At\n"
+        "12. ... at seven\nA) on B) at\n"
+        "13. ... June\nA) at B) in\n"
+        "14. ... birthday\nA) on B) in\n"
+        "15. ... night\nA) in B) at\n"
+        "Exercise 4: Irregular verbs. Complete the chart.\n"
+        "INFINITIVE\nSIMPLE PAST\nPAST PARTICIPLE\n"
+        "16  TO BEGIN\nBEGAN\n"
+        "17  TO COST\nCOST\n"
+        "18  TO DO\n"
+        "19  TO BUY\nBOUGHT\n"
+        "20  TO EAT\nATE\n"
+        "21  TO GIVE\nGIVEN\n"
+        "22  TO TAKE\nTOOK\n"
+        "23  TO GO\nGONE\n"
+        "24  TO SEE\nSEEN\n"
+        "25  TO SPEAK\n",
+        "BEGINNER\n100 QUESTIONS\nExercise 5: Vocabulary. Match the verbs.\n"
+        "26.\n________ baseball\n27.\n________ a bike\n"
+        "28.\n________ the TV\n29.\n________ photos\n30.\n________ a song\n"
+        "Exercise 6: Vocabulary. Complete the table.\nNUMBERS\nLETTERS\n"
+        "31\n59\n32\n73\n33\n35\n34\n27\n35\n84\n"
+        "36\nninety-six\n37\nforty-one\n38\neleven\n39\nthirteen\n40\ntwenty\n",
+        "BEGINNER\n100 QUESTIONS\n"
+        "Exercise 7: Vocabulary. Write the colour for each group.\n"
+        "41\nSnow, Milk, Paper:\n___________\n"
+        "42\nChocolate, Tea, Beer:\n___________\n"
+        "43\nPlants, Salad, Apples:\n___________\n"
+        "44\nThe Sun, Bananas, Cheese:\n___________\n"
+        "45\nBuses in London, Roses, Tomatoes:\n___________\n"
+        "Exercise 8: Pronunciation. Find the odd one out.\n"
+        "46\nDRIVE\nLIKE\nSISTER\nRIDE\n"
+        "47\nPOST\nGO\nSLOWLY\nSHOP\n"
+        "48\nLUNCH\nMUCH\nUSUALLY\nBUT\n"
+        "49\nSQUARE\nSTAIRS\nNEAR\nTHERE\n"
+        "50\nTHERE\nTHANKS\nMOTHER\nTHAT\n",
+        "BEGINNER\n100 QUESTIONS\nExercise 14: Telling the time.\n"
+        "81.\n____________________ 82.\n____________________\n"
+        "83.\n____________________ 84.\n____________________\n",
+    ])
+    pages = [
+        [item["payload"] for item in detect_candidates(
+            exam([page["text"]]), {"expected_content": "questions"}
+        ) if item["item_type"] == "question"]
+        for page in documents.pages
+    ]
+    assert list(map(len, pages)) == [15, 15, 10, 4]
+    assert pages[0][5]["prompt"].startswith("TO BEGIN")
+    assert pages[1][5]["prompt"].strip() == "59"
+    assert pages[1][6]["prompt"].strip() == "73"
+    assert pages[1][-1]["prompt"].strip() == "twenty"
+    assert pages[2][0]["prompt"].startswith("Snow")
+    assert pages[3][0]["prompt"] == "____________________"
+    assert pages[3][1]["prompt"] == "____________________"
+
+
+def test_present_simple_answer_sheet_creates_fill_blank_questions():
+    documents = exam([
+        "Present Simple Test\nWrite verbs in the Present Simple\n"
+        "1. I ____ for Mike. (to work)\n"
+        "2. She ____ for the teams. (to play)\n",
+        "Answers to the present simple test\n1. work\n2. plays\n",
+    ])
+    questions = [
+        i["payload"] for i in detect_candidates(
+            documents, {"expected_content": "questions"}
+        ) if i["item_type"] == "question"
+    ]
+    assert len(questions) == 2
+    assert [q["question_type"] for q in questions] == ["fill_blank", "fill_blank"]
+    assert [q["answer_key"]["blanks"][0][0] for q in questions] == ["work", "plays"]
