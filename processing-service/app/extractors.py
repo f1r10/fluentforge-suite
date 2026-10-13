@@ -506,6 +506,8 @@ def _repeated_pdf_page_furniture(pages: list[dict[str, Any]]) -> set[str]:
                 and not QUESTION_NUMBER_ONLY_RE.match(line)
                 and not ANSWER_SECTION_HEADING_RE.match(line)
                 and not ANSWER_RE.match(line)
+                and not _fixed_choice_options_from_line(line)
+                and not _options_from_line(line)
             ):
                 counter[line] += 1
     return {line for line, count in counter.items() if count >= 2}
