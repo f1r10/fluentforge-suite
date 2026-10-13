@@ -1,0 +1,92 @@
+"""Minimal redacted fixtures modelling the user-supplied A2 exam PDF format."""
+from app.extractors import Extraction, detect_candidates
+from app.scoped_answers import extract_scoped_answers
+
+
+def exam(pages: list[str]) -> Extraction:
+    return Extraction(
+        "pdf_layout_native",
+        [{"page": index + 1, "text": text, "tables": [], "blocks": []}
+         for index, text in enumerate(pages)],
+        [],
+        "\n".join(pages),
+        {},
+    )
+
+
+def test_a2_answer_key_recovers_all_sixty_section_scoped_answers():
+    text = (
+        "Answer Key:\n"
+        "Section I: Grammar:\n"
+        "1b, 2c, 3a, 4b, 5c, 6b, 7b, 8b, 9a, 10b, "
+        "11c, 12a, 13b, 14a, 15c, 16c, 17b, 18a, 19b, 20a\n"
+        "Section II: Reading:\n"
+        "Task 1: 1c, 2a, 3b, 4c, 5b\n"
+        "Task 2: 1T, 2T, 3F, 4T, 5T\n"
+        "Task 3: 1F, 2T, 3T, 4T, 5F\n"
+        "Task 4: 1a, 2a, 3b, 4c, 5b\n"
+        "Task 5: 1F, 2T, 3F, 4T, 5F\n"
+        "Section III: Listening:\n"
+        "Task 1: 1F, 2F, 3T, 4T, 5F\n"
+        "Task 2: 1T, 2T, 3F, 4F, 5T\n"
+        "Task 3: 1c, 2e, 3a, 4d, 5g\n"
+    )
+    answers = extract_scoped_answers(text)
+    assert len(answers) == 9
+    assert sum(map(len, answers.values())) == 60
+    assert answers["grammar", 0]["1"] == "B"
+    assert answers["reading", 2]["1"] == "True"
+    assert answers["reading", 3]["1"] == "False"
+    assert answers["listening", 3]["5"] == "G"
+
+
+def test_pdf_grammar_and_reading_repeated_numbers_keep_distinct_answers():
+    documents = exam([
+        "SECTION I: Grammar (Use of English)\n"
+        "1. Choose one.\na) first\nb) second\nc) third\n"
+        "2. Choose a letter.\na) red\nb) blue\nc) green\n",
+        "SECTION II: Reading Comprehension\nReading Task 1\n"
+        "Read the text below. A simple passage is here for students.\n"
+        "1. Choose one.\na) north\nb) south\nc) east\n",
+        "Reading Task 2\nRead and mark True or False.\n"
+        "1. A week has seven days.\n❏ True\n❏ False\n",
+        "Answer Key:\nSection I: Grammar:\n1b, 2c\n"
+        "Section II: Reading:\nTask 1: 1c\nTask 2: 1T\n",
+    ])
+    items = detect_candidates(documents, profile={"expected_content": "questions"})
+    questions = [item["payload"] for item in items if item["item_type"] == "question"]
+    assert len(questions) == 4
+    assert questions[0]["answer_key"] == {"correct": ["b"]}
+    assert questions[1]["answer_key"] == {"correct": ["c"]}
+    assert questions[2]["answer_key"] == {"correct": ["c"]}
+    assert questions[3]["answer_key"] == {"correct": ["true"]}
+
+
+def test_auto_import_recognizes_listening_tasks_and_scoped_true_false_answers():
+    documents = exam([
+        "SECTION III: Listening Comprehension\n"
+        "Listening Task 1\nListen and mark True or False.\n"
+        "1. First statement.\n❏ True\n❏ False\n"
+        "Listening Task 2\nListen and mark True or False.\n"
+        "1. Second statement.\n❏ True\n❏ False\n",
+        "Answer Key:\nSection III: Listening:\n"
+        "Task 1: 1F\nTask 2: 1T\n",
+    ])
+    items = detect_candidates(documents, profile={"expected_content": "auto"})
+    contexts = [i for i in items if i["item_type"] == "listening"]
+    questions = [i["payload"] for i in items if i["item_type"] == "question"]
+    assert len(contexts) == 2
+    assert len(questions) == 2
+    assert questions[0]["answer_key"] == {"correct": ["false"]}
+    assert questions[1]["answer_key"] == {"correct": ["true"]}
+    assert questions[0]["import_context"]["source_ref"] != questions[1]["import_context"]["source_ref"]
+
+
+def test_normal_flat_qa01_key_remains_supported():
+    documents = exam([
+        "1. She ___ a teacher.\nA) am\nB) is\nC) are\nD) be\n",
+        "Answer Key:\n1. B\n",
+    ])
+    questions = [i for i in detect_candidates(documents, {"expected_content": "questions"}) if i["item_type"] == "question"]
+    assert len(questions) == 1
+    assert questions[0]["payload"]["answer_key"] == {"correct": ["b"]}
