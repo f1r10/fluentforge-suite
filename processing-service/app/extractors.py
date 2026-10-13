@@ -483,6 +483,34 @@ def _questions_from_fluentforge_export(
     return out
 
 
+def _repeated_pdf_page_furniture(pages: list[dict[str, Any]]) -> set[str]:
+    """Remove repeated running headers/footers, never repeated question choices.
+
+    Repeated page titles can otherwise be appended to the last answer option.
+    Only short strings from page edges occurring on 2+ pages are removable.
+    """
+    from collections import Counter
+
+    counter: Counter[str] = Counter()
+    for page in pages:
+        lines = [
+            line.strip()
+            for line in str(page.get("text") or "").splitlines()
+            if line.strip()
+        ]
+        for line in set(lines[:4] + lines[-4:]):
+            if (
+                len(line) <= 160
+                and not QUESTION_RE.match(line)
+                and not OPTION_RE.match(line)
+                and not QUESTION_NUMBER_ONLY_RE.match(line)
+                and not ANSWER_SECTION_HEADING_RE.match(line)
+                and not ANSWER_RE.match(line)
+            ):
+                counter[line] += 1
+    return {line for line, count in counter.items() if count >= 2}
+
+
 def detect_candidates(
     extraction: Extraction,
     profile: dict[str, Any] | None = None,
@@ -494,11 +522,19 @@ def detect_candidates(
         exported_questions = _questions_from_fluentforge_export(extraction)
         if exported_questions is not None:
             return exported_questions
+    repeated_furniture = _repeated_pdf_page_furniture(extraction.pages)
     global_answers = _extract_global_answer_key(extraction.full_text)
     scoped_answers = extract_scoped_answers(extraction.full_text)
     active_section: str | None = None
 
-    for page in extraction.pages:
+    for original_page in extraction.pages:
+        page = {
+            **original_page,
+            "text": "\n".join(
+                line for line in str(original_page.get("text") or "").splitlines()
+                if line.strip() not in repeated_furniture
+            ),
+        }
         page_number = page.get("page")
         page_text = str(page.get("text") or "")
         active_section = section_for_page(page_text, active_section)
