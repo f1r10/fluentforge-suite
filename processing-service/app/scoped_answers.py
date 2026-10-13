@@ -8,19 +8,19 @@ from __future__ import annotations
 import re
 
 SECTION_RE = re.compile(
-    r"^\\s*Section\\s+(?:I|II|III)\\s*:\\s*(Grammar|Reading|Listening)\\b",
+    r"^\s*Section\s+(?:I|II|III)\s*:\s*(Grammar|Reading|Listening)\b",
     re.IGNORECASE,
 )
 TASK_RE = re.compile(
-    r"^\\s*(?:(?:Reading|Listening)\\s+)?Task\\s+(\\d+)\\s*:?",
+    r"^\s*(?:(?:Reading|Listening)\s+)?Task\s+(\d+)\s*:?",
     re.IGNORECASE,
 )
 PAGE_TASK_RE = re.compile(
-    r"(?im)^\\s*(?:Reading|Listening)\\s+Task\\s+(\\d+)\\b",
+    r"(?im)^\s*(?:Reading|Listening)\s+Task\s+(\d+)\b",
 )
 ANSWER_TOKEN_RE = re.compile(
-    r"(?<!\\d)(\\d{1,3})\\s*[:.\\-) ]?\\s*"
-    r"(Not Given|True|False|[A-H]|T|F)(?!\\w)",
+    r"(?<!\d)(\d{1,3})\s*[:.\-) ]?\s*"
+    r"(Not Given|True|False|[A-H]|T|F)(?!\w)",
     re.IGNORECASE,
 )
 
@@ -33,7 +33,7 @@ def extract_scoped_answers(document_text: str) -> dict[tuple[str, int], dict[str
     answers: dict[tuple[str, int], dict[str, str]] = {}
     for raw in document_text.splitlines():
         line = raw.strip()
-        if re.match(r"^Answer\\s+Key\\s*:", line, re.IGNORECASE):
+        if re.match(r"^Answer\s+Key\s*:", line, re.IGNORECASE):
             active = True
             continue
         if not active:
