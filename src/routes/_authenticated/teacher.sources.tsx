@@ -995,6 +995,8 @@ function ReviewWorkspace({
     }
     return "all";
   });
+  const [reviewPage, setReviewPage] = useState(0);
+  const REVIEW_PAGE_SIZE = 60;
   const pending = data.items.filter((item) => item.decision === "pending").length;
   const approved = data.items.filter((item) => item.decision === "approved").length;
   const duplicates = data.items.filter((item) => item.duplicate_of).length;
@@ -1047,6 +1049,13 @@ function ReviewWorkspace({
     }
     return item.decision === "rejected";
   });
+
+  const pageCount = Math.max(1, Math.ceil(visibleItems.length / REVIEW_PAGE_SIZE));
+  const currentReviewPage = Math.min(reviewPage, pageCount - 1);
+  const pagedItems = visibleItems.slice(
+    currentReviewPage * REVIEW_PAGE_SIZE,
+    (currentReviewPage + 1) * REVIEW_PAGE_SIZE,
+  );
 
   return (
     <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[1fr_1.2fr]">
@@ -1111,7 +1120,7 @@ function ReviewWorkspace({
               type="button"
               size="sm"
               variant={filter === value ? "default" : "outline"}
-              onClick={() =>
+              onClick={() => {
                 setFilter(
                   value as
                     | "all"
@@ -1119,14 +1128,30 @@ function ReviewWorkspace({
                     | "needs_fix"
                     | "ready"
                     | "rejected",
-                )
-              }
+                );
+                setReviewPage(0);
+              }}
             >
               {String(label)} ({String(count)})
             </Button>
           ))}
         </div>
 
+        {pageCount > 1 && (
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs">
+            <span>{t("page")} {currentReviewPage + 1} / {pageCount} · {visibleItems.length} {t("items")}</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={currentReviewPage === 0}
+                onClick={() => setReviewPage((page) => Math.max(0, page - 1))}>
+                {t("previous")}
+              </Button>
+              <Button size="sm" variant="outline" disabled={currentReviewPage >= pageCount - 1}
+                onClick={() => setReviewPage((page) => Math.min(pageCount - 1, page + 1))}>
+                {t("next")}
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1">
           {data.items.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
@@ -1141,7 +1166,7 @@ function ReviewWorkspace({
                   {t("no_results")}
                 </div>
               ) : (
-                visibleItems.map((item) => (
+                pagedItems.map((item) => (
                   <ImportItemCard key={item.id} item={item} onChanged={onChanged} />
                 ))
               )}
@@ -1186,12 +1211,14 @@ function ImportItemCard({
   const options = Array.isArray(questionPayload?.["options"])
     ? (questionPayload["options"] as Array<unknown>)
         .map((option) =>
-          option && typeof option === "object"
-            ? {
-                id: String((option as Record<string, unknown>)["id"] ?? ""),
-                text: String((option as Record<string, unknown>)["text"] ?? ""),
-              }
-            : null,
+          typeof option === "string"
+            ? { id: option.toLowerCase().replace(/ /g, "_"), text: option }
+            : option && typeof option === "object"
+              ? {
+                  id: String((option as Record<string, unknown>)["id"] ?? ""),
+                  text: String((option as Record<string, unknown>)["text"] ?? ""),
+                }
+              : null,
         )
         .filter(
           (option): option is { id: string; text: string } =>
@@ -1296,6 +1323,29 @@ function ImportItemCard({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function changeDraftQuestionType(type: string) {
+    setDraft((current) => {
+      const fixed = type === "true_false" ? ["True", "False"]
+        : type === "true_false_not_given" ? ["True", "False", "Not Given"]
+        : type === "yes_no_not_given" ? ["Yes", "No", "Not Given"]
+        : null;
+      if (fixed) {
+        return { ...current, question_type: type,
+          payload: { options: fixed }, answer_key: { correct: [] } };
+      }
+      if (["fill_blank", "short_answer", "cloze", "sentence_completion"].includes(type)) {
+        return { ...current, question_type: type,
+          payload: { blank_count: 1 }, answer_key: { blanks: [[]] } };
+      }
+      const existing = current["payload"] as Record<string, unknown> | undefined;
+      const options = Array.isArray(existing?.["options"]) &&
+        (existing["options"] as unknown[]).every((option) => option && typeof option === "object")
+        ? existing["options"] : ["a", "b", "c", "d"].map((id) => ({ id, text: "" }));
+      return { ...current, question_type: type,
+        payload: { options }, answer_key: { correct: [] } };
+    });
+  }
+
   function patchQuestionOption(index: number, text: string) {
     setDraft((current) => {
       const nested =
@@ -1356,7 +1406,7 @@ function ImportItemCard({
               : t("select_correct_answer")}
           </div>
           {options.map((option) => {
-            const checked = correct.includes(option.id);
+            const checked = correct.includes(option.id) || correct.includes(option.text);
             return (
               <label
                 key={option.id}
@@ -1367,7 +1417,12 @@ function ImportItemCard({
                   checked={checked}
                   disabled={busy}
                   onCheckedChange={(value) =>
-                    void setCorrectAnswer(option.id, !!value)
+                    void setCorrectAnswer(
+                      ["true_false", "true_false_not_given", "yes_no_not_given"].includes(
+                        String(payload["question_type"]),
+                      ) ? option.text : option.id,
+                      !!value,
+                    )
                   }
                 />
                 <strong className="w-6 shrink-0 uppercase">{option.id})</strong>
@@ -1388,6 +1443,7 @@ function ImportItemCard({
           itemType={converting ? "question" : item.item_type}
           draft={draft}
           onPatch={patchDraft}
+          onChangeQuestionType={changeDraftQuestionType}
           onPatchQuestionOption={patchQuestionOption}
         />
       ) : null}
@@ -1473,11 +1529,13 @@ function SimpleImportItemEditor({
   itemType,
   draft,
   onPatch,
+  onChangeQuestionType,
   onPatchQuestionOption,
 }: {
   itemType: string;
   draft: Record<string, unknown>;
   onPatch: (key: string, value: unknown) => void;
+  onChangeQuestionType: (type: string) => void;
   onPatchQuestionOption: (index: number, text: string) => void;
 }) {
   const { t } = useI18n();
@@ -1494,8 +1552,33 @@ function SimpleImportItemEditor({
     const options = Array.isArray(nested["options"])
       ? (nested["options"] as Array<Record<string, unknown>>)
       : [];
+    const questionType = String(draft["question_type"] ?? "single_choice");
+    const fixedOptions = questionType === "true_false" ? ["True", "False"]
+      : questionType === "true_false_not_given" ? ["True", "False", "Not Given"]
+      : questionType === "yes_no_not_given" ? ["Yes", "No", "Not Given"]
+      : null;
+    const key = (draft["answer_key"] as Record<string, unknown> | undefined) ?? {};
+    const blanks = Array.isArray(key["blanks"]) ? key["blanks"] as string[][] : [];
+    const textAnswers = blanks.map((values) => values.join(" | ")).join("\n");
     return (
       <div className="space-y-3 rounded-md border border-border bg-background p-3">
+        <SimpleField label={t("question_type")}>
+          <select className={inputClass} value={questionType}
+            onChange={(event) => onChangeQuestionType(event.target.value)}>
+            {[
+              ["single_choice", "Single choice"],
+              ["multiple_choice", "Multiple choice"],
+              ["word_bank", "Word bank"],
+              ["true_false", "True / False"],
+              ["true_false_not_given", "True / False / Not Given"],
+              ["yes_no_not_given", "Yes / No / Not Given"],
+              ["fill_blank", "Fill in the blank"],
+              ["short_answer", "Short answer"],
+              ["cloze", "Multiple blanks"],
+              ["sentence_completion", "Sentence completion"],
+            ].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </SimpleField>
         <label className="block space-y-1">
           <span className="text-xs font-medium">{t("question")}</span>
           <Textarea
@@ -1600,6 +1683,36 @@ function SimpleImportItemEditor({
               )}
             </SimpleField>
           </div>
+        )}
+        {fixedOptions && (
+          <SimpleField label={t("correct_answer")}>
+            <select className={inputClass}
+              value={Array.isArray(key["correct"]) ? String(key["correct"][0] ?? "") : ""}
+              onChange={(event) => onPatch("answer_key", {
+                correct: event.target.value ? [event.target.value] : [],
+              })}>
+              <option value="">Cavabı seçin</option>
+              {fixedOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </SimpleField>
+        )}
+        {["fill_blank", "short_answer", "cloze", "sentence_completion"].includes(questionType) && (
+          <SimpleField label={t("correct_answer")}>
+            <Textarea rows={3}
+              aria-label="Accepted text answers; one line per blank; separate alternatives with |"
+              placeholder="One accepted answer per line. Alternatives: answer | alternative"
+              value={textAnswers}
+              onChange={(event) => {
+                const next = event.target.value.split("\n").map((line) =>
+                  line.split("|").map((value) => value.trim()).filter(Boolean)
+                );
+                onPatch("answer_key", { blanks: next });
+                onPatch("payload", { ...nested, blank_count: next.length });
+              }}
+            />
+          </SimpleField>
         )}
         <label className="block space-y-1">
           <span className="text-xs font-medium">{t("explanation")}</span>

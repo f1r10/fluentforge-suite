@@ -495,10 +495,8 @@ def test_checkbox_pdf_options_and_true_false_are_reconstructed():
         "Yes, I do",
         "Yes, I am",
     ]
-    assert questions[1]["payload"]["payload"]["options"] == [
-        {"id": "true", "text": "True"},
-        {"id": "false", "text": "False"},
-    ]
+    assert questions[1]["payload"]["question_type"] == "true_false"
+    assert questions[1]["payload"]["payload"]["options"] == ["True", "False"]
 
 
 def test_fluentforge_export_reconstructs_paginated_questions_and_quarantines_contamination():
@@ -899,10 +897,8 @@ def test_standalone_true_false_lines_become_choices():
     items = detect_candidates(extraction, profile={"expected_content": "questions"})
     question = [item for item in items if item["item_type"] == "question"][0]
 
-    assert question["payload"]["payload"]["options"] == [
-        {"id": "true", "text": "True"},
-        {"id": "false", "text": "False"},
-    ]
+    assert question["payload"]["question_type"] == "true_false"
+    assert question["payload"]["payload"]["options"] == ["True", "False"]
 
 
 def test_listening_target_splits_multiple_tasks_on_one_page():

@@ -17,6 +17,8 @@ import xlrd
 from docx import Document
 from PIL import Image
 
+from .scoped_answers import extract_scoped_answers, section_for_page, task_for_page
+
 
 @dataclass
 class Extraction:
@@ -481,6 +483,36 @@ def _questions_from_fluentforge_export(
     return out
 
 
+def _repeated_pdf_page_furniture(pages: list[dict[str, Any]]) -> set[str]:
+    """Remove repeated running headers/footers, never repeated question choices.
+
+    Repeated page titles can otherwise be appended to the last answer option.
+    Only short strings from page edges occurring on 2+ pages are removable.
+    """
+    from collections import Counter
+
+    counter: Counter[str] = Counter()
+    for page in pages:
+        lines = [
+            line.strip()
+            for line in str(page.get("text") or "").splitlines()
+            if line.strip()
+        ]
+        for line in set(lines[:4] + lines[-4:]):
+            if (
+                len(line) <= 160
+                and not QUESTION_RE.match(line)
+                and not OPTION_RE.match(line)
+                and not QUESTION_NUMBER_ONLY_RE.match(line)
+                and not ANSWER_SECTION_HEADING_RE.match(line)
+                and not ANSWER_RE.match(line)
+                and not _fixed_choice_options_from_line(line)
+                and not _options_from_line(line)
+            ):
+                counter[line] += 1
+    return {line for line, count in counter.items() if count >= 2}
+
+
 def detect_candidates(
     extraction: Extraction,
     profile: dict[str, Any] | None = None,
@@ -492,10 +524,27 @@ def detect_candidates(
         exported_questions = _questions_from_fluentforge_export(extraction)
         if exported_questions is not None:
             return exported_questions
+    repeated_furniture = _repeated_pdf_page_furniture(extraction.pages)
     global_answers = _extract_global_answer_key(extraction.full_text)
+    scoped_answers = extract_scoped_answers(extraction.full_text)
+    active_section: str | None = None
 
-    for page in extraction.pages:
+    for original_page in extraction.pages:
+        page = {
+            **original_page,
+            "text": "\n".join(
+                line for line in str(original_page.get("text") or "").splitlines()
+                if line.strip() not in repeated_furniture
+            ),
+        }
         page_number = page.get("page")
+        page_text = str(page.get("text") or "")
+        active_section = section_for_page(page_text, active_section)
+        task_number = task_for_page(page_text, active_section)
+        section_answers = scoped_answers.get((active_section or "", task_number), {})
+        # Scope wins over globally unique answers. Never fall back to an
+        # unrelated task's answer when numbering restarts.
+        page_answers = {**global_answers, **section_answers}
         question_crops = _question_crop_map(page)
 
         if expected_content == "vocabulary":
@@ -529,11 +578,19 @@ def detect_candidates(
                 )
             continue
 
-        if expected_content == "listenings":
+        if (
+            expected_content in {"auto", "mixed", "listenings"}
+            and (active_section == "listening" or expected_content == "listenings")
+        ):
             listening_groups = _listening_task_groups(
                 page,
                 question_crops=question_crops,
-                global_answers=global_answers,
+                global_answers=page_answers,
+                task_answers={
+                    task: {**global_answers, **answers}
+                    for (section, task), answers in scoped_answers.items()
+                    if section == "listening"
+                },
             )
             if listening_groups:
                 for context_item, grouped_questions in listening_groups:
@@ -559,7 +616,7 @@ def detect_candidates(
             page.get("text", ""),
             page=page_number,
             question_crops=question_crops,
-            global_answers=global_answers,
+            global_answers=page_answers,
         )
 
         context_item: dict[str, Any] | None = None
@@ -1799,6 +1856,7 @@ def _listening_task_groups(
     page: dict[str, Any],
     question_crops: dict[str, dict[str, float]] | None,
     global_answers: dict[str, str] | None,
+    task_answers: dict[int, dict[str, str]] | None = None,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
     text = str(page.get("text") or "")
     matches = list(LISTENING_TASK_RE.finditer(text))
@@ -1815,7 +1873,9 @@ def _listening_task_groups(
             segment,
             page=page.get("page"),
             question_crops=question_crops,
-            global_answers=global_answers,
+            global_answers=(task_answers or {}).get(
+                int(match.group(1)), global_answers
+            ),
         )
         if not questions:
             continue
@@ -2217,6 +2277,54 @@ def _split_concatenated_question_lines(lines: list[str]) -> list[str]:
     return out
 
 
+def _normalize_worksheet_question_lines(lines: list[str]) -> list[str]:
+    """Recover numbered rows whose punctuation is lost in PDF tables.
+
+    Exercise sheets may print '31' in one table cell and '59' in another,
+    or '16 TO BEGIN' on a chart row. Retain only the longest sequential
+    run of bare row IDs; do not mistake the numeric cell content for a
+    new question. Preserve the complete source text for teacher review.
+    """
+    if not any(re.match(r"^\s*Exercise\s+\d+", value, re.IGNORECASE) for value in lines):
+        return lines
+
+    candidates: list[tuple[int, int]] = []
+    numbered_chart_row = re.compile(r"^\s*(\d{1,3})\s+(TO\s+[A-Z][A-Z]+.*?)\s*$")
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if stripped.isdecimal() and 1 <= int(stripped) <= 200:
+            candidates.append((i, int(stripped)))
+
+    # Longest subsequence with consecutive integer values, not necessarily
+    # adjacent text lines (a number's table-cell value can lie between IDs).
+    ends: dict[int, tuple[int, list[int]]] = {}
+    for i, number in candidates:
+        prior_len, prior_ids = ends.get(number - 1, (0, []))
+        chain = (prior_len + 1, [*prior_ids, i])
+        if chain[0] > ends.get(number, (0, []))[0]:
+            ends[number] = chain
+    chosen = set(max(ends.values(), default=(0, []), key=lambda v: v[0])[1])
+    if len(chosen) < 3:
+        chosen.clear()
+
+    result: list[str] = []
+    split_side_by_side = re.compile(r"^([_\s.]{5,})\s+(\d{1,3})[.)]\s*$")
+    for i, raw in enumerate(lines):
+        chart = numbered_chart_row.match(raw)
+        if chart:
+            result.append(f"{chart.group(1)}. {chart.group(2)}")
+            continue
+        if i in chosen:
+            result.append(f"{raw.strip()}.")
+            continue
+        inline = split_side_by_side.match(raw)
+        if inline:
+            result.extend((inline.group(1).strip(), f"{inline.group(2)}."))
+            continue
+        result.append(raw)
+    return result
+
+
 def _questions_from_text(
     text: str,
     page: int | None,
@@ -2224,7 +2332,11 @@ def _questions_from_text(
     global_answers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     lines = _split_concatenated_question_lines(
-        _join_wrapped_option_lines([line.rstrip() for line in text.splitlines()])
+        _join_wrapped_option_lines(
+            _normalize_worksheet_question_lines(
+                [line.rstrip() for line in text.splitlines()]
+            )
+        )
     )
     questions: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -2358,23 +2470,62 @@ def _questions_from_text(
         q.pop("_nested_numbering", None)
         answer = answer_key.get(number) or (global_answers or {}).get(number)
         if len(options) >= 2:
-            correct_id = None
-            if answer:
-                token = answer.lower().strip()
-                if token in {option["id"] for option in options}:
-                    correct_id = token
-            payload = {
-                "question_type": "single_choice",
-                "prompt": q["prompt"],
-                "payload": {"options": options},
-                "answer_key": {"correct": [correct_id]} if correct_id else {"correct": []},
-                "status": "draft",
-            }
-            confidence = 0.9 if correct_id else 0.72
+            fixed_ids = {option["id"] for option in options}
+            if fixed_ids == {"true", "false"} and len(options) == 2:
+                fixed_type = "true_false"
+                fixed_labels = ["True", "False"]
+            elif fixed_ids == {"true", "false", "not_given"} and len(options) == 3:
+                fixed_type = "true_false_not_given"
+                fixed_labels = ["True", "False", "Not Given"]
+            elif fixed_ids == {"yes", "no", "not_given"} and len(options) == 3:
+                fixed_type = "yes_no_not_given"
+                fixed_labels = ["Yes", "No", "Not Given"]
+            else:
+                fixed_type = None
+                fixed_labels = []
+            if fixed_type:
+                # The fixed-choice schema requires canonical human-readable
+                # answer values, not option IDs (e.g. 'True', not 'true').
+                answer_text = None
+                if answer:
+                    normalized_answer = answer.casefold().strip()
+                    if normalized_answer == "t":
+                        normalized_answer = "true"
+                    if normalized_answer == "f":
+                        normalized_answer = "false"
+                    answer_text = next(
+                        (label for label in fixed_labels
+                         if label.casefold().replace(" ", "_") == normalized_answer.replace(" ", "_")),
+                        None,
+                    )
+                payload = {
+                    "question_type": fixed_type,
+                    "prompt": q["prompt"],
+                    "payload": {"options": fixed_labels},
+                    "answer_key": {"correct": [answer_text]} if answer_text else {"correct": []},
+                    "status": "draft",
+                }
+                confidence = 0.92 if answer_text else 0.72
+            else:
+                correct_id = None
+                if answer:
+                    token = answer.lower().strip()
+                    if token in {option["id"] for option in options}:
+                        correct_id = token
+                payload = {
+                    "question_type": "single_choice",
+                    "prompt": q["prompt"],
+                    "payload": {"options": options},
+                    "answer_key": {"correct": [correct_id]} if correct_id else {"correct": []},
+                    "status": "draft",
+                }
+                confidence = 0.9 if correct_id else 0.72
         else:
+            prompt = q["prompt"]
+            has_blank = bool(re.search(r"_{2,}|\\.{4,}|…{2,}", prompt))
             payload = {
-                "question_type": "short_answer",
-                "prompt": q["prompt"],
+                "question_type": "fill_blank" if has_blank else "short_answer",
+                "prompt": prompt,
                 "payload": {"blank_count": 1},
                 "answer_key": {"blanks": [[answer]]} if answer else {"blanks": [[]]},
                 "status": "draft",
