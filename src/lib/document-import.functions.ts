@@ -1117,27 +1117,40 @@ export const getDocumentImport = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ jobId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const [jobResult, itemsResult] = await Promise.all([
-      context.supabase
-        .from("import_jobs")
-        .select(
-          "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files(id,original_filename,mime_type,size_bytes,keep_original,storage_path)",
-        )
-        .eq("id", data.jobId)
-        .maybeSingle(),
-      context.supabase
+    const jobResult = await context.supabase
+      .from("import_jobs")
+      .select(
+        "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files(id,original_filename,mime_type,size_bytes,keep_original,storage_path)",
+      )
+      .eq("id", data.jobId)
+      .maybeSingle();
+    if (jobResult.error) throw new Error(jobResult.error.message);
+    if (!jobResult.data) throw new Error("Import job not found.");
+
+    // PostgREST commonly limits a response to 1000 rows. A large source such
+    // as a 1801-entry C1 vocabulary PDF must show every review candidate.
+    const items: Array<Record<string, unknown>> = [];
+    const importPageSize = 200;
+    for (let offset = 0; ; offset += importPageSize) {
+      const pageResult = await context.supabase
         .from("import_items")
         .select("*")
         .eq("job_id", data.jobId)
         .order("page", { ascending: true, nullsFirst: false })
-        .order("created_at"),
-    ]);
-    if (jobResult.error) throw new Error(jobResult.error.message);
-    if (itemsResult.error) throw new Error(itemsResult.error.message);
-    if (!jobResult.data) throw new Error("Import job not found.");
+        .order("created_at")
+        .order("id")
+        .range(offset, offset + importPageSize - 1);
+      if (pageResult.error) throw new Error(pageResult.error.message);
+      const batch = pageResult.data ?? [];
+      items.push(...(batch as Array<Record<string, unknown>>));
+      if (batch.length < importPageSize) break;
+      if (items.length >= 50_000) {
+        throw new Error("Import review exceeds 50,000 items. Split the source file.");
+      }
+    }
     return {
       job: jobResult.data,
-      items: (itemsResult.data ?? []).map((item) => ({
+      items: items.map((item) => ({
         ...item,
         validation: item.created_entity_id
           ? { state: "imported" as const, message: null }
