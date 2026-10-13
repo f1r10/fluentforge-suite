@@ -2277,6 +2277,54 @@ def _split_concatenated_question_lines(lines: list[str]) -> list[str]:
     return out
 
 
+def _normalize_worksheet_question_lines(lines: list[str]) -> list[str]:
+    """Recover numbered rows whose punctuation is lost in PDF tables.
+
+    Exercise sheets may print '31' in one table cell and '59' in another,
+    or '16 TO BEGIN' on a chart row. Retain only the longest sequential
+    run of bare row IDs; do not mistake the numeric cell content for a
+    new question. Preserve the complete source text for teacher review.
+    """
+    if not any(re.match(r"^\\s*Exercise\\s+\\d+", value, re.IGNORECASE) for value in lines):
+        return lines
+
+    candidates: list[tuple[int, int]] = []
+    numbered_chart_row = re.compile(r"^\\s*(\\d{1,3})\\s+(TO\\s+[A-Z][A-Z]+.*?)\\s*$")
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if stripped.isdecimal() and 1 <= int(stripped) <= 200:
+            candidates.append((i, int(stripped)))
+
+    # Longest subsequence with consecutive integer values, not necessarily
+    # adjacent text lines (a number's table-cell value can lie between IDs).
+    ends: dict[int, tuple[int, list[int]]] = {}
+    for i, number in candidates:
+        prior_len, prior_ids = ends.get(number - 1, (0, []))
+        chain = (prior_len + 1, [*prior_ids, i])
+        if chain[0] > ends.get(number, (0, []))[0]:
+            ends[number] = chain
+    chosen = set(max(ends.values(), default=(0, []), key=lambda v: v[0])[1])
+    if len(chosen) < 3:
+        chosen.clear()
+
+    result: list[str] = []
+    split_side_by_side = re.compile(r"^([_\\s.]{5,})\\s+(\\d{1,3})[.)]\\s*$")
+    for i, raw in enumerate(lines):
+        chart = numbered_chart_row.match(raw)
+        if chart:
+            result.append(f"{chart.group(1)}. {chart.group(2)}")
+            continue
+        if i in chosen:
+            result.append(f"{raw.strip()}.")
+            continue
+        inline = split_side_by_side.match(raw)
+        if inline:
+            result.extend((inline.group(1).strip(), f"{inline.group(2)}."))
+            continue
+        result.append(raw)
+    return result
+
+
 def _questions_from_text(
     text: str,
     page: int | None,
@@ -2284,7 +2332,11 @@ def _questions_from_text(
     global_answers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     lines = _split_concatenated_question_lines(
-        _join_wrapped_option_lines([line.rstrip() for line in text.splitlines()])
+        _join_wrapped_option_lines(
+            _normalize_worksheet_question_lines(
+                [line.rstrip() for line in text.splitlines()]
+            )
+        )
     )
     questions: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
