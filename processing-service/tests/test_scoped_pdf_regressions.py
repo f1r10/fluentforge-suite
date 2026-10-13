@@ -108,3 +108,23 @@ def test_running_two_column_exam_footer_does_not_pollute_last_option():
     assert len(questions) == 2
     assert questions[0]["payload"]["options"][-1]["text"] == "isn't"
     assert questions[1]["payload"]["options"][-1]["text"] == "Yes"
+
+
+def test_1801_numbered_c1_entries_are_not_lost_or_deduplicated():
+    pages = []
+    for first in range(1, 1802, 56):
+        rows = [
+            f"{number}) lexeme{number} noun C1"
+            for number in range(first, min(first + 56, 1802))
+        ]
+        pages.append("BTU SFL WORD LISTS - C1 LEVEL\n" + "\n".join(rows))
+    items = detect_candidates(
+        exam(pages),
+        {"expected_content": "vocabulary", "learning_language": "en"},
+    )
+    vocabulary = [item["payload"] for item in items if item["item_type"] == "vocabulary"]
+    assert len(vocabulary) == 1801
+    assert vocabulary[0]["word"] == "lexeme1"
+    assert vocabulary[-1]["word"] == "lexeme1801"
+    assert all(item["level"] == "C1" and item["part_of_speech"] == "noun"
+               for item in vocabulary)
