@@ -59,7 +59,7 @@ def test_pdf_grammar_and_reading_repeated_numbers_keep_distinct_answers():
     assert questions[0]["answer_key"] == {"correct": ["b"]}
     assert questions[1]["answer_key"] == {"correct": ["c"]}
     assert questions[2]["answer_key"] == {"correct": ["c"]}
-    assert questions[3]["answer_key"] == {"correct": ["true"]}
+    assert questions[3]["answer_key"] == {"correct": ["True"]}
 
 
 def test_auto_import_recognizes_listening_tasks_and_scoped_true_false_answers():
@@ -77,8 +77,8 @@ def test_auto_import_recognizes_listening_tasks_and_scoped_true_false_answers():
     questions = [i["payload"] for i in items if i["item_type"] == "question"]
     assert len(contexts) == 2
     assert len(questions) == 2
-    assert questions[0]["answer_key"] == {"correct": ["false"]}
-    assert questions[1]["answer_key"] == {"correct": ["true"]}
+    assert questions[0]["answer_key"] == {"correct": ["False"]}
+    assert questions[1]["answer_key"] == {"correct": ["True"]}
     assert questions[0]["import_context"]["source_ref"] != questions[1]["import_context"]["source_ref"]
 
 
