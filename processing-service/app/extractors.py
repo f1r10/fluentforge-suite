@@ -2285,11 +2285,11 @@ def _normalize_worksheet_question_lines(lines: list[str]) -> list[str]:
     run of bare row IDs; do not mistake the numeric cell content for a
     new question. Preserve the complete source text for teacher review.
     """
-    if not any(re.match(r"^\\s*Exercise\\s+\\d+", value, re.IGNORECASE) for value in lines):
+    if not any(re.match(r"^\s*Exercise\s+\d+", value, re.IGNORECASE) for value in lines):
         return lines
 
     candidates: list[tuple[int, int]] = []
-    numbered_chart_row = re.compile(r"^\\s*(\\d{1,3})\\s+(TO\\s+[A-Z][A-Z]+.*?)\\s*$")
+    numbered_chart_row = re.compile(r"^\s*(\d{1,3})\s+(TO\s+[A-Z][A-Z]+.*?)\s*$")
     for i, raw in enumerate(lines):
         stripped = raw.strip()
         if stripped.isdecimal() and 1 <= int(stripped) <= 200:
@@ -2308,7 +2308,7 @@ def _normalize_worksheet_question_lines(lines: list[str]) -> list[str]:
         chosen.clear()
 
     result: list[str] = []
-    split_side_by_side = re.compile(r"^([_\\s.]{5,})\\s+(\\d{1,3})[.)]\\s*$")
+    split_side_by_side = re.compile(r"^([_\s.]{5,})\s+(\d{1,3})[.)]\s*$")
     for i, raw in enumerate(lines):
         chart = numbered_chart_row.match(raw)
         if chart:
