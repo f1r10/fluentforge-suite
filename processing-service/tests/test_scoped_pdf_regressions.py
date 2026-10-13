@@ -90,3 +90,21 @@ def test_normal_flat_qa01_key_remains_supported():
     questions = [i for i in detect_candidates(documents, {"expected_content": "questions"}) if i["item_type"] == "question"]
     assert len(questions) == 1
     assert questions[0]["payload"]["answer_key"] == {"correct": ["b"]}
+
+
+def test_running_two_column_exam_footer_does_not_pollute_last_option():
+    documents = exam([
+        "English Level Test ELEMENTARY 1A\n"
+        "1. We ___ American.\nA) not\nB) not are\nC) aren't\nD) isn't\n"
+        "English Level Test ELEMENTARY 1A\nwww.learnenglishteam.com\n",
+        "English Level Test ELEMENTARY 1A\n"
+        "2. Have you read this?\nA) No\nB) Yes\n"
+        "English Level Test ELEMENTARY 1A\nwww.learnenglishteam.com\n",
+        "Answer Key:\n1. C\n2. B\n"
+        "English Level Test ELEMENTARY 1A\nwww.learnenglishteam.com\n",
+    ])
+    items = detect_candidates(documents, {"expected_content": "questions"})
+    questions = [i["payload"] for i in items if i["item_type"] == "question"]
+    assert len(questions) == 2
+    assert questions[0]["payload"]["options"][-1]["text"] == "isn't"
+    assert questions[1]["payload"]["options"][-1]["text"] == "Yes"
