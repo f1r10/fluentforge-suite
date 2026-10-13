@@ -17,6 +17,8 @@ import xlrd
 from docx import Document
 from PIL import Image
 
+from .scoped_answers import extract_scoped_answers, section_for_page, task_for_page
+
 
 @dataclass
 class Extraction:
@@ -493,9 +495,18 @@ def detect_candidates(
         if exported_questions is not None:
             return exported_questions
     global_answers = _extract_global_answer_key(extraction.full_text)
+    scoped_answers = extract_scoped_answers(extraction.full_text)
+    active_section: str | None = None
 
     for page in extraction.pages:
         page_number = page.get("page")
+        page_text = str(page.get("text") or "")
+        active_section = section_for_page(page_text, active_section)
+        task_number = task_for_page(page_text, active_section)
+        section_answers = scoped_answers.get((active_section or "", task_number), {})
+        # Scope wins over globally unique answers. Never fall back to an
+        # unrelated task's answer when numbering restarts.
+        page_answers = {**global_answers, **section_answers}
         question_crops = _question_crop_map(page)
 
         if expected_content == "vocabulary":
@@ -529,11 +540,19 @@ def detect_candidates(
                 )
             continue
 
-        if expected_content == "listenings":
+        if (
+            expected_content in {"auto", "mixed", "listenings"}
+            and (active_section == "listening" or expected_content == "listenings")
+        ):
             listening_groups = _listening_task_groups(
                 page,
                 question_crops=question_crops,
-                global_answers=global_answers,
+                global_answers=page_answers,
+                task_answers={
+                    task: {**global_answers, **answers}
+                    for (section, task), answers in scoped_answers.items()
+                    if section == "listening"
+                },
             )
             if listening_groups:
                 for context_item, grouped_questions in listening_groups:
@@ -559,7 +578,7 @@ def detect_candidates(
             page.get("text", ""),
             page=page_number,
             question_crops=question_crops,
-            global_answers=global_answers,
+            global_answers=page_answers,
         )
 
         context_item: dict[str, Any] | None = None
@@ -1799,6 +1818,7 @@ def _listening_task_groups(
     page: dict[str, Any],
     question_crops: dict[str, dict[str, float]] | None,
     global_answers: dict[str, str] | None,
+    task_answers: dict[int, dict[str, str]] | None = None,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
     text = str(page.get("text") or "")
     matches = list(LISTENING_TASK_RE.finditer(text))
@@ -1815,7 +1835,9 @@ def _listening_task_groups(
             segment,
             page=page.get("page"),
             question_crops=question_crops,
-            global_answers=global_answers,
+            global_answers=(task_answers or {}).get(
+                int(match.group(1)), global_answers
+            ),
         )
         if not questions:
             continue
