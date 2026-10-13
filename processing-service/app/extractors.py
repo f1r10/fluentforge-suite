@@ -2418,23 +2418,62 @@ def _questions_from_text(
         q.pop("_nested_numbering", None)
         answer = answer_key.get(number) or (global_answers or {}).get(number)
         if len(options) >= 2:
-            correct_id = None
-            if answer:
-                token = answer.lower().strip()
-                if token in {option["id"] for option in options}:
-                    correct_id = token
-            payload = {
-                "question_type": "single_choice",
-                "prompt": q["prompt"],
-                "payload": {"options": options},
-                "answer_key": {"correct": [correct_id]} if correct_id else {"correct": []},
-                "status": "draft",
-            }
-            confidence = 0.9 if correct_id else 0.72
+            fixed_ids = {option["id"] for option in options}
+            if fixed_ids == {"true", "false"} and len(options) == 2:
+                fixed_type = "true_false"
+                fixed_labels = ["True", "False"]
+            elif fixed_ids == {"true", "false", "not_given"} and len(options) == 3:
+                fixed_type = "true_false_not_given"
+                fixed_labels = ["True", "False", "Not Given"]
+            elif fixed_ids == {"yes", "no", "not_given"} and len(options) == 3:
+                fixed_type = "yes_no_not_given"
+                fixed_labels = ["Yes", "No", "Not Given"]
+            else:
+                fixed_type = None
+                fixed_labels = []
+            if fixed_type:
+                # The fixed-choice schema requires canonical human-readable
+                # answer values, not option IDs (e.g. 'True', not 'true').
+                answer_text = None
+                if answer:
+                    normalized_answer = answer.casefold().strip()
+                    if normalized_answer == "t":
+                        normalized_answer = "true"
+                    if normalized_answer == "f":
+                        normalized_answer = "false"
+                    answer_text = next(
+                        (label for label in fixed_labels
+                         if label.casefold().replace(" ", "_") == normalized_answer.replace(" ", "_")),
+                        None,
+                    )
+                payload = {
+                    "question_type": fixed_type,
+                    "prompt": q["prompt"],
+                    "payload": {"options": fixed_labels},
+                    "answer_key": {"correct": [answer_text]} if answer_text else {"correct": []},
+                    "status": "draft",
+                }
+                confidence = 0.92 if answer_text else 0.72
+            else:
+                correct_id = None
+                if answer:
+                    token = answer.lower().strip()
+                    if token in {option["id"] for option in options}:
+                        correct_id = token
+                payload = {
+                    "question_type": "single_choice",
+                    "prompt": q["prompt"],
+                    "payload": {"options": options},
+                    "answer_key": {"correct": [correct_id]} if correct_id else {"correct": []},
+                    "status": "draft",
+                }
+                confidence = 0.9 if correct_id else 0.72
         else:
+            prompt = q["prompt"]
+            has_blank = bool(re.search(r"_{2,}|\\.{4,}|…{2,}", prompt))
             payload = {
-                "question_type": "short_answer",
-                "prompt": q["prompt"],
+                "question_type": "fill_blank" if has_blank else "short_answer",
+                "prompt": prompt,
                 "payload": {"blank_count": 1},
                 "answer_key": {"blanks": [[answer]]} if answer else {"blanks": [[]]},
                 "status": "draft",
