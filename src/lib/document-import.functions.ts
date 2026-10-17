@@ -1412,16 +1412,28 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       throw new Error("Import job or source file not found.");
     }
 
-    const { data: items, error: itemsError } = await admin
-      .from("import_items")
-      .select("*")
-      .eq("job_id", data.jobId)
-      .eq("decision", "approved")
-      .order("page", { ascending: true, nullsFirst: false })
-      .order("created_at");
-    if (itemsError) throw new Error(itemsError.message);
-
-    const approvedRows = items ?? [];
+    // Never rely on PostgREST's per-response limit here: returning just the
+    // first 1,000 approvals can permanently strand the remaining C1 entries.
+    // This must be stable across repeated, resumable commit batches.
+    const approvedRows: Array<Database["public"]["Tables"]["import_items"]["Row"]> = [];
+    for (let offset = 0; ; offset += 200) {
+      const { data: page, error: itemsError } = await admin
+        .from("import_items")
+        .select("*")
+        .eq("job_id", data.jobId)
+        .eq("decision", "approved")
+        .order("page", { ascending: true, nullsFirst: false })
+        .order("created_at")
+        .order("id")
+        .range(offset, offset + 199);
+      if (itemsError) throw new Error(itemsError.message);
+      const batch = (page ?? []) as Array<Database["public"]["Tables"]["import_items"]["Row"]>;
+      approvedRows.push(...batch);
+      if (batch.length < 200) break;
+      if (approvedRows.length >= 50_000) {
+        throw new Error("Import commit exceeds 50,000 items. Split the source file.");
+      }
+    }
     const invalidApproved = approvedRows.filter(
       (item) =>
         !!item.duplicate_of ||
