@@ -14,6 +14,7 @@ const stepSchema = z.object({
 }).strict();
 const draftSchema = z.object({
   catalogId: uuid, sequential: z.boolean().default(true),
+  enforceLocks: z.boolean().default(false),
   steps: z.array(stepSchema).min(1).max(100),
 }).strict();
 
@@ -63,12 +64,12 @@ export const getTeacherLesson = createServerFn({ method: "GET" })
       .eq("id", data.catalogId).is("deleted_at", null).maybeSingle();
     if (catalog.error || !catalog.data) throw new Error("Catalog not found.");
     const { data: draft, error } = await lessonDb(admin).from("lesson_drafts")
-      .select("catalog_id,sequential,steps,updated_at")
+      .select("catalog_id,sequential,enforce_locks,steps,updated_at")
       .eq("catalog_id", data.catalogId).maybeSingle();
     if (error) throw new Error(error.message);
     return {
       catalog: catalog.data,
-      draft: draft as { catalog_id: string; sequential: boolean;
+      draft: draft as { catalog_id: string; sequential: boolean; enforce_locks: boolean;
         steps: LessonStepRule[]; updated_at: string } | null,
       latest: await latestPublishedLesson(admin, data.catalogId),
     };
@@ -100,6 +101,7 @@ export const saveLessonDraft = createServerFn({ method: "POST" })
     }
     const result = await lessonDb(admin).from("lesson_drafts").upsert({
       catalog_id: data.catalogId, sequential: data.sequential,
+      enforce_locks: data.enforceLocks,
       steps: data.steps, updated_at: new Date().toISOString(),
     }, { onConflict: "catalog_id" });
     if (result.error) throw new Error(result.error.message);
