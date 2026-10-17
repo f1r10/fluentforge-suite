@@ -263,7 +263,10 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       .order("created_at");
     if (itemsError) throw new Error(itemsError.message);
 
-    const items = rawItems ?? [];
+    const { permittedLessonContent } = await import("./lesson-progress.server");
+    const permitted = await permittedLessonContent(admin, studentId, data.catalogId);
+    const items = (rawItems ?? []).filter((item) =>
+      !permitted || permitted.has(item.entity_type + ":" + item.entity_id));
     const directQuestionIds = items.filter((x) => x.entity_type === "question").map((x) => x.entity_id);
     const vocabularyIds = items.filter((x) => x.entity_type === "vocabulary").map((x) => x.entity_id);
     const readingIds = items.filter((x) => x.entity_type === "reading").map((x) => x.entity_id);
@@ -766,6 +769,9 @@ async function gradeAndLog(
     throw new Error("One or more questions are not available in this catalog.");
   }
 
+  const { assertLessonQuestionsAllowed } = await import("./lesson-progress.server");
+  await assertLessonQuestionsAllowed(admin, studentId, catalogId, [...loaded.values()]);
+
   const results = answers.map((answer) => {
     const question = loaded.get(answer.questionId)!;
     const grade = gradeLoadedQuestion(question, answer.response);
@@ -860,6 +866,11 @@ export const submitVocabularyPracticeAnswer = createServerFn({
         throw new Error(
           "This vocabulary entry is not available in the catalog.",
         );
+      }
+      const { permittedLessonContent } = await import("./lesson-progress.server");
+      const permitted = await permittedLessonContent(admin, studentId, data.catalogId);
+      if (permitted && !permitted.has("vocabulary:" + data.entryId)) {
+        throw new Error("Complete the preceding lesson steps before practicing this word.");
       }
     }
 
