@@ -802,10 +802,35 @@ async function gradeAndLog(
           needs_review: result.needs_review,
         } as never,
       })),
-    ).select("id");
+    ).select("id,entity_id");
     if (error) throw new Error(error.message);
     const { recordReviewEvents } = await import("./review-schedule.server");
     await recordReviewEvents(admin, loggedEvents ?? []);
+    // Populate Lesson Mode only with server-graded outcomes. Never trust
+    // client-writable activity events as progress evidence.
+    try {
+      const { recordVerifiedLessonAttempts } = await import("./lesson-progress.server");
+      const eventsByQuestion = new Map(
+        (loggedEvents ?? []).map((event) => [event.entity_id, event.id]),
+      );
+      await recordVerifiedLessonAttempts(
+        admin, studentId, catalogId,
+        results.filter((result) =>
+          !result.needs_review && result.max_score > 0 &&
+          eventsByQuestion.has(result.question_id),
+        ).map((result) => ({
+          entity_id: result.question_id,
+          entity_type: "question" as const,
+          question_version: result.question_version,
+          score_percent: (result.score / result.max_score) * 100,
+          source_event_id: eventsByQuestion.get(result.question_id)!,
+        })),
+      );
+    } catch (error) {
+      // Lesson mode is additive: a lesson logging problem must not
+      // invalidate a correct legacy practice result already persisted.
+      console.error("Lesson progress could not be recorded", error);
+    }
   }
 
   return results.map(({ response, duration_ms, ...result }) => result);
@@ -963,6 +988,19 @@ export const submitVocabularyPracticeAnswer = createServerFn({
     if (data.mode !== "flashcard" && gradedEvent) {
       const { recordReviewEvents } = await import("./review-schedule.server");
       await recordReviewEvents(admin, [gradedEvent]);
+      if (data.catalogId && correct !== null) {
+        try {
+          const { recordVerifiedLessonAttempts } = await import("./lesson-progress.server");
+          await recordVerifiedLessonAttempts(admin, studentId, data.catalogId, [{
+            entity_id: entry.id,
+            entity_type: "vocabulary",
+            score_percent: correct ? 100 : 0,
+            source_event_id: gradedEvent.id,
+          }]);
+        } catch (error) {
+          console.error("Lesson vocabulary progress could not be recorded", error);
+        }
+      }
     }
 
     return {
