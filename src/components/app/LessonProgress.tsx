@@ -33,7 +33,10 @@ export function LessonProgress({ catalogId, titles }: {
   async function markViewed(stepId: string) {
     try {
       await markLessonStepViewed({ data: { catalogId, stepId } });
-      await qc.invalidateQueries({ queryKey: ["student-lesson", catalogId] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["student-lesson", catalogId] }),
+        qc.invalidateQueries({ queryKey: ["student-practice", catalogId] }),
+      ]);
     } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
   }
   function jump(id: string) {
@@ -48,6 +51,17 @@ export function LessonProgress({ catalogId, titles }: {
         <div className="flex-1">
           <h2 className="font-semibold">{t.title} — {lesson.title}</h2>
           <p className="text-sm text-muted-foreground">{t.hint}</p>
+          {!lesson.enforce_locks && (
+            <p className="text-xs text-muted-foreground">
+              {lang === "az"
+                ? "Adi kataloq məşqləri də əlçatandır; dərs ardıcıllığı ayrıca izlənir."
+                : lang === "ru"
+                  ? "Обычная практика каталога остаётся доступной."
+                  : lang === "tr"
+                    ? "Normal katalog alıştırmaları da kullanılabilir."
+                    : "Regular catalog practice remains available."}
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted-foreground">
             {t.progress}: {progress.completedRequired}/{progress.totalRequired}
           </p>
