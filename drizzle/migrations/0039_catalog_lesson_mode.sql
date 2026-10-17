@@ -47,9 +47,20 @@ begin
     if new.state <> 'draft' then
       raise exception 'Lesson revisions must start as draft';
     end if;
-  elsif old.state = 'draft' and new.state = 'published'
-    and current_setting('fluentforge.lesson_publish', true) is distinct from 'true' then
-    raise exception 'Use the lesson publication workflow';
+  elsif old.state = 'draft' then
+    -- Draft content is editable, but its identity and revision must be stable.
+    if (old.id, old.catalog_id, old.revision, old.created_at)
+       is distinct from
+       (new.id, new.catalog_id, new.revision, new.created_at) then
+      raise exception 'Lesson draft identity and revision cannot change';
+    end if;
+    if new.state = 'published' then
+      if current_setting('fluentforge.lesson_publish', true) is distinct from 'true' then
+        raise exception 'Use the lesson publication workflow';
+      end if;
+    elsif new.state <> 'draft' then
+      raise exception 'Invalid lesson draft state transition';
+    end if;
   elsif old.state in ('published','superseded') then
     if not (old.state='published' and new.state='superseded'
       and current_setting('fluentforge.lesson_publish', true) = 'true'
