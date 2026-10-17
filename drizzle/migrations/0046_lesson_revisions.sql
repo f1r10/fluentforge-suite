@@ -4,6 +4,7 @@
 create table if not exists public.lesson_drafts (
   catalog_id uuid primary key references public.catalogs(id) on delete cascade,
   sequential boolean not null default true,
+  enforce_locks boolean not null default false,
   steps jsonb not null default '[]'::jsonb
     check (jsonb_typeof(steps) = 'array'),
   updated_at timestamptz not null default now()
@@ -14,6 +15,7 @@ create table if not exists public.lesson_publications (
   revision integer not null check (revision > 0),
   title text not null,
   sequential boolean not null default true,
+  enforce_locks boolean not null default false,
   steps jsonb not null check (jsonb_typeof(steps) = 'array'),
   published_at timestamptz not null default now(),
   primary key (catalog_id, revision)
@@ -144,8 +146,9 @@ begin
     from public.lesson_publications where catalog_id = _catalog_id;
 
   insert into public.lesson_publications
-    (catalog_id, revision, title, sequential, steps)
-  values (_catalog_id, _revision, _catalog.name, _draft.sequential, _snapshot);
+    (catalog_id, revision, title, sequential, enforce_locks, steps)
+  values (_catalog_id, _revision, _catalog.name, _draft.sequential,
+    _draft.enforce_locks, _snapshot);
   return _revision;
 end;
 $$;
