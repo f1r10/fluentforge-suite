@@ -37,6 +37,34 @@ create table if not exists public.lesson_step_progress (
 create index if not exists lesson_step_progress_student_idx
   on public.lesson_step_progress(student_id,updated_at desc);
 
+-- A published revision is never mutated in place. Its sole permitted change
+-- is the publication transaction superseding it, retaining historical grades.
+create or replace function public.protect_published_lesson_revision()
+returns trigger language plpgsql set search_path = public as $
+begin
+  if TG_OP = 'INSERT' then
+    if new.state <> 'draft' then
+      raise exception 'Lesson revisions must start as draft';
+    end if;
+  elsif old.state in ('published','superseded') then
+    if not (old.state='published' and new.state='superseded'
+      and (old.id,old.catalog_id,old.revision,old.title,old.description,
+           old.sequential,old.steps,old.created_at,old.published_at)
+       is not distinct from
+          (new.id,new.catalog_id,new.revision,new.title,new.description,
+           new.sequential,new.steps,new.created_at,new.published_at)) then
+      raise exception 'Published lesson revisions are immutable';
+    end if;
+  end if;
+  return new;
+end;
+$;
+drop trigger if exists trg_protect_published_lesson_revision
+  on public.lesson_revisions;
+create trigger trg_protect_published_lesson_revision
+before insert or update on public.lesson_revisions
+for each row execute function public.protect_published_lesson_revision();
+
 alter table public.lesson_revisions enable row level security;
 alter table public.lesson_step_progress enable row level security;
 drop policy if exists "teacher manage lesson revisions" on public.lesson_revisions;
