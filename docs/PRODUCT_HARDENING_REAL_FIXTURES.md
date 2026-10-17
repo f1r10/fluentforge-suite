@@ -93,6 +93,26 @@ regression-based routing before replacing the working default.
 - [ ] Teacher editor/publish and student Continue learning screens.
 - [ ] Two-device concurrent progress, independent catalogs unaffected, backfill.
 
+### Backup preflight (safe to run on the real EC2 host)
+
+The new `scripts/ec2-backup-preflight.sh` makes a read-only `pg_dump -Fc`,
+archives the `app-storage` and `processing-data` Docker volumes, checks
+PostgreSQL's archive index and validates SHA-256 hashes. It **never** calls
+`docker compose down`, removes volumes or resets the database.
+
+```bash
+cd ~/fluentforge-suite
+bash scripts/ec2-backup-preflight.sh
+```
+
+Do not send backup archives or secret environment files through chat.
+Because processing data may include a live SQLite DB and uploads may change
+during archive creation, the volume archives are *hot snapshots*, not
+transactionally consistent point-in-time restores. Validate them on a
+separate Compose project with a **different project name and app port**.
+Do not mark DR PASS until that isolated restore passes user/data and media
+checksum checks. Operator-supplied EC2 terminal access is required.
+
 ### Gate D — AWS disaster recovery (operator and real host required)
 - [ ] Confirm running EC2 commit matches GitHub and secrets aren't placeholders.
 - [ ] Create PostgreSQL custom-format backup and archive private storage volumes.
