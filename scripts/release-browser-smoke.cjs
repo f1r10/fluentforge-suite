@@ -954,7 +954,7 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     await studentPage.getByText("Theory for the student's released lesson.")
       .waitFor({ timeout: 20000 });
-    await studentPage.getByText("locked", { exact: true }).first()
+    await studentPage.getByText("Locked", { exact: true }).first()
       .waitFor({ timeout: 20000 });
     await studentPage.getByRole("button", { name: "I have read this" }).click();
     await studentPage.getByText("1 of 2 required steps completed")
