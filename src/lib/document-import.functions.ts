@@ -2424,6 +2424,57 @@ async function prepareItems(
   sha256: (input: string) => string,
 ) {
   const out: Array<Record<string, unknown>> = [];
+  type ExistingSenseLookup = {
+    id: string; word: string; learning_language: string;
+    part_of_speech: string | null; definition: string | null;
+    notes: string | null;
+    translations: Array<{ language: string; value: string }>;
+  };
+  const normalizedLemma = (word: string) =>
+    word.normalize("NFKC").trim().replace(/\\s+/g, " ")
+      .toLocaleLowerCase("en").replace(/i\\u0307/g, "i");
+  const lookupKey = (language: string, word: string) =>
+    `${language.toLowerCase()}::${normalizedLemma(word)}`;
+
+  const incomingWords = new Map<string, Set<string>>();
+  for (const item of items) {
+    if (item.item_type !== "vocabulary") continue;
+    const word = typeof item.payload?.["word"] === "string"
+      ? String(item.payload["word"]).trim() : "";
+    const language = typeof item.payload?.["learning_language"] === "string"
+      ? String(item.payload["learning_language"]).trim().toLowerCase() : "en";
+    if (!word) continue;
+    if (!incomingWords.has(language)) incomingWords.set(language, new Set());
+    incomingWords.get(language)!.add(word);
+  }
+
+  // Batch-fetch existing senses using an indexed server-only RPC. This
+  // avoids 1,801 HTTP lookups for a single C1 teacher vocabulary document.
+  // Keep a legacy lookup fallback until every deployed DB has migration 0045.
+  const existingByLemma = new Map<string, ExistingSenseLookup[]>();
+  let legacySenseLookup = false;
+  for (const [language, sourceWords] of incomingWords) {
+    if (legacySenseLookup) break;
+    for (const words of chunks([...sourceWords], 40)) {
+      const { data: found, error } = await admin.rpc(
+        "lookup_vocabulary_import_senses",
+        { _language: language, _words: words },
+      );
+      if (error) {
+        if (/could not find the function|function .* does not exist|pgrst202/i.test(error.message)) {
+          legacySenseLookup = true;
+          break;
+        }
+        throw new Error(error.message);
+      }
+      for (const row of (found ?? []) as ExistingSenseLookup[]) {
+        const key = lookupKey(row.learning_language, row.word);
+        const bucket = existingByLemma.get(key) ?? [];
+        bucket.push(row);
+        existingByLemma.set(key, bucket);
+      }
+    }
+  }
 
   for (const item of items) {
     let duplicateOf: string | null = null;
@@ -2468,14 +2519,24 @@ async function prepareItems(
       if (word) {
         // Compare lexical senses, not only the lemma. A single English word
         // can have separate noun/verb and even same-POS source meanings.
-        const { data: possibleSenses, error: duplicateError } = await admin
-          .from("vocabulary_entries")
-          .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations(language,value)")
-          .ilike("word", word)
-          .eq("learning_language", learningLanguage)
-          .is("deleted_at", null)
-          .limit(200);
-        if (duplicateError) throw new Error(duplicateError.message);
+        let possibleSenses: Array<ExistingSenseLookup & {
+          vocabulary_translations?: Array<{ language: string; value: string }>;
+        }> = [];
+        if (legacySenseLookup) {
+          const { data: fetched, error: duplicateError } = await admin
+            .from("vocabulary_entries")
+            .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations(language,value)")
+            .ilike("word", word)
+            .eq("learning_language", learningLanguage)
+            .is("deleted_at", null)
+            .limit(200);
+          if (duplicateError) throw new Error(duplicateError.message);
+          possibleSenses = (fetched ?? []).map((row: ExistingSenseLookup & {
+            vocabulary_translations?: Array<{ language: string; value: string }>;
+          }) => ({ ...row, translations: row.vocabulary_translations ?? [] }));
+        } else {
+          possibleSenses = existingByLemma.get(lookupKey(learningLanguage, word)) ?? [];
+        }
         const sourceTranslations = Array.isArray(raw["translations"])
           ? (raw["translations"] as Array<{ language: string; value: string }>)
           : [];
@@ -2489,20 +2550,7 @@ async function prepareItems(
         };
         const match = classifySenseAgainstExisting(
           incomingSense,
-          ((possibleSenses ?? []) as Array<{
-            id: string; word: string; learning_language: string;
-            part_of_speech: string | null; definition: string | null;
-            notes: string | null;
-            vocabulary_translations: Array<{ language: string; value: string }> | null;
-          }>).map((record) => ({
-            id: record.id,
-            word: record.word,
-            learning_language: record.learning_language,
-            part_of_speech: record.part_of_speech,
-            definition: record.definition,
-            notes: record.notes,
-            translations: record.vocabulary_translations ?? [],
-          })),
+          possibleSenses,
         );
         if (match.exactDuplicateId) {
           duplicateOf = match.exactDuplicateId;
