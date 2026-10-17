@@ -1356,36 +1356,43 @@ export const approveHighConfidenceItems = createServerFn({ method: "POST" })
     z.object({ jobId: z.string().uuid(), threshold: z.number().min(0.5).max(1).default(0.9) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: candidates, error: candidateError } = await context.supabase
-      .from("import_items")
-      .select("id,item_type,payload,duplicate_of,created_entity_id")
-      .eq("job_id", data.jobId)
-      .eq("decision", "pending")
-      .gte("confidence", data.threshold)
-      .is("duplicate_of", null);
-    if (candidateError) throw new Error(candidateError.message);
+    // PostgREST limits single responses, so a 1,801-row vocabulary review
+    // must not silently stop after the first 1,000 high-confidence candidates.
+    let approved = 0;
+    let needsReview = 0;
+    let cursor: string | null = null;
+    while (true) {
+      let query = context.supabase
+        .from("import_items")
+        .select("id,item_type,payload,duplicate_of,created_entity_id")
+        .eq("job_id", data.jobId)
+        .eq("decision", "pending")
+        .gte("confidence", data.threshold)
+        .is("duplicate_of", null)
+        .order("id")
+        .limit(200);
+      if (cursor) query = query.gt("id", cursor);
+      const { data: candidates, error: candidateError } = await query;
+      if (candidateError) throw new Error(candidateError.message);
+      if (!candidates?.length) break;
 
-    const readyIds = (candidates ?? [])
-      .filter(
-        (item) =>
-          !item.created_entity_id &&
-          validateImportItemPayload(item.item_type, item.payload).state ===
-            "ready",
-      )
-      .map((item) => item.id);
-
-    if (readyIds.length) {
-      await updateImportItemDecisionInChunks(
-        context.supabase,
-        readyIds,
-        "approved",
-      );
+      const readyIds = candidates
+        .filter(
+          (item) =>
+            !item.created_entity_id &&
+            validateImportItemPayload(item.item_type, item.payload).state ===
+              "ready",
+        )
+        .map((item) => item.id);
+      if (readyIds.length) {
+        await updateImportItemDecisionInChunks(context.supabase, readyIds, "approved");
+        approved += readyIds.length;
+      }
+      needsReview += candidates.length - readyIds.length;
+      cursor = candidates[candidates.length - 1]!.id;
+      if (candidates.length < 200) break;
     }
-
-    return {
-      approved: readyIds.length,
-      needsReview: (candidates?.length ?? 0) - readyIds.length,
-    };
+    return { approved, needsReview };
   });
 
 export const commitDocumentImport = createServerFn({ method: "POST" })
