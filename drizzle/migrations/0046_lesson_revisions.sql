@@ -163,13 +163,13 @@ create or replace function public.lesson_attempt_summary(
 )
 returns table(step_id uuid, best_score_percent numeric, attempt_count bigint)
 language sql stable security definer set search_path = public
-as $
+as $$
   select a.step_id, max(a.score_percent)::numeric, count(*)::bigint
   from public.student_lesson_attempts a
   where a.student_id = _student_id and a.catalog_id = _catalog_id
     and a.revision = _revision
   group by a.step_id;
-$;
+$$;
 revoke all on function public.lesson_attempt_summary(uuid,uuid,integer)
   from public, anon, authenticated;
 grant execute on function public.lesson_attempt_summary(uuid,uuid,integer)
