@@ -30,6 +30,7 @@ create table if not exists public.lesson_step_progress (
   attempted_at timestamptz,
   best_score_percent numeric(5,2)
     check (best_score_percent between 0 and 100),
+  last_graded_event_id bigint references public.activity_events(id) on delete set null,
   teacher_approved boolean not null default false,
   updated_at timestamptz not null default now(),
   primary key (revision_id,student_id,step_id)
@@ -116,3 +117,61 @@ revoke all on function public.publish_lesson_revision(uuid,uuid) from public;
 revoke all on function public.publish_lesson_revision(uuid,uuid) from authenticated;
 revoke all on function public.publish_lesson_revision(uuid,uuid) from anon;
 grant execute on function public.publish_lesson_revision(uuid,uuid) to service_role;
+
+-- Only authoritative activity_events written by the existing grader can
+-- advance attempt/pass progress. Atomic GREATEST preserves scores across
+-- concurrent student devices and duplicate submissions.
+create or replace function public.record_lesson_step_grade(
+  p_revision_id uuid,
+  p_student_id uuid,
+  p_step_id text,
+  p_score_percent numeric,
+  p_event_id bigint
+) returns void language plpgsql
+set search_path = public as $lesson_grade$
+begin
+  if p_score_percent is not null and
+     (p_score_percent < 0 or p_score_percent > 100) then
+    raise exception 'Score percent out of bounds';
+  end if;
+  if not exists (
+    select 1 from public.activity_events
+      where id=p_event_id and student_id=p_student_id
+  ) then
+    raise exception 'Grading event is missing or does not belong to the student';
+  end if;
+  if not exists (
+    select 1 from public.lesson_revisions as revision,
+      jsonb_array_elements(revision.steps) as step
+    where revision.id=p_revision_id
+      and revision.state='published'
+      and step->>'id'=p_step_id
+      and step->>'kind'='activity'
+  ) then
+    raise exception 'Lesson activity does not belong to published revision';
+  end if;
+  insert into public.lesson_step_progress(
+    revision_id,student_id,step_id,attempted_at,
+    best_score_percent,last_graded_event_id
+  ) values (
+    p_revision_id,p_student_id,p_step_id,now(),
+    p_score_percent,p_event_id
+  )
+  on conflict (revision_id,student_id,step_id) do update set
+    attempted_at=coalesce(public.lesson_step_progress.attempted_at,excluded.attempted_at),
+    best_score_percent=case
+      when excluded.best_score_percent is null then public.lesson_step_progress.best_score_percent
+      when public.lesson_step_progress.best_score_percent is null then excluded.best_score_percent
+      else greatest(public.lesson_step_progress.best_score_percent,excluded.best_score_percent)
+    end,
+    last_graded_event_id=greatest(
+      coalesce(public.lesson_step_progress.last_graded_event_id,0),
+      excluded.last_graded_event_id
+    ),
+    updated_at=now();
+end;
+$lesson_grade$;
+revoke all on function public.record_lesson_step_grade(uuid,uuid,text,numeric,bigint) from public;
+revoke all on function public.record_lesson_step_grade(uuid,uuid,text,numeric,bigint) from authenticated;
+revoke all on function public.record_lesson_step_grade(uuid,uuid,text,numeric,bigint) from anon;
+grant execute on function public.record_lesson_step_grade(uuid,uuid,text,numeric,bigint) to service_role;
