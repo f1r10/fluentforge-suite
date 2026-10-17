@@ -1511,16 +1511,25 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       // Recover any core entries left behind by an interrupted previous
       // batch before creating new rows. Provenance carries the import-item ID,
       // so retries do not duplicate vocabulary entries.
-      const { data: existingCreated, error: existingCreatedError } = await admin
-        .from("vocabulary_entries")
-        .select("id,provenance")
-        .eq("source_file_id", job.source_file_id)
-        .contains("provenance", {
-          import: { job_id: job.id },
-        } as never)
-        .is("deleted_at", null);
-      if (existingCreatedError) {
-        throw new Error(existingCreatedError.message);
+      const existingCreated: Array<{ id: string; provenance: unknown }> = [];
+      for (let offset = 0; ; offset += 200) {
+        const { data: batch, error: existingCreatedError } = await admin
+          .from("vocabulary_entries")
+          .select("id,provenance")
+          .eq("source_file_id", job.source_file_id)
+          .contains("provenance", {
+            import: { job_id: job.id },
+          } as never)
+          .is("deleted_at", null)
+          .order("id")
+          .range(offset, offset + 199);
+        if (existingCreatedError) throw new Error(existingCreatedError.message);
+        const rows = (batch ?? []) as Array<{ id: string; provenance: unknown }>;
+        existingCreated.push(...rows);
+        if (rows.length < 200) break;
+        if (existingCreated.length >= 50_000) {
+          throw new Error("Import recovery exceeds 50,000 rows.");
+        }
       }
 
       const itemToEntity = new Map<string, string>();
