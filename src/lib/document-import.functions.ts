@@ -2431,8 +2431,8 @@ async function prepareItems(
     translations: Array<{ language: string; value: string }>;
   };
   const normalizedLemma = (word: string) =>
-    word.normalize("NFKC").trim().replace(/\\s+/g, " ")
-      .toLocaleLowerCase("en").replace(/i\\u0307/g, "i");
+    word.normalize("NFKC").trim().replace(/\s+/g, " ")
+      .toLocaleLowerCase("en").replace(/i\u0307/g, "i");
   const lookupKey = (language: string, word: string) =>
     `${language.toLowerCase()}::${normalizedLemma(word)}`;
 
