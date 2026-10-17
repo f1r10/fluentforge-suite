@@ -46,6 +46,9 @@ begin
     if new.state <> 'draft' then
       raise exception 'Lesson revisions must start as draft';
     end if;
+  elsif old.state = 'draft' and new.state = 'published'
+    and current_setting('fluentforge.lesson_publish', true) is distinct from 'true' then
+    raise exception 'Use the lesson publication workflow';
   elsif old.state in ('published','superseded') then
     if not (old.state='published' and new.state='superseded'
       and (old.id,old.catalog_id,old.revision,old.title,old.description,
@@ -100,6 +103,7 @@ begin
     where id=p_catalog_id and status='active' and deleted_at is null;
   if not found then raise exception 'Catalog is not active'; end if;
 
+  perform set_config('fluentforge.lesson_publish', 'true', true);
   update public.lesson_revisions
     set state='superseded' where catalog_id=p_catalog_id and state='published';
   update public.lesson_revisions
