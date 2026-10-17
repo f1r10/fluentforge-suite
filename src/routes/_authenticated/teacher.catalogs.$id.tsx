@@ -41,7 +41,6 @@ import { listTopics } from "@/lib/questions.functions";
 import { LEVELS, QUESTION_TYPES } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
 import { useContentLanguages } from "@/lib/content-languages";
-import { LessonEditor } from "@/components/app/LessonEditor";
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 
@@ -328,8 +327,6 @@ function CatalogWorkspace() {
           <Button type="submit" disabled={savingMeta}>{t("save")}</Button>
         </form>
       </section>
-
-      <LessonEditor catalogId={id} items={data.items} />
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
