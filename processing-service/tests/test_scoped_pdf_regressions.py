@@ -230,5 +230,6 @@ def test_real_c1_multisense_glosses_survive_native_candidate_detection():
         "noun", "noun", "verb", "verb",
     ]
     assert [value["notes"] for value in vocabulary] == [
-        "CALCULATION", "IMAGE", "WORKING", "PUBLISH",
+        "Source sense: CALCULATION", "Source sense: IMAGE",
+        "Source sense: WORKING", "Source sense: PUBLISH",
     ]
