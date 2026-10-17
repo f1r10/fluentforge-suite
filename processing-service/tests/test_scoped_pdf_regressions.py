@@ -273,3 +273,41 @@ def test_checkbox_fixed_choice_maps_letter_key_through_option_label():
     assert [item["answer_key"]["correct"] for item in questions] == [
         ["True"], ["False"],
     ]
+
+
+def test_clock_diagram_questions_require_visual_teacher_review():
+    clock_text = (
+        "Exercise 14: Telling the time. What time is it?\n"
+        "81.\n______________\n"
+        "82.\n______________\n"
+    )
+    documents = Extraction(
+        "pdf_layout_native",
+        [{
+            "page": 8, "text": clock_text, "tables": [],
+            "blocks": [
+                {"text": "81.\n____________", "crop": {
+                    "x": .1, "y": .50, "width": .3, "height": .05,
+                }},
+                {"text": "82.\n____________", "crop": {
+                    "x": .5, "y": .52, "width": .3, "height": .05,
+                }},
+            ],
+            "images": [
+                {"xref": 4, "crop": {"x": .1, "y": .45, "width": .2, "height": .1}},
+                {"xref": 5, "crop": {"x": .5, "y": .46, "width": .2, "height": .1}},
+            ],
+        }],
+        [], clock_text, {},
+    )
+    items = detect_candidates(documents, {"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+    assert len(questions) == 2
+    for item in questions:
+        assert item["payload"]["question_type"] == "fill_blank"
+        assert item["payload"].get("import_warnings")
+        assert item["confidence"] <= .45
+        assert any(
+            asset["kind"] == "image_region"
+            for asset in item["payload"]["import_context"]["assets"]
+        )
