@@ -11,6 +11,7 @@ import {
 } from "./grading";
 import { TYPE_BY_ID } from "./question-types";
 import { lessonItemAccess } from "./lesson-access.server";
+import { recordGradedLessonActivity } from "./lesson-grading.server";
 import {
   acceptedVocabularyAnswers,
   gradeVocabularyResponse,
@@ -95,6 +96,7 @@ const vocabularyPracticeInputSchema = z.object({
 
 type LoadedQuestion = {
   id: string;
+  catalog_item_id?: string;
   question_type: string;
   prompt: string;
   instructions: string | null;
@@ -695,9 +697,10 @@ async function loadAllowedQuestions(
   const permittedItems = (catalogItems ?? []).filter(
     (item) => !lessonAccess || lessonAccess.allowedItemIds.has(item.id),
   );
-  const directQuestions = new Set(
-    permittedItems.filter((x) => x.entity_type === "question").map((x) => x.entity_id),
+  const directItems = new Map(
+    permittedItems.filter((x) => x.entity_type === "question").map((x) => [x.entity_id, x.id]),
   );
+  const directQuestions = new Set(directItems.keys());
   const readingIds = new Set(
     permittedItems.filter((x) => x.entity_type === "reading").map((x) => x.entity_id),
   );
@@ -745,7 +748,10 @@ async function loadAllowedQuestions(
     ) {
       permitted = true;
     }
-    if (permitted) allowed.set(row.id, row as LoadedQuestion);
+    if (permitted) allowed.set(row.id, {
+      ...row,
+      catalog_item_id: directItems.get(row.id),
+    } as LoadedQuestion);
   }
 
   return allowed;
@@ -812,8 +818,30 @@ async function gradeAndLog(
           needs_review: result.needs_review,
         } as never,
       })),
-    ).select("id");
+    ).select("id,entity_id");
     if (error) throw new Error(error.message);
+
+    const eventsByQuestionId = new Map<string, number[]>();
+    for (const event of loggedEvents ?? []) {
+      const key = event.entity_id ?? "";
+      const ids = eventsByQuestionId.get(key) ?? [];
+      ids.push(event.id);
+      eventsByQuestionId.set(key, ids);
+    }
+    for (const result of results) {
+      const itemId = loaded.get(result.question_id)?.catalog_item_id;
+      if (!itemId) continue; // contextual readings need aggregate grading
+      const eventId = eventsByQuestionId.get(result.question_id)?.shift();
+      if (eventId === undefined) throw new Error("Question event was not recorded.");
+      const score = result.needs_review ? null : {
+        points: result.score,
+        possible: result.max_score,
+      };
+      await recordGradedLessonActivity(
+        admin, catalogId, studentId, itemId, eventId, score,
+      );
+    }
+
     const { recordReviewEvents } = await import("./review-schedule.server");
     await recordReviewEvents(admin, loggedEvents ?? []);
   }
@@ -974,6 +1002,20 @@ export const submitVocabularyPracticeAnswer = createServerFn({
       } as never,
     }).select("id").single();
     if (activityError) throw new Error(activityError.message);
+    if (data.catalogId && gradedEvent) {
+      const { data: catalogItem, error: catalogItemError } = await admin
+        .from("catalog_items").select("id")
+        .eq("catalog_id", data.catalogId)
+        .eq("entity_type", "vocabulary")
+        .eq("entity_id", entry.id)
+        .maybeSingle();
+      if (catalogItemError) throw new Error(catalogItemError.message);
+      if (!catalogItem) throw new Error("Vocabulary catalog item not found.");
+      await recordGradedLessonActivity(
+        admin, data.catalogId, studentId, catalogItem.id, gradedEvent.id,
+        correct === null ? null : { points: correct ? 1 : 0, possible: 1 },
+      );
+    }
     if (data.mode !== "flashcard" && gradedEvent) {
       const { recordReviewEvents } = await import("./review-schedule.server");
       await recordReviewEvents(admin, [gradedEvent]);
