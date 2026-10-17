@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { getWhoAmI } from "@/lib/teacher.functions";
 import { getStudentLesson, markLessonTheoryViewed } from "@/lib/lesson-mode.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { useI18n } from "@/lib/i18n";
+import { lessonText } from "@/lib/lesson-copy";
 
 export const Route = createFileRoute("/_authenticated/student/lessons/$id")({
   beforeLoad: async () => {
@@ -21,6 +23,8 @@ export const Route = createFileRoute("/_authenticated/student/lessons/$id")({
 });
 
 function StudentLesson() {
+  const { lang } = useI18n();
+  const l = (key: string) => lessonText(lang, key);
   const { id } = Route.useParams();
   const { data: lesson, isPending, error, refetch } = useQuery({
     queryKey: ["student-lesson", id],
@@ -34,30 +38,30 @@ function StudentLesson() {
         catalogId: id, revisionId, stepId,
       }});
       await refetch();
-      toast.success("Theory completed.");
+      toast.success(l("Theory completed."));
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Could not save progress.");
+      toast.error(failure instanceof Error ? failure.message : l("Could not save progress."));
     } finally {
       setBusyStepId(null);
     }
   };
 
-  if (isPending) return <div className="p-6 text-sm text-muted-foreground">Loading lesson…</div>;
+  if (isPending) return <div className="p-6 text-sm text-muted-foreground">{l("Loading lesson…")}</div>;
   if (error) return <div role="alert" className="p-6 text-sm">{error.message}</div>;
-  if (!lesson) return <div className="p-6 text-sm">No published lesson is assigned to this catalog.</div>;
+  if (!lesson) return <div className="p-6 text-sm">{l("No published lesson is assigned to this catalog.")}</div>;
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <Link to="/student/catalogs/$id" params={{ id }}
-        className="text-sm text-muted-foreground underline">← Back to catalog</Link>
+        className="text-sm text-muted-foreground underline">← {l("Back to catalog")}</Link>
       <div>
         <h1 className="text-2xl font-semibold">{lesson.title}</h1>
         {lesson.description && <p className="mt-2 text-sm">{lesson.description}</p>}
         <p className="mt-2 text-xs text-muted-foreground">
-          Revision {lesson.revision} · {lesson.completedRequired} of {lesson.totalRequired} required steps completed
+          {l("Revision")} {lesson.revision} · {lesson.completedRequired} {l("of")} {lesson.totalRequired} {l("required steps completed")}
         </p>
       </div>
-      <div className="h-2 overflow-hidden rounded-md bg-muted" aria-label="Lesson progress">
+      <div className="h-2 overflow-hidden rounded-md bg-muted" aria-label={l("Lesson progress")}>
         <div className="h-full bg-primary" style={{
           width: lesson.totalRequired
             ? `${Math.round(100 * lesson.completedRequired / lesson.totalRequired)}%`
@@ -72,15 +76,15 @@ function StudentLesson() {
                 {index + 1}. {step.title}
               </h2>
               <p className="text-xs text-muted-foreground">
-                {step.kind === "theory" ? "Theory" : "Activity"} ·
-                {step.required ? " Required" : " Optional"} · {step.state}
+                {l(step.kind === "theory" ? "Theory" : "Activity")} ·
+                {l(step.required ? "Required" : "Optional")} · {l(step.state)}
               </p>
             </div>
-            <span className="rounded-md bg-muted px-2 py-1 text-xs">{step.state}</span>
+            <span className="rounded-md bg-muted px-2 py-1 text-xs">{l(step.state)}</span>
           </div>
           {step.state === "locked" && (
             <p className="text-sm text-muted-foreground">
-              Complete the previous required activities to unlock this step.
+              {l("Complete the previous required activities to unlock this step.")}
             </p>
           )}
           {step.kind === "theory" && step.state !== "locked" && (
@@ -89,7 +93,7 @@ function StudentLesson() {
               {step.state !== "completed" && (
                 <Button onClick={() => markViewed(lesson.id, step.id)}
                   disabled={busyStepId !== null}>
-                  {busyStepId === step.id ? "Saving…" : "I have read this"}
+                  {l(busyStepId === step.id ? "Saving…" : "I have read this")}
                 </Button>
               )}
             </>
@@ -97,7 +101,7 @@ function StudentLesson() {
           {step.kind === "activity" && step.state === "available" && (
             <Button asChild variant="outline">
               <Link to="/student/catalogs/$id" params={{ id }}>
-                Practise this lesson activity
+                {l("Practise this lesson activity")}
               </Link>
             </Button>
           )}
@@ -105,7 +109,7 @@ function StudentLesson() {
       ))}
       {lesson.complete && (
         <p className="rounded-md border p-4 text-sm font-medium">
-          Lesson complete. Your results are preserved for this revision.
+          {l("Lesson complete. Your results are preserved for this revision.")}
         </p>
       )}
     </main>
