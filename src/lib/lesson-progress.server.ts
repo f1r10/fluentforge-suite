@@ -11,6 +11,7 @@ type PublishedStep = LessonStepRule & {
   entity_type: "question" | "vocabulary" | "reading" | "listening";
   entity_id: string;
   question_version?: number | null;
+  title?: string | null;
 };
 type Publication = {
   catalog_id: string;
@@ -48,9 +49,11 @@ export async function lessonProgress(
     db(admin).from("student_lesson_views")
       .select("step_id").eq("student_id", studentId)
       .eq("catalog_id", lesson.catalog_id).eq("revision", lesson.revision),
-    db(admin).from("student_lesson_attempts")
-      .select("step_id,score_percent").eq("student_id", studentId)
-      .eq("catalog_id", lesson.catalog_id).eq("revision", lesson.revision),
+    db(admin).rpc("lesson_attempt_summary", {
+      _student_id: studentId,
+      _catalog_id: lesson.catalog_id,
+      _revision: lesson.revision,
+    }),
   ]);
   if (views.error) throw new Error(views.error.message);
   if (attempts.error) throw new Error(attempts.error.message);
@@ -60,9 +63,9 @@ export async function lessonProgress(
   }
   for (const row of attempts.data ?? []) {
     const existing = outcomes.get(row.step_id) ?? { id: row.step_id };
-    const score = Number(row.score_percent);
+    const score = Number(row.best_score_percent);
     outcomes.set(row.step_id, {
-      ...existing, attempted: true,
+      ...existing, attempted: Number(row.attempt_count) > 0,
       bestScorePercent: Math.max(existing.bestScorePercent ?? 0, score),
     });
   }
@@ -117,4 +120,66 @@ function stepVersionMatches(
   return typeof publishedVersion === "number" &&
     typeof attemptedVersion === "number" &&
     publishedVersion === attemptedVersion;
+}
+
+
+/** Content availability is evaluated from server-verified completed steps.
+ * No publication => exact legacy catalog behavior remains unchanged.
+ */
+export async function permittedLessonContent(
+  admin: Admin, studentId: string, catalogId: string,
+): Promise<Set<string> | null> {
+  const published = await latestPublishedLesson(admin, catalogId);
+  if (!published) return null;
+  const progress = await lessonProgress(admin, studentId, published);
+  const permittedSteps = new Set(
+    progress.steps.filter((step) => step.state !== "locked").map((step) => step.id),
+  );
+  return new Set(published.steps.filter((step) => permittedSteps.has(step.id))
+    .map((step) => step.entity_type + ":" + step.entity_id));
+}
+
+/** Reject direct API attempts to answer a locked lesson's questions.
+ * Questions within an available reading/listening block remain permitted.
+ */
+export async function assertLessonQuestionsAllowed(
+  admin: Admin, studentId: string, catalogId: string,
+  questions: Array<{
+    id: string;
+    reading_question_set_id: string | null;
+    listening_question_set_id: string | null;
+  }>,
+): Promise<void> {
+  const allowed = await permittedLessonContent(admin, studentId, catalogId);
+  if (!allowed) return;
+  const unavailable = questions.filter((item) => !allowed.has("question:" + item.id));
+  if (!unavailable.length) return;
+
+  const readingIds = [...new Set(unavailable.map((q) => q.reading_question_set_id)
+    .filter((id): id is string => !!id))];
+  const listeningIds = [...new Set(unavailable.map((q) => q.listening_question_set_id)
+    .filter((id): id is string => !!id))];
+  const [readingSets, listeningSets] = await Promise.all([
+    readingIds.length ? admin.from("reading_question_sets")
+      .select("id,reading_id").in("id", readingIds)
+      : Promise.resolve({ data: [], error: null }),
+    listeningIds.length ? admin.from("listening_question_sets")
+      .select("id,listening_id").in("id", listeningIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (readingSets.error) throw new Error(readingSets.error.message);
+  if (listeningSets.error) throw new Error(listeningSets.error.message);
+  const readingParents = new Map((readingSets.data ?? []).map((r) => [r.id, r.reading_id]));
+  const listeningParents = new Map((listeningSets.data ?? []).map((r) => [r.id, r.listening_id]));
+  for (const question of unavailable) {
+    const readingParent = question.reading_question_set_id
+      ? readingParents.get(question.reading_question_set_id) : null;
+    const listeningParent = question.listening_question_set_id
+      ? listeningParents.get(question.listening_question_set_id) : null;
+    if ((readingParent && allowed.has("reading:" + readingParent)) ||
+        (listeningParent && allowed.has("listening:" + listeningParent))) {
+      continue;
+    }
+    throw new Error("Finish the preceding lesson steps before answering this question.");
+  }
 }
