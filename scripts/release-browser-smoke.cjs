@@ -405,6 +405,43 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] teacher approved vocabulary with missing POS; bulk auto-approval was blocked");
 
+    // A lemma alone is not a unique vocabulary sense. This must work across
+    // separate import jobs (not just two rows in an initially empty batch).
+    for (const sense of [
+      { kind: "noun", definition: "a job", az: "iş" },
+      { kind: "verb", definition: "to operate", az: "işləmək" },
+    ]) {
+      await gotoHydrated(page, "/teacher/sources");
+      await page
+        .getByRole("combobox", { name: "Import into", exact: true })
+        .selectOption("vocabulary");
+      await page.locator('input[type="file"]').setInputFiles({
+        name: `release-polyseme-${sense.kind}.csv`,
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+          "word,definition,part_of_speech,az,level\n" +
+          `releasepolyseme,${sense.definition},${sense.kind},${sense.az},A1\n`,
+          "utf8",
+        ),
+      });
+      const senseDialog = page.getByRole("dialog");
+      await senseDialog.getByText(/^(needs_review|completed)$/)
+        .waitFor({ timeout: 60000 });
+      const row = senseDialog.locator("article")
+        .filter({ hasText: "releasepolyseme" }).first();
+      await row.waitFor({ timeout: 20000 });
+      assert(
+        !(await row.getByText("duplicate", { exact: true }).count()),
+        "A different part of speech must not be classified as an exact duplicate.",
+      );
+      await senseDialog.getByRole("button", { name: /Approve all valid/ }).click();
+      await senseDialog.getByRole("button", { name: /Import approved/ }).click();
+      await senseDialog.getByText("completed", { exact: true })
+        .waitFor({ timeout: 20000 });
+      await page.keyboard.press("Escape");
+    }
+    console.log("[ok] two independent senses of one lemma survived separate approved imports");
+
     await gotoHydrated(page, "/teacher/catalogs");
     await page
       .getByRole("button", { name: /^(New catalog|Add catalog)$/ })
