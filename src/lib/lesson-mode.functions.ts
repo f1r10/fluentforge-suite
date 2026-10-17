@@ -274,7 +274,8 @@ export const getStudentLesson = createServerFn({ method: "GET" })
       steps: progress.steps.map((step) => {
         const definition = steps.find((entry) => entry.id === step.id)!;
         return {
-          id: step.id, title: definition.title, kind: definition.kind,
+          id: step.id, title: step.state === "locked" ? "Locked step" : definition.title,
+          kind: definition.kind,
           required: step.required, mode: step.mode, state: step.state,
           // Locked activities may not receive item IDs or theory content.
           itemId: step.state === "locked" ? null : definition.itemId ?? null,
