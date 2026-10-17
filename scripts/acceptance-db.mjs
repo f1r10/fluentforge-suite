@@ -127,6 +127,30 @@ async function verifySchemaSecurity() {
     pass("Service-only RPC privileges are enforced");
   }
 
+  // Guardrail for lesson completion: service-role execution alone does not
+  // establish that a grading event belongs to the catalog activity. Require
+  // explicit binding and prevent outside publication/supersession.
+  const lessonFunctions = await sql`
+    select p.proname, pg_get_functiondef(p.oid) as body
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('record_lesson_step_grade', 'protect_published_lesson_revision')
+  `;
+  const lessonByName = new Map(lessonFunctions.map((x) => [x.proname, x.body]));
+  const gradeDef = lessonByName.get("record_lesson_step_grade") ?? "";
+  const revisionDef = lessonByName.get("protect_published_lesson_revision") ?? "";
+  if (!gradeDef.includes("catalog_id") || !gradeDef.includes("entity_id") ||
+      !gradeDef.includes("event_type") || !gradeDef.includes("score_percent")) {
+    fail("Lesson grade RPC must bind trusted event to catalog/entity and score.");
+  } else {
+    pass("Lesson grade RPC verifies catalog, entity, event type and score");
+  }
+  if (!revisionDef.includes("fluentforge.lesson_publish")) {
+    fail("Published lesson transitions must be restricted to atomic publisher.");
+  } else {
+    pass("Published lesson immutability guard requires publication context");
+  }
+
   const resetColumns = await sql`
     select column_name
     from information_schema.columns
