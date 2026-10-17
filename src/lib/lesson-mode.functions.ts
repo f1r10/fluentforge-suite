@@ -123,6 +123,15 @@ async function verifyPublishableActivities(catalogId: string, steps: LessonStep[
   if ((items ?? []).length !== itemIds.length) {
     throw new Error("The lesson references removed catalog activities.");
   }
+  // Reading/Listening contain multiple contextual questions. An individual
+  // answer cannot safely count as a passing score for their whole activity.
+  // They remain available in legacy catalogs but are not publishable steps
+  // until their aggregate server grading is implemented and tested.
+  if ((items ?? []).some((item) =>
+    item.entity_type === "reading" || item.entity_type === "listening"
+  )) {
+    throw new Error("Reading and Listening steps need aggregate grading before publishing.");
+  }
   for (const type of ["question", "vocabulary", "reading", "listening"] as const) {
     const table = {
       question: "questions", vocabulary: "vocabulary_entries",
