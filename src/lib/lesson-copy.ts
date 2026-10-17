@@ -3,6 +3,9 @@
  */
 const en: Record<string, string> = {
   "Back to catalog": "Back to catalog",
+  "Theory completed.": "Theory completed.",
+  "Could not save progress.": "Could not save progress.",
+  "Lesson progress": "Lesson progress",
   "Lesson Mode": "Lesson Mode",
   "My lesson": "My lesson",
   "Save draft": "Save draft",
@@ -47,7 +50,8 @@ const en: Record<string, string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.": "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.",
 };
 const az: Record<string,string> = {
-  "Back to catalog":"Kataloqa qayıt","Lesson Mode":"Ardıcıl dərs",
+  "Back to catalog":"Kataloqa qayıt",
+  "Theory completed.":"Qayda tamamlandı.", "Could not save progress.":"İrəliləyiş saxlanmadı.", "Lesson progress":"Dərs irəliləyişi","Lesson Mode":"Ardıcıl dərs",
   "My lesson":"Dərsim","Save draft":"Qaralamanı saxla",
   "Publish draft":"Dərc et","Published revision":"Dərc edilmiş versiya",
   "Lesson title":"Dərsin adı","Description":"Təsvir",
@@ -72,7 +76,8 @@ const az: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Kataloq materiallarından ardıcıl dərs qur. Yeni versiya köhnə tələbə nəticələrini dəyişmir.",
 };
 const ru: Record<string,string> = {
-  "Back to catalog":"Вернуться в каталог","Lesson Mode":"Последовательный урок",
+  "Back to catalog":"Вернуться в каталог",
+  "Theory completed.":"Теория завершена.", "Could not save progress.":"Не удалось сохранить прогресс.", "Lesson progress":"Прогресс урока","Lesson Mode":"Последовательный урок",
   "My lesson":"Мой урок","Save draft":"Сохранить черновик","Publish draft":"Опубликовать",
   "Published revision":"Опубликованная версия","Lesson title":"Название урока",
   "Description":"Описание","Lock later required activities until earlier required steps are completed":"Открывать следующие обязательные шаги только после предыдущих",
@@ -97,7 +102,8 @@ const ru: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Создайте урок из материалов каталога. Новая версия не изменит прежние результаты учащихся.",
 };
 const tr: Record<string,string> = {
-  "Back to catalog":"Kataloğa dön","Lesson Mode":"Sıralı ders","My lesson":"Dersim",
+  "Back to catalog":"Kataloğa dön",
+  "Theory completed.":"Konu tamamlandı.", "Could not save progress.":"İlerleme kaydedilemedi.", "Lesson progress":"Ders ilerlemesi","Lesson Mode":"Sıralı ders","My lesson":"Dersim",
   "Save draft":"Taslağı kaydet","Publish draft":"Yayımla",
   "Published revision":"Yayımlanan sürüm","Lesson title":"Ders adı","Description":"Açıklama",
   "Lock later required activities until earlier required steps are completed":"Önceki zorunlu adımlar tamamlanmadan sonrakileri kilitle",
