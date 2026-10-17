@@ -299,6 +299,17 @@ function validateImportItemPayload(
       return { state: "ready", message: null };
     }
     if (itemType === "vocabulary") {
+      const reviewWarnings =
+        payload && typeof payload === "object" &&
+        Array.isArray((payload as Record<string, unknown>)["import_warnings"])
+          ? (payload as Record<string, unknown>)["import_warnings"] as unknown[]
+          : [];
+      if (reviewWarnings.length) {
+        return {
+          state: "needs_fix",
+          message: reviewWarnings.map(String).join(" "),
+        };
+      }
       const parsed = vocabularyImportPayloadSchema.parse(payload);
       const suspiciousRawRow =
         /^\s*\d{1,4}[.)]\s+/.test(parsed.word) ||
