@@ -18,6 +18,7 @@ type Publication = {
   revision: number;
   title: string;
   sequential: boolean;
+  enforce_locks: boolean;
   steps: PublishedStep[];
   published_at: string;
 };
@@ -33,7 +34,7 @@ export async function latestPublishedLesson(
   admin: Admin, catalogId: string,
 ): Promise<Publication | null> {
   const { data, error } = await db(admin).from("lesson_publications")
-    .select("catalog_id,revision,title,sequential,steps,published_at")
+    .select("catalog_id,revision,title,sequential,enforce_locks,steps,published_at")
     .eq("catalog_id", catalogId).order("revision", { ascending: false })
     .limit(1).maybeSingle();
   if (error) throw new Error(error.message);
@@ -130,7 +131,7 @@ export async function permittedLessonContent(
   admin: Admin, studentId: string, catalogId: string,
 ): Promise<Set<string> | null> {
   const published = await latestPublishedLesson(admin, catalogId);
-  if (!published) return null;
+  if (!published || !published.enforce_locks) return null;
   const progress = await lessonProgress(admin, studentId, published);
   const permittedSteps = new Set(
     progress.steps.filter((step) => step.state !== "locked").map((step) => step.id),
