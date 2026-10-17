@@ -55,6 +55,8 @@ async function verifySchemaSecurity() {
     "export_jobs",
     "backups",
     "audit_logs",
+    "lesson_revisions",
+    "lesson_step_progress",
   ];
   const rlsRows = await sql`
     select c.relname as table_name, c.relrowsecurity as enabled
@@ -85,6 +87,8 @@ async function verifySchemaSecurity() {
     "student_practice_daily_stats",
     "student_streak_stats",
     "student_domain_progress",
+    "publish_lesson_revision",
+    "record_lesson_step_grade",
   ];
   const functionRows = await sql`
     select
