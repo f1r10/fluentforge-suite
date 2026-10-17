@@ -233,3 +233,43 @@ def test_real_c1_multisense_glosses_survive_native_candidate_detection():
         "Source sense: CALCULATION", "Source sense: IMAGE",
         "Source sense: WORKING", "Source sense: PUBLISH",
     ]
+
+
+def test_beginner_ab_labeled_checkbox_true_false_without_key():
+    # The actual 100-question Beginner PDF prints True/False under A/B
+    # checkboxes instead of canonical naked True/False labels.
+    documents = exam([
+        "76. Sarah and Colin live in a new house.\n"
+        "A  \uf072 TRUE\nB \uf072 FALSE\n"
+        "77. Sarah stays at home every day.\n"
+        "A  \uf072 TRUE\nB \uf072 FALSE\n",
+    ])
+    questions = [
+        item["payload"] for item in detect_candidates(
+            documents, profile={"expected_content": "questions"}
+        ) if item["item_type"] == "question"
+    ]
+    assert len(questions) == 2
+    for question in questions:
+        assert question["question_type"] == "true_false"
+        assert question["payload"]["options"] == ["True", "False"]
+        # Source does not provide a key; require teacher to supply it.
+        assert question["answer_key"] == {"correct": []}
+
+
+def test_checkbox_fixed_choice_maps_letter_key_through_option_label():
+    documents = exam([
+        "1. A week has seven days.\nA) TRUE\nB) FALSE\n"
+        "2. The sun is cold.\nA) FALSE\nB) TRUE\n",
+        "Answer Key:\n1. A\n2. A\n",
+    ])
+    questions = [
+        item["payload"] for item in detect_candidates(
+            documents, profile={"expected_content": "questions"}
+        ) if item["item_type"] == "question"
+    ]
+    assert len(questions) == 2
+    assert [item["question_type"] for item in questions] == ["true_false"] * 2
+    assert [item["answer_key"]["correct"] for item in questions] == [
+        ["True"], ["False"],
+    ]
