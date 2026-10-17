@@ -10,6 +10,7 @@ import {
   type Scoring,
 } from "./grading";
 import { TYPE_BY_ID } from "./question-types";
+import { lessonItemAccess } from "./lesson-access.server";
 import {
   acceptedVocabularyAnswers,
   gradeVocabularyResponse,
@@ -263,7 +264,10 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       .order("created_at");
     if (itemsError) throw new Error(itemsError.message);
 
-    const items = rawItems ?? [];
+    const lessonAccess = await lessonItemAccess(admin, data.catalogId, studentId);
+    const items = (rawItems ?? []).filter(
+      (item) => !lessonAccess || lessonAccess.allowedItemIds.has(item.id),
+    );
     const directQuestionIds = items.filter((x) => x.entity_type === "question").map((x) => x.entity_id);
     const vocabularyIds = items.filter((x) => x.entity_type === "vocabulary").map((x) => x.entity_id);
     const readingIds = items.filter((x) => x.entity_type === "reading").map((x) => x.entity_id);
@@ -666,6 +670,7 @@ async function loadAllowedQuestions(
   admin: Admin,
   catalogId: string,
   questionIds: string[],
+  studentId: string,
 ) {
   const unique = [...new Set(questionIds)];
   if (!unique.length) return new Map<string, LoadedQuestion>();
@@ -682,18 +687,22 @@ async function loadAllowedQuestions(
 
   const { data: catalogItems, error: catalogError } = await admin
     .from("catalog_items")
-    .select("entity_type,entity_id")
+    .select("id,entity_type,entity_id")
     .eq("catalog_id", catalogId);
   if (catalogError) throw new Error(catalogError.message);
 
+  const lessonAccess = await lessonItemAccess(admin, catalogId, studentId);
+  const permittedItems = (catalogItems ?? []).filter(
+    (item) => !lessonAccess || lessonAccess.allowedItemIds.has(item.id),
+  );
   const directQuestions = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "question").map((x) => x.entity_id),
+    permittedItems.filter((x) => x.entity_type === "question").map((x) => x.entity_id),
   );
   const readingIds = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "reading").map((x) => x.entity_id),
+    permittedItems.filter((x) => x.entity_type === "reading").map((x) => x.entity_id),
   );
   const listeningIds = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "listening").map((x) => x.entity_id),
+    permittedItems.filter((x) => x.entity_type === "listening").map((x) => x.entity_id),
   );
 
   const readingSetIds = (questions ?? [])
@@ -760,6 +769,7 @@ async function gradeAndLog(
     admin,
     catalogId,
     answers.map((answer) => answer.questionId),
+    studentId,
   );
 
   if (loaded.size !== new Set(answers.map((answer) => answer.questionId)).size) {
@@ -835,6 +845,10 @@ export const submitVocabularyPracticeAnswer = createServerFn({
         throw new Error(
           "This vocabulary entry is not available in the catalog.",
         );
+      }
+      const access = await lessonItemAccess(admin, data.catalogId, studentId);
+      if (access && !access.allowedItemIds.has(catalogItem.id)) {
+        throw new Error("Complete the earlier required lesson steps first.");
       }
     }
 
@@ -1059,6 +1073,7 @@ export const finishPractice = createServerFn({ method: "POST" })
         admin,
         data.catalogId,
         skippedIds,
+        studentId,
       );
       if (allowed.size !== skippedIds.length) {
         throw new Error(
