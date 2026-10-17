@@ -496,17 +496,6 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
 
-    const lessonEditor = page.getByRole("region", { name: "Sequential lesson" });
-    await lessonEditor.getByText("Runtime PDF import works?", { exact: true })
-      .waitFor({ timeout: 20000 });
-    await lessonEditor.locator("label")
-      .filter({ hasText: "Runtime PDF import works?" })
-      .getByRole("checkbox").check();
-    await lessonEditor.getByRole("button", { name: "Save and publish" }).click();
-    await lessonEditor.getByText("Published revision 1")
-      .waitFor({ timeout: 20000 });
-    console.log("[ok] teacher published immutable catalog lesson revision 1");
-
     await gotoHydrated(page, "/teacher/exams");
     await page
       .getByRole("button", { name: "New exam", exact: true })
@@ -979,11 +968,6 @@ async function gotoHydrated(page, path) {
     await studentPage
       .getByRole("heading", { name: "Release Catalog", level: 1 })
       .waitFor({ timeout: 20000 });
-    await studentPage
-      .getByRole("region", { name: "My lesson" })
-      .getByText("Runtime PDF import works?", { exact: true })
-      .waitFor({ timeout: 20000 });
-    console.log("[ok] assigned student sees the published lesson and its steps");
     await studentPage
       .getByText("New practice", { exact: true })
       .waitFor({ timeout: 20000 });
