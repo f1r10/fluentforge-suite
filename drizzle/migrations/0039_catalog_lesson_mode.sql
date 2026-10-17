@@ -52,6 +52,7 @@ begin
     raise exception 'Use the lesson publication workflow';
   elsif old.state in ('published','superseded') then
     if not (old.state='published' and new.state='superseded'
+      and current_setting('fluentforge.lesson_publish', true) = 'true'
       and (old.id,old.catalog_id,old.revision,old.title,old.description,
            old.sequential,old.steps,old.created_at,old.published_at)
        is not distinct from
@@ -129,27 +130,73 @@ create or replace function public.record_lesson_step_grade(
   p_event_id bigint
 ) returns void language plpgsql
 set search_path = public as $lesson_grade$
+declare
+  _event public.activity_events%rowtype;
+  _catalog_id uuid;
+  _entity_id uuid;
+  _entity_type text;
+  _expected_percent numeric;
 begin
   if p_score_percent is not null and
      (p_score_percent < 0 or p_score_percent > 100) then
     raise exception 'Score percent out of bounds';
   end if;
-  if not exists (
-    select 1 from public.activity_events
-      where id=p_event_id and student_id=p_student_id
-  ) then
-    raise exception 'Grading event is missing or does not belong to the student';
+
+  select * into _event from public.activity_events where id = p_event_id;
+  if not found or _event.student_id is distinct from p_student_id
+     or _event.category <> 'practice' then
+    raise exception 'Trusted grading event is missing or belongs to another student';
   end if;
-  if not exists (
-    select 1 from public.lesson_revisions as revision,
-      jsonb_array_elements(revision.steps) as step
-    where revision.id=p_revision_id
-      and revision.state='published'
-      and step->>'id'=p_step_id
-      and step->>'kind'='activity'
-  ) then
-    raise exception 'Lesson activity does not belong to published revision';
+
+  select revision.catalog_id, item.entity_type, item.entity_id
+    into _catalog_id, _entity_type, _entity_id
+  from public.lesson_revisions revision
+  join lateral jsonb_array_elements(revision.steps) step on true
+  join public.catalog_items item
+    on item.id = (step ->> 'itemId')::uuid
+   and item.catalog_id = revision.catalog_id
+  where revision.id = p_revision_id and revision.state = 'published'
+    and step ->> 'id' = p_step_id and step ->> 'kind' = 'activity';
+  if not found then
+    raise exception 'Lesson activity does not belong to the published revision';
   end if;
+
+  if _event.details ->> 'catalog_id' is distinct from _catalog_id::text
+     or _event.entity_id is distinct from _entity_id
+     or _event.entity_type is distinct from _entity_type
+     or not (
+       (_entity_type = 'question' and _event.event_type = 'practice_answer')
+       or (_entity_type = 'vocabulary' and _event.event_type in ('vocabulary_answer','vocabulary_rating'))
+     ) then
+    raise exception 'Grading event is unrelated to this lesson activity';
+  end if;
+
+  -- No score may be created for a flashcard rating or an ungraded answer.
+  if _event.event_type = 'vocabulary_rating' and p_score_percent is not null then
+    raise exception 'Vocabulary flashcards do not supply a graded score';
+  end if;
+  if _entity_type = 'vocabulary' and _event.event_type = 'vocabulary_answer'
+     and p_score_percent is not null then
+    _expected_percent := case when _event.is_correct then 100
+      when _event.is_correct = false then 0 else null end;
+    if _expected_percent is null or p_score_percent <> _expected_percent then
+      raise exception 'Vocabulary score differs from verified answer result';
+    end if;
+  end if;
+  if _entity_type = 'question' and p_score_percent is not null then
+    if coalesce((_event.details ->> 'needs_review')::boolean,false)
+       or not (_event.details ? 'score' and _event.details ? 'max_score')
+       or coalesce((_event.details ->> 'max_score')::numeric,0) <= 0 then
+      raise exception 'Question is ungraded or score evidence is missing';
+    end if;
+    _expected_percent := least(100, greatest(0,
+      100 * (_event.details ->> 'score')::numeric /
+      (_event.details ->> 'max_score')::numeric));
+    if abs(_expected_percent - p_score_percent) > 0.01 then
+      raise exception 'Lesson score differs from the canonical graded event';
+    end if;
+  end if;
+
   insert into public.lesson_step_progress(
     revision_id,student_id,step_id,attempted_at,
     best_score_percent,last_graded_event_id
