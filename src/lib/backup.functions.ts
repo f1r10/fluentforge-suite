@@ -51,6 +51,8 @@ const RESTORE_ORDER: BackupTable[] = [
   "student_vocabulary_state",
   "catalogs",
   "catalog_items",
+  "lesson_revisions",
+  "lesson_step_progress",
   "catalog_assignments",
   "exams",
   "exam_sections",
