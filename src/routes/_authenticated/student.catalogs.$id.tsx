@@ -26,6 +26,7 @@ import {
 } from "@/components/app/VocabularyPracticeCard";
 import type { VocabularyPracticeMode } from "@/lib/vocabulary-practice";
 import { useI18n } from "@/lib/i18n";
+import { LessonProgress } from "@/components/app/LessonProgress";
 
 const practiceQuery = (id: string) =>
   queryOptions({
@@ -224,6 +225,17 @@ function PracticePage() {
         </div>
       </header>
 
+      <LessonProgress
+        catalogId={id}
+        titles={data.blocks.map((block) => ({
+          id: block.item_id,
+          title: block.kind === "question" ? block.question.prompt
+            : block.kind === "vocabulary" ? block.entry.word
+            : block.kind === "reading" ? block.reading.title
+            : block.listening.title,
+        }))}
+      />
+
       <section className="mb-6 space-y-3 rounded-md border border-border p-4">
         <div>
           <div className="font-medium">{t("new_practice")}</div>
@@ -335,8 +347,8 @@ function PracticePage() {
           if (block.kind === "question") {
             const question = block.question as PracticeQuestion;
             return (
+              <div key={block.item_id} id={"lesson-item-" + block.item_id}>
               <PracticeQuestionCard
-                key={block.item_id}
                 question={question}
                 response={currentResponse(question)}
                 feedback={feedback[question.id]}
@@ -347,27 +359,29 @@ function PracticePage() {
                 onCheck={() => checkAnswer(question)}
                 onReveal={() => setRevealed((prev) => ({ ...prev, [question.id]: true }))}
               />
+              </div>
             );
           }
 
           if (block.kind === "vocabulary") {
             const entry = block.entry as VocabularyPracticeEntry;
             return (
+              <div key={block.item_id} id={"lesson-item-" + block.item_id}>
               <VocabularyPracticeCard
-                key={block.item_id}
                 catalogId={id}
                 sessionId={sessionId}
                 entry={entry}
                 allEntries={vocabularyEntries}
                 mode={vocabularyMode}
               />
+              </div>
             );
           }
 
           if (block.kind === "reading") {
             return (
+              <div key={block.item_id} id={"lesson-item-" + block.item_id}>
               <ReadingBlock
-                key={block.item_id}
                 reading={block.reading as unknown as ReadingData}
                 responses={responses}
                 feedback={feedback}
@@ -378,12 +392,13 @@ function PracticePage() {
                 onCheck={checkAnswer}
                 onReveal={(questionId) => setRevealed((prev) => ({ ...prev, [questionId]: true }))}
               />
+              </div>
             );
           }
 
           return (
+            <div key={block.item_id} id={"lesson-item-" + block.item_id}>
             <ListeningBlock
-              key={block.item_id}
               listening={block.listening as unknown as ListeningData}
               responses={responses}
               feedback={feedback}
@@ -394,6 +409,7 @@ function PracticePage() {
               onCheck={checkAnswer}
               onReveal={(questionId) => setRevealed((prev) => ({ ...prev, [questionId]: true }))}
             />
+            </div>
           );
         })}
       </div>
