@@ -1,0 +1,86 @@
+-- Additive Lesson Mode foundation: existing catalog practice is unchanged.
+-- Published snapshots are immutable except for status transition to superseded.
+create table if not exists public.lesson_revisions (
+  id uuid primary key default gen_random_uuid(),
+  catalog_id uuid not null references public.catalogs(id) on delete cascade,
+  revision integer not null check (revision > 0),
+  state text not null default 'draft'
+    check (state in ('draft','published','superseded')),
+  title text not null check (length(trim(title)) between 1 and 200),
+  description text not null default '',
+  sequential boolean not null default true,
+  steps jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(steps) = 'array' and jsonb_array_length(steps) between 1 and 100),
+  created_at timestamptz not null default now(),
+  published_at timestamptz,
+  unique(catalog_id, revision)
+);
+create unique index if not exists lesson_revisions_draft_by_catalog_uidx
+  on public.lesson_revisions(catalog_id) where state='draft';
+create unique index if not exists lesson_revisions_published_by_catalog_uidx
+  on public.lesson_revisions(catalog_id) where state='published';
+create index if not exists lesson_revisions_recent_idx
+  on public.lesson_revisions(catalog_id,revision desc);
+
+create table if not exists public.lesson_step_progress (
+  revision_id uuid not null references public.lesson_revisions(id) on delete cascade,
+  student_id uuid not null references public.students(id) on delete cascade,
+  step_id text not null check (length(step_id) between 1 and 100),
+  viewed_at timestamptz,
+  attempted_at timestamptz,
+  best_score_percent numeric(5,2)
+    check (best_score_percent between 0 and 100),
+  teacher_approved boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (revision_id,student_id,step_id)
+);
+create index if not exists lesson_step_progress_student_idx
+  on public.lesson_step_progress(student_id,updated_at desc);
+
+alter table public.lesson_revisions enable row level security;
+alter table public.lesson_step_progress enable row level security;
+drop policy if exists "teacher manage lesson revisions" on public.lesson_revisions;
+create policy "teacher manage lesson revisions" on public.lesson_revisions
+  for all to authenticated using (public.is_teacher())
+  with check (public.is_teacher());
+drop policy if exists "teacher manage lesson progress" on public.lesson_step_progress;
+create policy "teacher manage lesson progress" on public.lesson_step_progress
+  for all to authenticated using (public.is_teacher())
+  with check (public.is_teacher());
+
+-- Student access is exclusively through checked server functions. RLS denies
+-- raw table access to students; service role is only used after authorization.
+grant all on public.lesson_revisions,public.lesson_step_progress to service_role;
+grant select,insert,update,delete on public.lesson_revisions,public.lesson_step_progress to authenticated;
+
+-- The sole publication transition is atomic; clients never update snapshots
+-- directly. EXECUTE is restricted to server service role (not web users).
+create or replace function public.publish_lesson_revision(
+  p_catalog_id uuid, p_draft_id uuid
+) returns uuid
+language plpgsql set search_path = public
+as $$
+declare
+  draft_row public.lesson_revisions%rowtype;
+begin
+  select * into draft_row from public.lesson_revisions
+    where id=p_draft_id and catalog_id=p_catalog_id and state='draft'
+    for update;
+  if not found then raise exception 'Lesson draft not found or already published'; end if;
+
+  perform 1 from public.catalogs
+    where id=p_catalog_id and status='active' and deleted_at is null;
+  if not found then raise exception 'Catalog is not active'; end if;
+
+  update public.lesson_revisions
+    set state='superseded' where catalog_id=p_catalog_id and state='published';
+  update public.lesson_revisions
+    set state='published',published_at=now()
+    where id=p_draft_id;
+  return p_draft_id;
+end;
+$$;
+revoke all on function public.publish_lesson_revision(uuid,uuid) from public;
+revoke all on function public.publish_lesson_revision(uuid,uuid) from authenticated;
+revoke all on function public.publish_lesson_revision(uuid,uuid) from anon;
+grant execute on function public.publish_lesson_revision(uuid,uuid) to service_role;
