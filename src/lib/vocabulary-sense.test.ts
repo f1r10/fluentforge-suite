@@ -17,6 +17,20 @@ describe("sense-aware vocabulary import deduplication", () => {
       base({ part_of_speech: "noun", translations: [{language:"az",value:"iş"}] }),
     )).toBe("different");
   });
+  it("never calls matching translations exact when one source gloss is missing", () => {
+    expect(compareVocabularySenses(
+      base({ word:"run", notes:"Source sense: WORKING",
+        translations:[{language:"az",value:"işləmək"}] }),
+      base({ word:"run", notes:null,
+        translations:[{language:"az",value:"işləmək"}] }),
+    )).toBe("review");
+  });
+  it("requires review when part of speech is absent for one side", () => {
+    expect(compareVocabularySenses(
+      base({part_of_speech:"noun", definition:"a profession"}),
+      base({part_of_speech:null, definition:"a profession"}),
+    )).toBe("review");
+  });
   it("keeps two distinct C1 run verb source glosses", () => {
     expect(compareVocabularySenses(
       base({ word:"run",notes:"WORKING" }),
