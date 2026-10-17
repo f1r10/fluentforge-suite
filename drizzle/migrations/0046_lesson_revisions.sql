@@ -94,7 +94,14 @@ begin
     from jsonb_array_elements(_draft.steps) with ordinality
   ), matched as (
     select input.position, input.step, ci.id, ci.entity_type,
-      ci.entity_id, q.current_version as question_version
+      ci.entity_id, q.current_version as question_version,
+      case ci.entity_type
+        when 'question' then q.prompt
+        when 'vocabulary' then v.word
+        when 'reading' then r.title
+        when 'listening' then l.title
+        else null
+      end as content_title
     from input
     left join public.catalog_items ci
       on ci.id = (input.step ->> 'id')::uuid
@@ -120,7 +127,7 @@ begin
   )
   select count(*), jsonb_agg(
     (step - 'id') || jsonb_build_object(
-      'id', id, 'entity_type', entity_type,
+      'id', id, 'entity_type', entity_type, 'title', content_title,
       'entity_id', entity_id, 'question_version', question_version
     ) order by position
   ) into _verified, _snapshot from matched;
@@ -145,6 +152,25 @@ $$;
 revoke all on function public.publish_catalog_lesson(uuid)
   from public, anon, authenticated;
 grant execute on function public.publish_catalog_lesson(uuid) to service_role;
+
+-- DB-side reduction prevents the PostgREST 1000-row response limit from
+-- silently erasing an earlier best passing attempt.
+create or replace function public.lesson_attempt_summary(
+  _student_id uuid, _catalog_id uuid, _revision integer
+)
+returns table(step_id uuid, best_score_percent numeric, attempt_count bigint)
+language sql stable security definer set search_path = public
+as $
+  select a.step_id, max(a.score_percent)::numeric, count(*)::bigint
+  from public.student_lesson_attempts a
+  where a.student_id = _student_id and a.catalog_id = _catalog_id
+    and a.revision = _revision
+  group by a.step_id;
+$;
+revoke all on function public.lesson_attempt_summary(uuid,uuid,integer)
+  from public, anon, authenticated;
+grant execute on function public.lesson_attempt_summary(uuid,uuid,integer)
+  to service_role;
 
 -- Publications cannot be silently edited. A new version must be published.
 create or replace function public.prevent_lesson_publication_change()
