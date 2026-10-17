@@ -1,12 +1,33 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
-import { LogOut } from "lucide-react";
+import {
+  Bell,
+  BookMarked,
+  BookOpen,
+  BookOpenCheck,
+  BookType,
+  ClipboardList,
+  Dumbbell,
+  FileQuestion,
+  FolderOpen,
+  Headphones,
+  Home,
+  LogOut,
+  RotateCcw,
+  CalendarClock,
+  Search,
+} from "lucide-react";
 import { getWhoAmI } from "@/lib/teacher.functions";
-import { heartbeat, setMyLanguage } from "@/lib/student.functions";
+import { endMySession, setMyLanguage } from "@/lib/student.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { LanguageSelect } from "@/components/app/common";
-import { useI18n, type Lang } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/_authenticated/student")({
   beforeLoad: async () => {
@@ -18,45 +39,104 @@ export const Route = createFileRoute("/_authenticated/student")({
     }
     return { me };
   },
-  head: () => ({ meta: [{ title: "My learning" }, { name: "robots", content: "noindex" }] }),
-  component: StudentHome,
+  component: StudentShell,
 });
 
-function StudentHome() {
-  const { me } = Route.useRouteContext();
-  const { t, setLang } = useI18n();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
+const nav = [
+  { to: "/student" as const, key: "dashboard", icon: Home },
+  { to: "/student/questions" as const, key: "browse_questions", icon: FileQuestion },
+  { to: "/student/vocabulary" as const, key: "vocabulary", icon: BookType },
+  { to: "/student/word-search" as const, key: "word_search", icon: Search },
+  { to: "/student/my-vocabulary" as const, key: "my_dictionary", icon: BookOpenCheck },
+  { to: "/student/readings" as const, key: "reading_library", icon: BookOpen },
+  { to: "/student/listenings" as const, key: "listening_library", icon: Headphones },
+  { to: "/student/catalogs" as const, key: "my_catalogs", icon: FolderOpen },
+  { to: "/student/library" as const, key: "library", icon: BookMarked },
+  { to: "/student/mistakes" as const, key: "my_mistakes", icon: RotateCcw },
+  { to: "/student/reviews" as const, key: "reviews_due", icon: CalendarClock },
+  { to: "/student/practice" as const, key: "self_practice", icon: Dumbbell },
+  { to: "/student/exams" as const, key: "exams", icon: ClipboardList },
+  { to: "/student/notifications" as const, key: "notifications", icon: Bell },
+];
 
-  useEffect(() => {
-    if (me.interface_language) setLang(me.interface_language as Lang);
-    const beat = () => heartbeat({ data: { location: "Home" } }).catch(() => {});
-    beat();
-    const id = setInterval(beat, 60_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function StudentShell() {
+  const { me } = Route.useRouteContext();
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
 
   async function signOut() {
-    await qc.cancelQueries(); qc.clear();
+    await endMySession().catch(() => {});
+    await qc.cancelQueries();
+    qc.clear();
     await supabase.auth.signOut();
     navigate({ to: "/", replace: true });
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-2xl px-4 py-5">
-      <header className="mb-8 flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm text-muted-foreground">{t("welcome")}</p>
-          <h1 className="text-xl font-bold">{me.first_name} {me.last_name}</h1>
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+          <Link to="/student" className="min-w-0 shrink-0">
+            <div className="text-sm font-bold">FluentForge</div>
+            <div className="max-w-40 truncate text-xs text-muted-foreground">
+              {me.first_name} {me.last_name}
+            </div>
+          </Link>
+
+          <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-1">
+            {nav.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                activeOptions={{ exact: item.to === "/student" }}
+                className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                activeProps={{
+                  className:
+                    "flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-2.5 py-2 text-sm font-medium text-foreground",
+                }}
+              >
+                <item.icon className="h-4 w-4" />
+                <span>{t(item.key)}</span>
+              </Link>
+            ))}
+          </nav>
+
+          <div className="hidden shrink-0 items-center gap-2 md:flex">
+            <LanguageSelect
+              onChange={(language) =>
+                setMyLanguage({ data: { language } }).catch(() => {})
+              }
+            />
+            <button
+              type="button"
+              onClick={signOut}
+              aria-label={t("sign_out")}
+              className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <LanguageSelect onChange={(l) => setMyLanguage({ data: { language: l } }).catch(() => {})} />
-          <button onClick={signOut} aria-label={t("sign_out")} className="p-2 text-muted-foreground"><LogOut className="h-5 w-5" /></button>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-2 md:hidden">
+          <LanguageSelect
+            onChange={(language) =>
+              setMyLanguage({ data: { language } }).catch(() => {})
+            }
+          />
+          <button
+            type="button"
+            onClick={signOut}
+            aria-label={t("sign_out")}
+            className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
         </div>
       </header>
-      <h2 className="mb-2 border-b border-border pb-2 font-semibold">{t("your_progress")}</h2>
-      <p className="py-6 text-sm text-muted-foreground">{t("nothing_yet")}</p>
+
+      <Outlet />
     </div>
   );
 }

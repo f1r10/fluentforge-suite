@@ -40,9 +40,39 @@ export const getTeacherDashboard = createServerFn({ method: "GET" })
     ]);
     const { data: upcomingExams } = await sb.from("exams").select("id, title, status, available_from, available_until").is("deleted_at", null).order("created_at", { ascending: false }).limit(5);
     const { data: recentCatalogs } = await sb.from("catalogs").select("id, name, updated_at").is("deleted_at", null).order("updated_at", { ascending: false }).limit(5);
-    const { data: activity } = await sb.from("activity_events").select("id, event_type, created_at, details, students(first_name, last_name)").order("created_at", { ascending: false }).limit(10);
+    const [{ data: activity }, { data: dashboardSetting }] = await Promise.all([
+      sb
+        .from("activity_events")
+        .select("id, event_type, created_at, details, students(first_name, last_name)")
+        .order("created_at", { ascending: false })
+        .limit(10),
+      sb
+        .from("system_settings")
+        .select("value")
+        .eq("key", "dashboard")
+        .maybeSingle(),
+    ]);
+    const visibleWidgets =
+      dashboardSetting?.value &&
+      typeof dashboardSetting.value === "object" &&
+      Array.isArray((dashboardSetting.value as Record<string, unknown>)["visible_widgets"])
+        ? ((dashboardSetting.value as Record<string, unknown>)["visible_widgets"] as unknown[])
+            .filter((value): value is string => typeof value === "string")
+        : [
+            "students",
+            "active_today",
+            "groups",
+            "catalogs",
+            "exams",
+            "pending_reviews",
+            "online_now",
+            "recent_activity",
+            "upcoming_exams",
+            "recent_catalogs",
+          ];
     return {
       counts: { students, activeToday: active, groups, catalogs, questions, vocab, exams, pendingReviews, unreadInbox },
+      visibleWidgets,
       online: (online.data ?? []).map((o) => ({ ...(o.students as unknown as { id: string; first_name: string; last_name: string }), last_seen_at: o.last_seen_at, location: o.current_location })),
       upcomingExams: upcomingExams ?? [],
       recentCatalogs: recentCatalogs ?? [],
@@ -96,21 +126,81 @@ async function issueKey(admin: Awaited<ReturnType<typeof import("./security.serv
 
 export const createStudent = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
-  .inputValidator((d) => z.object({ first_name: z.string().trim().min(1).max(80), last_name: z.string().trim().min(1).max(80), username: z.string().trim().min(3).max(40).regex(/^[a-z0-9._-]+$/), groupIds: z.array(z.string().uuid()).default([]) }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        first_name: z.string().trim().min(1).max(80),
+        last_name: z.string().trim().min(1).max(80),
+        username: z.string().trim().min(3).max(40).regex(/^[a-z0-9._-]+$/),
+        groupIds: z.array(z.string().uuid()).max(100).default([]),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { adminClient, randomToken, randomPassword, audit } = await import("./security.server");
     const admin = await adminClient();
-    const { data: exists } = await admin.from("students").select("id").eq("username", data.username).maybeSingle();
+    const username = data.username.toLowerCase();
+    const { data: exists } = await admin.from("students").select("id").ilike("username", username).maybeSingle();
     if (exists) throw new Error("This username is already taken.");
-    const { data: u, error } = await admin.auth.admin.createUser({ email: `student-${randomToken(14).toLowerCase()}@accounts.local`, password: randomPassword(), email_confirm: true });
+
+    const { data: u, error } = await admin.auth.admin.createUser({
+      email: `student-${randomToken(14).toLowerCase()}@accounts.local`,
+      password: randomPassword(),
+      email_confirm: true,
+    });
     if (error || !u.user) throw new Error(error?.message ?? "Could not create student");
-    await admin.from("user_roles").insert({ user_id: u.user.id, role: "student" });
-    const { data: st, error: e2 } = await admin.from("students").insert({ first_name: data.first_name, last_name: data.last_name, username: data.username, auth_user_id: u.user.id }).select("id").single();
-    if (e2) throw new Error(e2.message);
-    if (data.groupIds.length) await admin.from("group_memberships").insert(data.groupIds.map((g) => ({ group_id: g, student_id: st.id })));
-    const key = await issueKey(admin, st.id, data.username);
-    await audit(admin, { actor_type: "teacher", actor_id: context.userId, action: "student_created", entity_type: "student", entity_id: st.id, summary: `Created student ${data.first_name} ${data.last_name}` });
-    return { id: st.id, key };
+
+    let studentId: string | null = null;
+    try {
+      const { error: roleError } = await admin.from("user_roles").insert({
+        user_id: u.user.id,
+        role: "student",
+      });
+      if (roleError) throw new Error(roleError.message);
+
+      const { data: st, error: studentError } = await admin
+        .from("students")
+        .insert({
+          first_name: data.first_name,
+          last_name: data.last_name,
+          username,
+          auth_user_id: u.user.id,
+        })
+        .select("id")
+        .single();
+      if (studentError || !st) throw new Error(studentError?.message ?? "Could not create student profile");
+      studentId = st.id;
+
+      if (data.groupIds.length) {
+        const { error: groupError } = await admin.from("group_memberships").insert(
+          [...new Set(data.groupIds)].map((groupId) => ({
+            group_id: groupId,
+            student_id: st.id,
+          })),
+        );
+        if (groupError) throw new Error(groupError.message);
+      }
+
+      const key = await issueKey(admin, st.id, username);
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: context.userId,
+        action: "student_created",
+        entity_type: "student",
+        entity_id: st.id,
+        summary: `Created student ${data.first_name} ${data.last_name}`,
+      });
+      return { id: st.id, key };
+    } catch (studentError) {
+      // Supabase Auth is outside the public-schema transaction boundary.
+      // Compensate so a failed multi-step create does not leave a half-created student.
+      if (studentId) {
+        await admin.from("students").delete().eq("id", studentId);
+      }
+      await admin.from("user_roles").delete().eq("user_id", u.user.id);
+      await admin.auth.admin.deleteUser(u.user.id);
+      throw studentError;
+    }
   });
 
 export const regenerateKey = createServerFn({ method: "POST" })
@@ -125,6 +215,42 @@ export const regenerateKey = createServerFn({ method: "POST" })
     await admin.from("student_sessions").update({ revoked_at: new Date().toISOString() }).eq("student_id", st.id).is("revoked_at", null);
     await audit(admin, { actor_type: "teacher", actor_id: context.userId, action: "key_regenerated", entity_type: "student", entity_id: st.id, summary: `New access key for ${st.username}` });
     return { key };
+  });
+
+export const revokeStudentKey = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) => z.object({ studentId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const now = new Date().toISOString();
+    const { data: student } = await admin
+      .from("students")
+      .select("username")
+      .eq("id", data.studentId)
+      .maybeSingle();
+    if (!student) throw new Error("Student not found.");
+
+    await admin
+      .from("student_access_keys")
+      .update({ revoked_at: now })
+      .eq("student_id", data.studentId)
+      .is("revoked_at", null);
+    await admin
+      .from("student_sessions")
+      .update({ revoked_at: now })
+      .eq("student_id", data.studentId)
+      .is("revoked_at", null);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "key_revoked",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: `Access key revoked for ${student.username}`,
+    });
+    return { ok: true };
   });
 
 export const setStudentStatus = createServerFn({ method: "POST" })
@@ -162,6 +288,98 @@ export const updateStudent = createServerFn({ method: "POST" })
   });
 
 // ---------- Groups ----------
+export const listStudentNotes = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z.object({ studentId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: student, error: studentError } = await context.supabase
+      .from("students")
+      .select("id")
+      .eq("id", data.studentId)
+      .maybeSingle();
+    if (studentError) throw new Error(studentError.message);
+    if (!student) throw new Error("Student not found.");
+
+    const { data: notes, error } = await context.supabase
+      .from("student_notes")
+      .select("id,body,created_at,updated_at")
+      .eq("student_id", data.studentId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return notes ?? [];
+  });
+
+export const createStudentNote = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        studentId: z.string().uuid(),
+        body: z.string().trim().min(1).max(10_000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: note, error } = await context.supabase
+      .from("student_notes")
+      .insert({
+        student_id: data.studentId,
+        body: data.body,
+      })
+      .select("id,body,created_at,updated_at")
+      .single();
+    if (error || !note) {
+      throw new Error(error?.message ?? "Could not save note.");
+    }
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_note_created",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: "Created a private student note",
+      details: { note_id: note.id },
+    });
+
+    return note;
+  });
+
+export const deleteStudentNote = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        studentId: z.string().uuid(),
+        noteId: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("student_notes")
+      .delete()
+      .eq("id", data.noteId)
+      .eq("student_id", data.studentId);
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_note_deleted",
+      entity_type: "student",
+      entity_id: data.studentId,
+      summary: "Deleted a private student note",
+      details: { note_id: data.noteId },
+    });
+
+    return { ok: true };
+  });
+
 export const listGroups = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .handler(async ({ context }) => {
@@ -231,20 +449,638 @@ export const getSettings = createServerFn({ method: "GET" })
 export const saveBranding = createServerFn({ method: "POST" })
   .middleware([requireTeacher])
   .inputValidator((d) =>
-    z.object({
-      system_name: z.string().trim().min(1).max(100), short_name: z.string().max(40), login_title: z.string().max(120),
-      welcome_message: z.string().max(1000), login_instructions: z.string().max(1000), footer: z.string().max(300), support_text: z.string().max(500),
-      accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/), logo_url: z.string().url().nullable().or(z.literal("")), login_image_url: z.string().url().nullable().or(z.literal("")),
-      default_language: z.enum(["az", "en", "ru", "tr"]),
-    }).parse(d),
+    z
+      .object({
+        system_name: z.string().trim().min(1).max(100),
+        short_name: z.string().max(40),
+        login_title: z.string().max(120),
+        welcome_message: z.string().max(1000),
+        login_instructions: z.string().max(1000),
+        footer: z.string().max(300),
+        support_text: z.string().max(500),
+        accent_color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        logo_url: z.string().url().nullable().or(z.literal("")),
+        favicon_url: z.string().url().nullable().or(z.literal("")),
+        login_image_url: z.string().url().nullable().or(z.literal("")),
+        teacher_login_button: z.string().max(80).default(""),
+        student_login_button: z.string().max(80).default(""),
+        setup_button: z.string().max(80).default(""),
+        default_language: z.enum(["az", "en", "ru", "tr"]),
+        enabled_languages: z
+          .array(z.enum(["az", "en", "ru", "tr"]))
+          .min(1)
+          .max(4),
+      })
+      .superRefine((value, ctx) => {
+        if (!value.enabled_languages.includes(value.default_language)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["default_language"],
+            message: "Default language must be enabled.",
+          });
+        }
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { default_language, ...branding } = data;
+    const { default_language, enabled_languages, ...branding } = data;
     const { adminClient, audit } = await import("./security.server");
-    await context.supabase.from("system_settings").update({ value: { ...branding, logo_url: branding.logo_url || null, login_image_url: branding.login_image_url || null } }).eq("key", "branding");
-    await context.supabase.from("system_settings").update({ value: { default_language } }).eq("key", "interface");
-    await audit(await adminClient(), { actor_type: "teacher", actor_id: context.userId, action: "settings_changed", summary: "Branding settings updated" });
+    const admin = await adminClient();
+
+    const { data: currentRow, error: currentError } = await context.supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "branding")
+      .maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+
+    const current =
+      currentRow?.value && typeof currentRow.value === "object"
+        ? (currentRow.value as Record<string, unknown>)
+        : {};
+
+    const logoUrl = branding.logo_url || null;
+    const faviconUrl = branding.favicon_url || null;
+    const loginImageUrl = branding.login_image_url || null;
+    const currentLogoUrl =
+      typeof current["logo_url"] === "string" ? current["logo_url"] : null;
+    const currentFaviconUrl =
+      typeof current["favicon_url"] === "string"
+        ? current["favicon_url"]
+        : null;
+    const currentLoginImageUrl =
+      typeof current["login_image_url"] === "string"
+        ? current["login_image_url"]
+        : null;
+    const currentLogoPath =
+      typeof current["logo_storage_path"] === "string"
+        ? current["logo_storage_path"]
+        : null;
+    const currentFaviconPath =
+      typeof current["favicon_storage_path"] === "string"
+        ? current["favicon_storage_path"]
+        : null;
+    const currentLoginImagePath =
+      typeof current["login_image_storage_path"] === "string"
+        ? current["login_image_storage_path"]
+        : null;
+
+    const logoStoragePath =
+      logoUrl && logoUrl === currentLogoUrl ? currentLogoPath : null;
+    const faviconStoragePath =
+      faviconUrl && faviconUrl === currentFaviconUrl
+        ? currentFaviconPath
+        : null;
+    const loginImageStoragePath =
+      loginImageUrl && loginImageUrl === currentLoginImageUrl
+        ? currentLoginImagePath
+        : null;
+
+    const { error: brandingError } = await context.supabase
+      .from("system_settings")
+      .update({
+        value: {
+          ...branding,
+          logo_url: logoUrl,
+          favicon_url: faviconUrl,
+          login_image_url: loginImageUrl,
+          logo_storage_path: logoStoragePath,
+          favicon_storage_path: faviconStoragePath,
+          login_image_storage_path: loginImageStoragePath,
+        } as never,
+      })
+      .eq("key", "branding");
+    if (brandingError) throw new Error(brandingError.message);
+
+    const { data: interfaceRow, error: interfaceReadError } =
+      await context.supabase
+        .from("system_settings")
+        .select("value")
+        .eq("key", "interface")
+        .maybeSingle();
+    if (interfaceReadError) throw new Error(interfaceReadError.message);
+
+    const interfaceValue =
+      interfaceRow?.value && typeof interfaceRow.value === "object"
+        ? (interfaceRow.value as Record<string, unknown>)
+        : {};
+
+    const { error: interfaceError } = await context.supabase
+      .from("system_settings")
+      .update({
+        value: {
+          ...interfaceValue,
+          default_language,
+          enabled_languages: [...new Set(enabled_languages)],
+        } as never,
+      })
+      .eq("key", "interface");
+    if (interfaceError) throw new Error(interfaceError.message);
+
+    const stalePaths = [
+      currentLogoPath && currentLogoPath !== logoStoragePath
+        ? currentLogoPath
+        : null,
+      currentFaviconPath && currentFaviconPath !== faviconStoragePath
+        ? currentFaviconPath
+        : null,
+      currentLoginImagePath &&
+      currentLoginImagePath !== loginImageStoragePath
+        ? currentLoginImagePath
+        : null,
+    ].filter((value): value is string => !!value);
+    if (stalePaths.length) {
+      await admin.storage.from("branding").remove(stalePaths);
+    }
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "settings_changed",
+      summary: "Branding settings updated",
+    });
     return { ok: true };
+  });
+
+export const saveDashboardSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        visible_widgets: z
+          .array(
+            z.enum([
+              "students",
+              "active_today",
+              "groups",
+              "catalogs",
+              "exams",
+              "pending_reviews",
+              "online_now",
+              "recent_activity",
+              "upcoming_exams",
+              "recent_catalogs",
+            ]),
+          )
+          .max(10),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      visible_widgets: [...new Set(data.visible_widgets)],
+    };
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "dashboard",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "dashboard_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "dashboard",
+      summary: "Teacher dashboard widgets updated",
+      details: value,
+    });
+
+    return { ok: true };
+  });
+
+export const saveStudentDashboardSettings = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        visible_widgets: z
+          .array(
+            z.enum([
+              "catalogs",
+              "exams",
+              "practice",
+              "today",
+              "correctness",
+              "accuracy",
+              "study_time",
+              "streak",
+              "progress",
+              "domain_progress",
+              "weak_topics",
+              "history",
+              "favorites",
+              "completed_exams",
+            ]),
+          )
+          .max(14),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      visible_widgets: [...new Set(data.visible_widgets)],
+    };
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "student_dashboard",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "student_dashboard_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "student_dashboard",
+      summary: "Student dashboard widgets updated",
+      details: value,
+    });
+
+    return { ok: true };
+  });
+
+export const saveMonitoringSettings = createServerFn({
+  method: "POST",
+})
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        show_browser_device: z.boolean(),
+        show_ip: z.boolean(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const value = {
+      show_browser_device: data.show_browser_device,
+      show_ip: data.show_ip,
+    };
+
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "monitoring",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "monitoring_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "monitoring",
+      summary: "Monitoring privacy settings updated",
+      details: value,
+    });
+
+    return { ok: true };
+  });
+
+export const listLiveStudentSessions = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        search: z.string().max(120).default(""),
+        onlineMinutes: z.number().int().min(1).max(60).default(5),
+      })
+      .parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const since = new Date(
+      Date.now() - data.onlineMinutes * 60_000,
+    ).toISOString();
+
+    const [{ data: settingsRow, error: settingsError }, sessionsResult] =
+      await Promise.all([
+        context.supabase
+          .from("system_settings")
+          .select("value")
+          .eq("key", "monitoring")
+          .maybeSingle(),
+        context.supabase
+          .from("student_sessions")
+          .select(
+            "id,student_id,started_at,last_seen_at,current_location,user_agent,ip,students!inner(id,first_name,last_name,username,status,deleted_at)",
+          )
+          .is("revoked_at", null)
+          .gte("last_seen_at", since)
+          .order("last_seen_at", { ascending: false })
+          .limit(200),
+      ]);
+
+    if (settingsError) throw new Error(settingsError.message);
+    if (sessionsResult.error) throw new Error(sessionsResult.error.message);
+
+    const settings =
+      settingsRow?.value && typeof settingsRow.value === "object"
+        ? (settingsRow.value as Record<string, unknown>)
+        : {};
+    const showBrowserDevice =
+      settings["show_browser_device"] !== false;
+    const showIp = settings["show_ip"] === true;
+    const needle = data.search.trim().toLocaleLowerCase();
+
+    const rows = (sessionsResult.data ?? [])
+      .flatMap((session) => {
+        const student = session.students as unknown as {
+          id: string;
+          first_name: string;
+          last_name: string;
+          username: string;
+          status: string;
+          deleted_at: string | null;
+        };
+        if (
+          !student ||
+          student.deleted_at ||
+          student.status === "archived"
+        ) {
+          return [];
+        }
+
+        const studentName =
+          `${student.first_name} ${student.last_name}`.trim();
+        if (
+          needle &&
+          ![
+            studentName,
+            student.username,
+            session.current_location ?? "",
+          ].some((value) =>
+            value.toLocaleLowerCase().includes(needle),
+          )
+        ) {
+          return [];
+        }
+
+        const userAgent =
+          showBrowserDevice && session.user_agent
+            ? describeUserAgent(session.user_agent)
+            : null;
+
+        return [
+          {
+            id: session.id,
+            student_id: student.id,
+            student_name: studentName,
+            username: student.username,
+            started_at: session.started_at,
+            last_seen_at: session.last_seen_at,
+            current_location: session.current_location,
+            session_duration_ms: Math.max(
+              0,
+              Date.now() - new Date(session.started_at).getTime(),
+            ),
+            browser: userAgent?.browser ?? null,
+            device: userAgent?.device ?? null,
+            operating_system: userAgent?.operatingSystem ?? null,
+            ip: showIp ? session.ip : null,
+            privacy: {
+              show_browser_device: showBrowserDevice,
+              show_ip: showIp,
+            },
+          },
+        ];
+      });
+
+    return {
+      rows,
+      privacy: {
+        show_browser_device: showBrowserDevice,
+        show_ip: showIp,
+      },
+      online_minutes: data.onlineMinutes,
+    };
+  });
+
+function describeUserAgent(value: string) {
+  const ua = value.toLocaleLowerCase();
+
+  let browser = "Other";
+  if (ua.includes("edg/")) browser = "Edge";
+  else if (ua.includes("firefox/")) browser = "Firefox";
+  else if (ua.includes("chrome/") || ua.includes("crios/")) {
+    browser = "Chrome";
+  } else if (
+    ua.includes("safari/") &&
+    !ua.includes("chrome/") &&
+    !ua.includes("crios/")
+  ) {
+    browser = "Safari";
+  }
+
+  let operatingSystem = "Other";
+  if (ua.includes("windows")) operatingSystem = "Windows";
+  else if (ua.includes("android")) operatingSystem = "Android";
+  else if (
+    ua.includes("iphone") ||
+    ua.includes("ipad") ||
+    ua.includes("ios")
+  ) {
+    operatingSystem = "iOS/iPadOS";
+  } else if (ua.includes("mac os") || ua.includes("macintosh")) {
+    operatingSystem = "macOS";
+  } else if (ua.includes("linux")) operatingSystem = "Linux";
+
+  let device = "Desktop";
+  if (ua.includes("ipad") || ua.includes("tablet")) {
+    device = "Tablet";
+  } else if (
+    ua.includes("mobile") ||
+    ua.includes("iphone") ||
+    ua.includes("android")
+  ) {
+    device = "Mobile";
+  }
+
+  return { browser, device, operatingSystem };
+}
+
+export const saveMediaSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        max_video_mb: z.number().int().min(10).max(700),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: currentRow, error: readError } = await context.supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "media")
+      .maybeSingle();
+    if (readError) throw new Error(readError.message);
+
+    const current =
+      currentRow?.value && typeof currentRow.value === "object"
+        ? (currentRow.value as Record<string, unknown>)
+        : {};
+
+    const value = {
+      ...current,
+      max_video_mb: data.max_video_mb,
+    };
+
+    const { error } = await context.supabase
+      .from("system_settings")
+      .upsert(
+        {
+          key: "media",
+          value: value as never,
+          is_public: false,
+        },
+        { onConflict: "key" },
+      );
+    if (error) throw new Error(error.message);
+
+    const { adminClient, audit } = await import("./security.server");
+    await audit(await adminClient(), {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "media_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "media",
+      summary: "Media upload settings updated",
+      details: { max_video_mb: data.max_video_mb },
+    });
+
+    return { ok: true };
+  });
+
+export const getLanguageSettings = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("languages")
+      .select(
+        "code,name,native_name,is_interface,is_learning,is_translation,sort_order",
+      )
+      .order("sort_order")
+      .order("name");
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const saveLanguageSettings = createServerFn({ method: "POST" })
+  .middleware([requireTeacher])
+  .inputValidator((d) =>
+    z
+      .object({
+        languages: z
+          .array(
+            z.object({
+              code: z
+                .string()
+                .trim()
+                .min(2)
+                .max(16)
+                .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
+              name: z.string().trim().min(1).max(100),
+              native_name: z.string().trim().max(100).nullable().default(null),
+              is_learning: z.boolean(),
+              is_translation: z.boolean(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .superRefine((value, ctx) => {
+        const normalized = value.languages.map((language) =>
+          language.code.toLowerCase(),
+        );
+        if (new Set(normalized).size !== normalized.length) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["languages"],
+            message: "Language codes must be unique.",
+          });
+        }
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const payload = data.languages.map((language) => ({
+      code: language.code.toLowerCase(),
+      name: language.name.trim(),
+      native_name: language.native_name?.trim() || null,
+      is_learning: language.is_learning,
+      is_translation: language.is_translation,
+    }));
+
+    const { adminClient, audit } = await import("./security.server");
+    const admin = await adminClient();
+    const { error } = await admin.rpc("save_language_settings", {
+      p_languages: payload as never,
+    });
+    if (error) throw new Error(error.message);
+
+    await audit(admin, {
+      actor_type: "teacher",
+      actor_id: context.userId,
+      action: "language_settings_changed",
+      entity_type: "system_setting",
+      entity_id: "languages",
+      summary: "Learning and translation languages updated",
+      details: {
+        learning_languages: payload
+          .filter((language) => language.is_learning)
+          .map((language) => language.code),
+        translation_languages: payload
+          .filter((language) => language.is_translation)
+          .map((language) => language.code),
+      },
+    });
+
+    return { ok: true };
+  });
+
+export const getStorageUsage = createServerFn({ method: "GET" })
+  .middleware([requireTeacher])
+  .handler(async () => {
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
+    const { data, error } = await admin.rpc("storage_usage_summary");
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []).map((row) => ({
+      category: row.category,
+      bytes: Number(row.bytes ?? 0),
+      items: Number(row.items ?? 0),
+    }));
+
+    return {
+      rows,
+      total_bytes: rows.reduce((sum, row) => sum + row.bytes, 0),
+      total_items: rows.reduce((sum, row) => sum + row.items, 0),
+      note: "Tracked storage excludes branding assets because their byte size is not persisted in the portable metadata schema.",
+    };
   });
 
 export const changeCredentials = createServerFn({ method: "POST" })

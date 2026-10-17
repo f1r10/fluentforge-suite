@@ -43,3 +43,57 @@ export function scoreBlanks(responses: string[], blanks: string[][], n: Normaliz
   if (correct === blanks.length) return points;
   return s.partial ? (correct / blanks.length) * points : 0;
 }
+
+
+export type MatchingPair = { left: string; right: string };
+
+/** Score matching pairs by normalized left->right correspondence. */
+export function scoreMatching(
+  response: MatchingPair[],
+  correctPairs: MatchingPair[],
+  n: Normalization = {},
+  s: Scoring = {},
+) {
+  const points = s.points ?? 1;
+  if (!correctPairs.length) return 0;
+
+  const responseMap = new Map(
+    response.map((pair) => [normalizeAnswer(pair.left, n), normalizeAnswer(pair.right, n)]),
+  );
+
+  const correct = correctPairs.filter((pair) => {
+    const left = normalizeAnswer(pair.left, n);
+    const right = normalizeAnswer(pair.right, n);
+    return responseMap.get(left) === right;
+  }).length;
+
+  if (correct === correctPairs.length && response.length === correctPairs.length) return points;
+  return s.partial ? (correct / correctPairs.length) * points : 0;
+}
+
+/** Score ordering/sequencing questions. */
+export function scoreOrdering(
+  response: string[],
+  correctOrder: string[],
+  n: Normalization = {},
+  s: Scoring = {},
+) {
+  const points = s.points ?? 1;
+  if (!correctOrder.length) return 0;
+
+  const normalizedResponse = response.map((x) => normalizeAnswer(x, n));
+  const normalizedCorrect = correctOrder.map((x) => normalizeAnswer(x, n));
+
+  const exact =
+    normalizedResponse.length === normalizedCorrect.length &&
+    normalizedResponse.every((value, index) => value === normalizedCorrect[index]);
+
+  if (exact) return points;
+  if (!s.partial) return 0;
+
+  const matches = normalizedCorrect.filter(
+    (value, index) => normalizedResponse[index] === value,
+  ).length;
+
+  return (matches / normalizedCorrect.length) * points;
+}

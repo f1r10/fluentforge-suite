@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { brokeredPreviewStorage } from './previewAuthStorage';
+import { createRuntimeBrowserClient } from '@/runtime/browser-client';
 
 function isNewSupabaseApiKey(value: string): boolean {
   return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
@@ -28,7 +29,17 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 }
 
 
-function createSupabaseClient() {
+type BrowserClient = ReturnType<typeof createClient<Database>>;
+
+function createSupabaseClient(): BrowserClient {
+  const runtimeBackend =
+    import.meta.env['VITE_RUNTIME_BACKEND'] ||
+    process.env['RUNTIME_BACKEND'];
+
+  if (runtimeBackend === 'postgres') {
+    return createRuntimeBrowserClient() as unknown as BrowserClient;
+  }
+
   // Use import.meta.env for client-side (Vite build-time replacement)
   // Fall back to process.env for SSR (server-side rendering)
   const SUPABASE_URL = import.meta.env['VITE_SUPABASE_URL'] || process.env['SUPABASE_URL'];

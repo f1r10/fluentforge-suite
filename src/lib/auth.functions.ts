@@ -17,7 +17,10 @@ export const getSetupState = createServerFn({ method: "GET" }).handler(async () 
   const { adminClient } = await import("./security.server");
   const admin = await adminClient();
   const { count } = await admin.from("admin_users").select("id", { count: "exact", head: true });
-  return { needsSetup: (count ?? 0) === 0 };
+  return {
+    needsSetup: (count ?? 0) === 0,
+    requiresSetupToken: !!process.env["SETUP_TOKEN"],
+  };
 });
 
 const usernameSchema = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/);
@@ -25,19 +28,80 @@ const passwordSchema = z.string().min(8).max(200);
 
 /** Public, one-time: creates the single teacher account. */
 export const setupTeacher = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({ username: usernameSchema, password: passwordSchema }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        username: usernameSchema,
+        password: passwordSchema,
+        setupToken: z.string().max(500).optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data }) => {
-    const { adminClient, randomToken, audit } = await import("./security.server");
+    const { adminClient, randomToken, sha256, audit } = await import("./security.server");
     const admin = await adminClient();
+
+    const requiredSetupToken = process.env["SETUP_TOKEN"];
+    if (requiredSetupToken && data.setupToken !== requiredSetupToken) {
+      throw new Error("The setup token is not valid.");
+    }
+
     const { count } = await admin.from("admin_users").select("id", { count: "exact", head: true });
     if ((count ?? 0) > 0) throw new Error("Setup is already complete.");
+
     const email = `teacher-${randomToken(12).toLowerCase()}@accounts.local`;
-    const { data: created, error } = await admin.auth.admin.createUser({ email, password: data.password, email_confirm: true });
+    const { data: created, error } = await admin.auth.admin.createUser({
+      email,
+      password: data.password,
+      email_confirm: true,
+    });
     if (error || !created.user) throw new Error(error?.message ?? "Could not create account");
-    await admin.from("user_roles").insert({ user_id: created.user.id, role: "teacher" });
-    await admin.from("admin_users").insert({ auth_user_id: created.user.id, username: data.username.toLowerCase() });
-    await audit(admin, { actor_type: "teacher", actor_id: created.user.id, action: "setup", summary: "Teacher account created" });
-    return { ok: true };
+
+    try {
+      const { data: adm, error: adminError } = await admin
+        .from("admin_users")
+        .insert({ auth_user_id: created.user.id, username: data.username.toLowerCase() })
+        .select("id")
+        .single();
+      if (adminError || !adm) throw new Error(adminError?.message ?? "Could not create teacher profile");
+
+      const { error: roleError } = await admin.from("user_roles").insert({
+        user_id: created.user.id,
+        role: "teacher",
+      });
+      if (roleError) throw new Error(roleError.message);
+
+      const setId = crypto.randomUUID();
+      const rawCodes = Array.from({ length: 5 }, () => randomToken(16).toUpperCase());
+      const { error: recoveryError } = await admin.from("admin_recovery_codes").insert(
+        rawCodes.map((code) => ({
+          admin_id: adm.id,
+          set_id: setId,
+          code_hash: sha256(code),
+        })),
+      );
+      if (recoveryError) throw new Error(recoveryError.message);
+
+      await audit(admin, {
+        actor_type: "teacher",
+        actor_id: created.user.id,
+        action: "setup",
+        summary: "Teacher account created",
+      });
+
+      return {
+        ok: true,
+        recoveryCodes: rawCodes.map((code) => code.match(/.{4}/g)!.join("-")),
+      };
+    } catch (setupError) {
+      // Auth user creation is outside the public-schema transaction boundary.
+      // Compensate on failure so a concurrent/partial setup cannot leave an
+      // orphaned teacher account.
+      await admin.from("user_roles").delete().eq("user_id", created.user.id);
+      await admin.from("admin_users").delete().eq("auth_user_id", created.user.id);
+      await admin.auth.admin.deleteUser(created.user.id);
+      throw setupError;
+    }
   });
 
 export const teacherLogin = createServerFn({ method: "POST" })

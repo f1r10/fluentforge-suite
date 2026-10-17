@@ -2,14 +2,22 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, queryOptions, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Eye, FileSpreadsheet, FileUp, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { bulkQuestions, listQuestions, listTopics } from "@/lib/questions.functions";
+import {
+  bulkQuestions,
+  getQuestionStudentPreview,
+  listQuestions,
+  listTopics,
+} from "@/lib/questions.functions";
 import { listCatalogs } from "@/lib/teacher.functions";
 import { LEVELS, QUESTION_TYPES, TYPE_BY_ID } from "@/lib/question-types";
 import { topicOptions } from "@/components/app/topics";
+import { QuestionImportDialog } from "@/components/app/QuestionImportDialog";
+import { QuestionStudentPreview } from "@/components/app/PracticeQuestionCard";
 import { useI18n } from "@/lib/i18n";
 
 const topicsQuery = queryOptions({ queryKey: ["topics"], queryFn: () => listTopics() });
@@ -28,10 +36,15 @@ function QuestionBank() {
   const { data: topics } = useSuspenseQuery(topicsQuery);
   const { data: catalogs } = useSuspenseQuery(catalogsQuery);
   const tOpts = topicOptions(topics);
-  const [f, setF] = useState({ text: "", type: "", level: "", topicId: "", status: "active" as "active" | "draft" | "archived" | "all", page: 0 });
+  const [f, setF] = useState({ text: "", type: "", level: "", topicId: "", status: "all" as "active" | "draft" | "archived" | "all", page: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkTopic, setBulkTopic] = useState("");
   const [bulkCatalog, setBulkCatalog] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [previewQuestion, setPreviewQuestion] = useState<
+    Awaited<ReturnType<typeof getQuestionStudentPreview>> | null
+  >(null);
+  const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["questions", f],
@@ -46,6 +59,17 @@ function QuestionBank() {
     const n = new Set(selected);
     if (n.has(id)) n.delete(id); else n.add(id);
     setSelected(n);
+  }
+
+  async function openPreview(id: string) {
+    setPreviewBusyId(id);
+    try {
+      setPreviewQuestion(await getQuestionStudentPreview({ data: { id } }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPreviewBusyId(null);
+    }
   }
 
   async function bulk(action: "archive" | "activate" | "trash" | "add_topic" | "add_to_catalog" | "duplicate") {
@@ -63,7 +87,19 @@ function QuestionBank() {
     <div className="mx-auto max-w-6xl space-y-4 pb-24">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">{t("questions_bank")} {data && <span className="text-base font-normal text-muted-foreground">({data.total})</span>}</h1>
-        <Button asChild><Link to="/teacher/questions/new"><Plus className="h-4 w-4" />{t("add_question")}</Link></Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <a href="/teacher/sources?target=questions">
+              <FileUp className="h-4 w-4" />
+              {t("import_document")}
+            </a>
+          </Button>
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t("import_questions")}
+          </Button>
+          <Button asChild><Link to="/teacher/questions/new"><Plus className="h-4 w-4" />{t("add_question")}</Link></Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -104,6 +140,17 @@ function QuestionBank() {
                   {r.current_version > 1 && ` · v${r.current_version}`}
                 </p>
               </Link>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                disabled={previewBusyId === r.id}
+                onClick={() => void openPreview(r.id)}
+                aria-label={t("preview")}
+                title={t("preview")}
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
             </li>
           ))}
         </ul>
@@ -117,8 +164,28 @@ function QuestionBank() {
         </div>
       )}
 
+      <QuestionImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        topics={topics}
+      />
+
+      <Dialog
+        open={!!previewQuestion}
+        onOpenChange={(open) => !open && setPreviewQuestion(null)}
+      >
+        <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("preview")}</DialogTitle>
+          </DialogHeader>
+          {previewQuestion && (
+            <QuestionStudentPreview question={previewQuestion} />
+          )}
+        </DialogContent>
+      </Dialog>
+
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 shadow-sm md:left-56">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background p-3 shadow-sm md:left-64">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 text-sm">
             <strong>{selected.size} {t("selected")}</strong>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>{t("clear")}</Button>
@@ -133,7 +200,20 @@ function QuestionBank() {
             </select>
             <Button size="sm" variant="outline" disabled={!bulkTopic} onClick={() => bulk("add_topic")}>{t("add_topic")}</Button>
             <Button size="sm" variant="outline" onClick={() => bulk("duplicate")}>{t("duplicate")}</Button>
-            <Button size="sm" variant="outline" onClick={() => bulk(f.status === "archived" ? "activate" : "archive")}>{f.status === "archived" ? t("enable") : t("archive")}</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bulk("activate")}
+            >
+              {t("enable")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bulk("archive")}
+            >
+              {t("archive")}
+            </Button>
             <Button size="sm" variant="outline" className="text-destructive" onClick={() => bulk("trash")}>{t("move_to_trash")}</Button>
           </div>
         </div>

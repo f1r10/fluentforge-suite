@@ -53,7 +53,7 @@ function StudentLogin() {
           <Input id="key" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" autoCapitalize="off" spellCheck={false} className="h-11" required />
         </div>
         <ErrorText>{error}</ErrorText>
-        <Button type="submit" className="h-11 w-full" disabled={busy}>{t("sign_in")}</Button>
+        <Button type="submit" className="h-11 w-full" disabled={busy}>{b.student_login_button || t("sign_in")}</Button>
       </form>
       <Link to="/teacher-login" className="mt-6 text-sm text-muted-foreground underline-offset-4 hover:underline">{t("teacher_sign_in")}</Link>
     </AuthLayout>
