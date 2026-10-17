@@ -102,14 +102,18 @@ function LessonEditor() {
   }
 
   async function publish() {
-    if (!versions?.draft) {
-      toast.error("Save your draft before publishing.");
+    if (!draft.steps.length) {
+      toast.error("Add at least one lesson step before publishing.");
       return;
     }
     setSaving(true);
     try {
-      await publishLessonDraft({ data: { catalogId: id, draftId: versions.draft.id } });
-      toast.success("Lesson published as an immutable revision.");
+      // Publish the exact state currently displayed in the editor. Publishing
+      // an older saved draft while local edits are pending loses the teacher's
+      // changes and is dangerously misleading.
+      const saved = await saveLessonDraft({ data: { catalogId: id, ...draft } });
+      await publishLessonDraft({ data: { catalogId: id, draftId: saved.id } });
+      toast.success("Current lesson saved and published as an immutable revision.");
       await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not publish the lesson.");
@@ -139,7 +143,7 @@ function LessonEditor() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={save} disabled={saving}>Save draft</Button>
-          <Button onClick={publish} disabled={saving || !versions.draft}>
+          <Button onClick={publish} disabled={saving || draft.steps.length === 0}>
             Publish draft
           </Button>
         </div>
@@ -260,7 +264,7 @@ function LessonEditor() {
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={save} disabled={saving}>Save draft</Button>
-        <Button onClick={publish} disabled={saving || !versions.draft}>Publish draft</Button>
+        <Button onClick={publish} disabled={saving || draft.steps.length === 0}>Publish draft</Button>
       </div>
     </main>
   );
