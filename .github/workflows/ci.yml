@@ -202,6 +202,14 @@ jobs:
             -f docker-compose.postgres.yml \
             up -d --build app scheduler
 
+      - name: Show plain runtime migration errors
+        if: failure()
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            logs --no-color --tail=100 migrate || true
+
       - name: Verify plain runtime readiness
         run: |
           ok=0
