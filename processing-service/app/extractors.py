@@ -665,8 +665,7 @@ def detect_candidates(
         # approval until the teacher attaches the visual and supplies an
         # answer. Avoid suppressing ordinary text questions on the page.
         visual_time_task = bool(re.search(
-            r"\\b(?:telling the time|draw the hands on the clocks?|"
-            r"what time is it\\?)\\b",
+            r"\b(?:telling the time|draw the hands on the clocks?|what time is it)\b",
             page_text,
             re.IGNORECASE,
         ))
