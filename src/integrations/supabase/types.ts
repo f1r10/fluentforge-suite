@@ -63,6 +63,7 @@ export type Database = {
           viewed_at: string | null
           attempted_at: string | null
           best_score_percent: number | null
+          last_graded_event_id: number | null
           teacher_approved: boolean
           updated_at: string
         }
@@ -73,6 +74,7 @@ export type Database = {
           viewed_at?: string | null
           attempted_at?: string | null
           best_score_percent?: number | null
+          last_graded_event_id?: number | null
           teacher_approved?: boolean
           updated_at?: string
         }
@@ -83,6 +85,7 @@ export type Database = {
           viewed_at?: string | null
           attempted_at?: string | null
           best_score_percent?: number | null
+          last_graded_event_id?: number | null
           teacher_approved?: boolean
           updated_at?: string
         }
@@ -2843,6 +2846,16 @@ export type Database = {
       publish_lesson_revision: {
         Args: { p_catalog_id: string; p_draft_id: string }
         Returns: string
+      }
+      record_lesson_step_grade: {
+        Args: {
+          p_revision_id: string
+          p_student_id: string
+          p_step_id: string
+          p_score_percent: number | null
+          p_event_id: number
+        }
+        Returns: undefined
       }
       current_student_id: { Args: never; Returns: string }
       record_review_from_event: {
