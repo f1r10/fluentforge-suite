@@ -1,11 +1,12 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, Headphones, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getWhoAmI } from "@/lib/teacher.functions";
+import { getStudentLesson } from "@/lib/lesson-mode.functions";
 import {
   finishPractice,
   getStudentCatalogPractice,
@@ -53,6 +54,10 @@ function PracticePage() {
   const { id } = Route.useParams();
   const { t } = useI18n();
   const { data } = useSuspenseQuery(practiceQuery(id));
+  const { data: lesson } = useQuery({
+    queryKey: ["student-lesson", id],
+    queryFn: () => getStudentLesson({ data: { catalogId: id } }),
+  });
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [practiceKind, setPracticeKind] = useState<
     "all" | "question" | "vocabulary" | "reading" | "listening"
@@ -217,7 +222,16 @@ function PracticePage() {
           <ArrowLeft className="h-4 w-4" />
           {t("back")}
         </Link>
-        <h1 className="text-2xl font-bold">{data.catalog.name}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{data.catalog.name}</h1>
+          {lesson && (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/student/lessons/$id" params={{ id }}>
+                {lesson.complete ? "Review lesson" : "Continue learning"}
+              </Link>
+            </Button>
+          )}
+        </div>
         {data.catalog.description && <p className="mt-1 text-sm text-muted-foreground">{data.catalog.description}</p>}
         <div className="mt-2 text-xs text-muted-foreground">
           {feedbackMode === "instant" ? t("instant_feedback") : t("feedback_after_finish")}
