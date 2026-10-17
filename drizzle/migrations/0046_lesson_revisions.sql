@@ -34,6 +34,26 @@ create table if not exists public.student_lesson_views (
 create index if not exists student_lesson_views_lookup_idx
   on public.student_lesson_views(student_id, catalog_id, revision);
 
+-- Trustworthy attempts are written ONLY by server-side canonical practice graders,
+-- not inferred from client-writable activity_events.
+create table if not exists public.student_lesson_attempts (
+  student_id uuid not null references public.students(id) on delete cascade,
+  catalog_id uuid not null,
+  revision integer not null,
+  step_id uuid not null,
+  source_event_id bigint references public.activity_events(id) on delete set null,
+  score_percent numeric(6,3) not null check (score_percent between 0 and 100),
+  recorded_at timestamptz not null default now(),
+  foreign key (catalog_id, revision)
+    references public.lesson_publications(catalog_id, revision) on delete cascade,
+  unique (student_id, catalog_id, revision, step_id, source_event_id)
+);
+create index if not exists student_lesson_attempts_progress_idx
+  on public.student_lesson_attempts(student_id, catalog_id, revision, step_id);
+alter table public.student_lesson_attempts enable row level security;
+revoke all on public.student_lesson_attempts from anon, authenticated;
+grant all on public.student_lesson_attempts to service_role;
+
 alter table public.lesson_drafts enable row level security;
 alter table public.lesson_publications enable row level security;
 alter table public.student_lesson_views enable row level security;
