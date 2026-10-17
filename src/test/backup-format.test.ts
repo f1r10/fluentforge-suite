@@ -78,6 +78,22 @@ describe("FluentForge backup format", () => {
   });
 });
 
+describe("legacy backups", () => {
+  it("restores complete V1 archives without inventing lesson progress", () => {
+    const legacy = emptyPackage();
+    legacy.version = 1;
+    legacy.schema = "2026-10-06/v1";
+    delete legacy.tables["lesson_revisions"];
+    delete legacy.tables["lesson_step_progress"];
+    delete legacy.manifest.row_counts["lesson_revisions"];
+    delete legacy.manifest.row_counts["lesson_step_progress"];
+    const loaded = parseBackupPackage(legacy);
+    expect(loaded.version).toBe(2);
+    expect(loaded.tables["lesson_revisions"]).toEqual([]);
+    expect(loaded.tables["lesson_step_progress"]).toEqual([]);
+  });
+});
+
 describe("backup row sanitization", () => {
   it("removes student auth linkage", () => {
     const result = sanitizeBackupRow("students", {
