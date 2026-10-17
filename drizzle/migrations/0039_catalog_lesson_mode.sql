@@ -40,7 +40,7 @@ create index if not exists lesson_step_progress_student_idx
 -- A published revision is never mutated in place. Its sole permitted change
 -- is the publication transaction superseding it, retaining historical grades.
 create or replace function public.protect_published_lesson_revision()
-returns trigger language plpgsql set search_path = public as $
+returns trigger language plpgsql set search_path = public as $lesson_guard$
 begin
   if TG_OP = 'INSERT' then
     if new.state <> 'draft' then
@@ -61,7 +61,7 @@ begin
   end if;
   return new;
 end;
-$;
+$lesson_guard$;
 drop trigger if exists trg_protect_published_lesson_revision
   on public.lesson_revisions;
 create trigger trg_protect_published_lesson_revision
