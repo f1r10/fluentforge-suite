@@ -179,8 +179,12 @@ export const saveLessonDraft = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { admin } = await assertActiveCatalog(data.catalogId);
     const steps = parseSteps(data.steps);
-    const ids = [...new Set(steps.filter((step) => step.kind === "activity")
-      .map((step) => step.itemId!))];
+    const activityIds = steps.filter((step) => step.kind === "activity")
+      .map((step) => step.itemId!);
+    const ids = [...new Set(activityIds)];
+    if (ids.length !== activityIds.length) {
+      throw new Error("Each catalog activity may appear only once per lesson revision.");
+    }
     if (ids.length) {
       const { data: items, error } = await admin
         .from("catalog_items").select("id")
