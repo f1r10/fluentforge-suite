@@ -419,8 +419,8 @@ async function gotoHydrated(page, path) {
         name: `release-polyseme-${sense.kind}.csv`,
         mimeType: "text/csv",
         buffer: Buffer.from(
-          "word,definition,part_of_speech,az,level\\n" +
-          `releasepolyseme,${sense.definition},${sense.kind},${sense.az},A1\\n`,
+          "word,definition,part_of_speech,az,level\n" +
+          `releasepolyseme,${sense.definition},${sense.kind},${sense.az},A1\n`,
           "utf8",
         ),
       });
