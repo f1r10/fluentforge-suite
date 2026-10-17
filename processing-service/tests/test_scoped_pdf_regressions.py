@@ -204,3 +204,31 @@ def test_present_simple_answer_sheet_creates_fill_blank_questions():
     assert len(questions) == 2
     assert [q["question_type"] for q in questions] == ["fill_blank", "fill_blank"]
     assert [q["answer_key"]["blanks"][0][0] for q in questions] == ["work", "plays"]
+
+
+def test_real_c1_multisense_glosses_survive_native_candidate_detection():
+    # From the teacher's BTU C1 sample, reduced to safe short excerpts.
+    source = exam([
+        "BTU SFL WORD LISTS - C1 LEVEL\n"
+        "1471) projection noun CALCULATION C1\n"
+        "1472) projection noun IMAGE C1\n"
+        "1650) run verb WORKING C1\n"
+        "1651) run verb PUBLISH C1\n"
+    ])
+    items = detect_candidates(source, {
+        "expected_content": "vocabulary", "learning_language": "en",
+    })
+    vocabulary = [
+        item["payload"] for item in items
+        if item["item_type"] == "vocabulary"
+    ]
+    assert len(vocabulary) == 4
+    assert [value["word"] for value in vocabulary] == [
+        "projection", "projection", "run", "run",
+    ]
+    assert [value["part_of_speech"] for value in vocabulary] == [
+        "noun", "noun", "verb", "verb",
+    ]
+    assert [value["notes"] for value in vocabulary] == [
+        "CALCULATION", "IMAGE", "WORKING", "PUBLISH",
+    ]
