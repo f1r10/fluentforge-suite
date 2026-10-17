@@ -17,7 +17,11 @@ export type SenseRecord = {
 export type SenseMatch = "different" | "exact" | "review";
 
 function normalized(value: string | null | undefined): string {
-  return (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+  return (value ?? "")
+    .normalize("NFKC").trim().replace(/\s+/g, " ")
+    .toLocaleLowerCase("en")
+    // Unicode lowercasing of capital dotted İ produces i + combining dot.
+    .replace(/i\u0307/g, "i");
 }
 
 function language(value: string | null | undefined): string {
