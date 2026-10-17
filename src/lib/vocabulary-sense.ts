@@ -55,10 +55,16 @@ export function compareVocabularySenses(incoming: SenseRecord, existing: SenseRe
     "part_of_speech", "definition", "notes",
   ];
   let evidence = 0;
+  let asymmetricMetadata = false;
   for (const field of fields) {
     const a = normalized(incoming[field]);
     const b = normalized(existing[field]);
-    if (!a || !b) continue;
+    if (!a || !b) {
+      // A missing gloss or POS is not evidence that a new record represents
+      // the same sense. Even a matching translation can be polysemous.
+      if (Boolean(a) !== Boolean(b)) asymmetricMetadata = true;
+      continue;
+    }
     if (a !== b) return "different";
     if (field !== "part_of_speech") evidence += 1;
   }
@@ -72,7 +78,7 @@ export function compareVocabularySenses(incoming: SenseRecord, existing: SenseRe
     if (!overlap) return "different";
     evidence += 1;
   }
-  return evidence > 0 ? "exact" : "review";
+  return evidence > 0 && !asymmetricMetadata ? "exact" : "review";
 }
 
 export function classifySenseAgainstExisting(
