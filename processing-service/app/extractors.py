@@ -658,6 +658,48 @@ def detect_candidates(
                     }
                     question["payload"] = payload
 
+        # A picture/clock-based short-answer question is not self-contained
+        # just because its text is parseable. The original 100-exercise PDF
+        # uses four clock drawings followed by blanks; no answer can be
+        # safely recovered from the text layer. Explicitly block bulk
+        # approval until the teacher attaches the visual and supplies an
+        # answer. Avoid suppressing ordinary text questions on the page.
+        visual_time_task = bool(re.search(
+            r"\\b(?:telling the time|draw the hands on the clocks?|"
+            r"what time is it\\?)\\b",
+            page_text,
+            re.IGNORECASE,
+        ))
+        if visual_time_task:
+            for question in questions:
+                payload = question.get("payload") or {}
+                if payload.get("question_type") not in {"fill_blank", "short_answer"}:
+                    continue
+                answer_key = payload.get("answer_key") or {}
+                has_accepted_answer = any(
+                    answer
+                    for group in answer_key.get("blanks", [])
+                    if isinstance(group, list)
+                    for answer in group
+                )
+                assets = (
+                    payload.get("import_context", {}).get("assets", [])
+                    if isinstance(payload.get("import_context"), dict)
+                    else []
+                )
+                if not has_accepted_answer and any(
+                    asset.get("kind") == "image_region"
+                    for asset in assets if isinstance(asset, dict)
+                ):
+                    payload["import_warnings"] = [
+                        "Image-dependent clock question: attach the relevant source image "
+                        "and enter a teacher-verified answer before approving."
+                    ]
+                    question["payload"] = payload
+                    question["confidence"] = min(
+                        float(question.get("confidence") or 0), 0.45
+                    )
+
         candidates.extend(questions)
 
         layout = _page_layout_elements(page)
