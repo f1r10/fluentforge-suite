@@ -459,9 +459,9 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
 
-    // Lesson Mode is a separate, versioned teacher workflow layered over the
-    // existing catalog. Creating a theory-only lesson must not break catalog
-    // practice, assignment or any previously supported exam flow.
+    // Lesson Mode extends the existing catalog: theory locks the graded
+    // question until read; grading from catalog practice completes the lesson.
+    // Existing catalogs with no published lesson retain legacy behavior.
     const releaseCatalogId = page.url().split("/").filter(Boolean).at(-1);
     assert(releaseCatalogId && /^[0-9a-f-]{36}$/i.test(releaseCatalogId),
       "Created catalog must have a stable UUID.");
@@ -471,6 +471,9 @@ async function gotoHydrated(page, path) {
     await page.getByRole("button", { name: "Add theory" }).click();
     await page.locator("article textarea").first()
       .fill("Theory for the student's released lesson.");
+    await page.getByRole("combobox", { name: "Add catalog activity" })
+      .selectOption({ index: 1 });
+    await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
     await page.getByRole("button", { name: "Save draft" }).first().click();
     await page.getByRole("button", { name: "Publish draft" }).first()
       .waitFor({ state: "visible", timeout: 20000 });
@@ -946,33 +949,42 @@ async function gotoHydrated(page, path) {
     await assignedCatalog.waitFor({ timeout: 20000 });
     console.log("[ok] directly assigned catalog is visible to the student");
 
-    await assignedCatalog.click();
-    await studentPage
-      .getByRole("heading", { name: "Release Catalog", level: 1 })
-      .waitFor({ timeout: 20000 });
-    await studentPage
-      .getByText("New practice", { exact: true })
-      .waitFor({ timeout: 20000 });
-    await studentPage
-      .getByRole("button", { name: "Generate practice", exact: true })
-      .click();
-    await studentPage
-      .getByText("Runtime PDF import works?", { exact: true })
-      .waitFor({ timeout: 30000 });
-    console.log("[ok] student can open an assigned catalog and generate catalog practice");
-
     await gotoHydrated(studentPage, `/student/lessons/${releaseCatalogId}`);
     await studentPage.getByRole("heading", { name: "Release Catalog", level: 1 })
       .waitFor({ timeout: 20000 });
     await studentPage.getByText("Theory for the student's released lesson.")
       .waitFor({ timeout: 20000 });
+    await studentPage.getByText("locked", { exact: true }).first()
+      .waitFor({ timeout: 20000 });
     await studentPage.getByRole("button", { name: "I have read this" }).click();
+    await studentPage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] later graded activity remains locked until teacher-authored theory completed");
+
+    await gotoHydrated(studentPage, `/student/catalogs/${releaseCatalogId}`);
+    await studentPage.getByRole("heading", { name: "Release Catalog", level: 1 })
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByText("New practice", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("button", { name: "Generate practice", exact: true })
+      .click();
+    await studentPage.getByText("Runtime PDF import works?", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await studentPage.getByText("Yes", { exact: true }).first()
+      .locator("xpath=ancestor::label").getByRole("checkbox").click();
+    await studentPage.getByRole("button", { name: "Check answer", exact: true })
+      .first().click();
+    await studentPage.getByText("Correct", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] existing catalog grader supplied authoritative lesson score");
+
+    await gotoHydrated(studentPage, `/student/lessons/${releaseCatalogId}`);
     await studentPage.getByText("Lesson complete.")
       .waitFor({ timeout: 20000 });
     await studentPage.reload();
     await studentPage.getByText("Lesson complete.")
       .waitFor({ timeout: 20000 });
-    console.log("[ok] assigned student completed theory and progress persisted after refresh");
+    console.log("[ok] assigned student completed graded lesson and progress persisted after refresh");
 
     await gotoHydrated(studentPage, "/student/library");
     await studentPage
