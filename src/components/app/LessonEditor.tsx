@@ -13,10 +13,10 @@ type CatalogItem = {
   status: string; available: boolean;
 };
 const labels = {
-  az: {title:"Ardıcıl dərs", hint:"Mövcud kataloq məzmunundan dərs planı qurun. Dərc edilmiş versiya dəyişmir.", include:"Dərsə daxil et", required:"Məcburi", rule:"Tamamlanma", view:"Baxış", attempt:"Cəhd", pass:"Keçid balı", score:"Minimum bal (%)", save:"Qaralamanı saxla", publish:"Saxla və dərc et", revision:"Dərc versiyası", sequential:"Addımları ardıcıllıqla aç", empty:"Əvvəl kataloqa məzmun əlavə edin.", review:"Dərc etməzdən əvvəl dərsin sırasını və tamamlanma qaydalarını yoxlayın."},
-  en: {title:"Sequential lesson", hint:"Build a lesson from existing catalog content. Published revisions remain unchanged.", include:"Include", required:"Required", rule:"Completion", view:"View", attempt:"Attempt", pass:"Pass score", score:"Minimum score (%)", save:"Save draft", publish:"Save and publish", revision:"Published revision", sequential:"Unlock steps sequentially", empty:"Add content to this catalog first.", review:"Review the sequence and rules before publishing."},
-  ru: {title:"Последовательный урок", hint:"Создайте урок из материалов каталога. Опубликованные версии неизменяемы.", include:"Включить", required:"Обязательно", rule:"Завершение", view:"Просмотр", attempt:"Попытка", pass:"Проходной балл", score:"Минимальный балл (%)", save:"Сохранить черновик", publish:"Сохранить и опубликовать", revision:"Версия", sequential:"Открывать последовательно", empty:"Сначала добавьте материалы в каталог.", review:"Проверьте порядок и критерии перед публикацией."},
-  tr: {title:"Sıralı ders", hint:"Mevcut katalog içeriğinden ders hazırlayın. Yayımlanan sürümler değişmez.", include:"Derse ekle", required:"Zorunlu", rule:"Tamamlama", view:"Görüntüleme", attempt:"Deneme", pass:"Geçme puanı", score:"Minimum puan (%)", save:"Taslağı kaydet", publish:"Kaydet ve yayımla", revision:"Yayın sürümü", sequential:"Adımları sırayla aç", empty:"Önce kataloğa içerik ekleyin.", review:"Yayımlamadan önce sıra ve kuralları kontrol edin."},
+  az: {title:"Ardıcıl dərs", hint:"Mövcud kataloq məzmunundan dərs planı qurun. Dərc edilmiş versiya dəyişmir.", include:"Dərsə daxil et", required:"Məcburi", rule:"Tamamlanma", view:"Baxış", attempt:"Cəhd", pass:"Keçid balı", score:"Minimum bal (%)", save:"Qaralamanı saxla", publish:"Saxla və dərc et", revision:"Dərc versiyası", sequential:"Addımları ardıcıllıqla aç", enforce:"Kataloq məşqlərində də kilidləri məcburi tətbiq et", empty:"Əvvəl kataloqa məzmun əlavə edin.", review:"Dərc etməzdən əvvəl dərsin sırasını və tamamlanma qaydalarını yoxlayın."},
+  en: {title:"Sequential lesson", hint:"Build a lesson from existing catalog content. Published revisions remain unchanged.", include:"Include", required:"Required", rule:"Completion", view:"View", attempt:"Attempt", pass:"Pass score", score:"Minimum score (%)", save:"Save draft", publish:"Save and publish", revision:"Published revision", sequential:"Unlock steps sequentially", enforce:"Enforce these locks in catalog practice (hides unlisted/locked content)", empty:"Add content to this catalog first.", review:"Review the sequence and rules before publishing."},
+  ru: {title:"Последовательный урок", hint:"Создайте урок из материалов каталога. Опубликованные версии неизменяемы.", include:"Включить", required:"Обязательно", rule:"Завершение", view:"Просмотр", attempt:"Попытка", pass:"Проходной балл", score:"Минимальный балл (%)", save:"Сохранить черновик", publish:"Сохранить и опубликовать", revision:"Версия", sequential:"Открывать последовательно", enforce:"Применять ограничения и в практике каталога", empty:"Сначала добавьте материалы в каталог.", review:"Проверьте порядок и критерии перед публикацией."},
+  tr: {title:"Sıralı ders", hint:"Mevcut katalog içeriğinden ders hazırlayın. Yayımlanan sürümler değişmez.", include:"Derse ekle", required:"Zorunlu", rule:"Tamamlama", view:"Görüntüleme", attempt:"Deneme", pass:"Geçme puanı", score:"Minimum puan (%)", save:"Taslağı kaydet", publish:"Kaydet ve yayımla", revision:"Yayın sürümü", sequential:"Adımları sırayla aç", enforce:"Katalog alıştırmalarında da kilitleri zorunlu tut", empty:"Önce kataloğa içerik ekleyin.", review:"Yayımlamadan önce sıra ve kuralları kontrol edin."},
 } as const;
 
 export function LessonEditor({ catalogId, items }: {
@@ -31,6 +31,7 @@ export function LessonEditor({ catalogId, items }: {
   });
   const [steps, setSteps] = useState<LessonStepRule[]>([]);
   const [sequential, setSequential] = useState(true);
+  const [enforceLocks, setEnforceLocks] = useState(false);
   const [busy, setBusy] = useState(false);
   const [initialized, setInitialized] = useState(false);
   useEffect(() => {
@@ -41,6 +42,7 @@ export function LessonEditor({ catalogId, items }: {
       minScorePercent: step.minScorePercent,
     })));
     setSequential(data.draft?.sequential ?? data.latest?.sequential ?? true);
+    setEnforceLocks(data.draft?.enforce_locks ?? data.latest?.enforce_locks ?? false);
     setInitialized(true);
   }, [data, initialized]);
   const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
@@ -70,7 +72,7 @@ export function LessonEditor({ catalogId, items }: {
     if (!selected.length) { toast.error(t.empty); return; }
     setBusy(true);
     try {
-      await saveLessonDraft({ data: { catalogId, sequential, steps: selected } });
+      await saveLessonDraft({ data: { catalogId, sequential, enforceLocks, steps: selected } });
       if (publish) {
         await publishLessonDraft({ data: { catalogId } });
       }
@@ -97,6 +99,10 @@ export function LessonEditor({ catalogId, items }: {
       <label className="flex items-center gap-2 text-sm">
         <Checkbox checked={sequential} onCheckedChange={(checked) => setSequential(checked === true)} />
         {t.sequential}
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox checked={enforceLocks} onCheckedChange={(checked) => setEnforceLocks(checked === true)} />
+        {t.enforce}
       </label>
       <p className="text-xs text-muted-foreground">{t.include}</p>
       <div className="grid max-h-44 grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
