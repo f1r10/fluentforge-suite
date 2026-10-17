@@ -110,6 +110,38 @@ async function publishedLesson(catalogId: string) {
   return data;
 }
 
+async function verifyPublishableActivities(catalogId: string, steps: LessonStep[]): Promise<void> {
+  const itemIds = [...new Set(steps.filter((step) => step.kind === "activity")
+    .map((step) => step.itemId!))];
+  if (!itemIds.length) return;
+  const { adminClient } = await import("./security.server");
+  const admin = await adminClient();
+  const { data: items, error } = await admin
+    .from("catalog_items").select("id,entity_type,entity_id")
+    .eq("catalog_id", catalogId).in("id", itemIds);
+  if (error) throw new Error(error.message);
+  if ((items ?? []).length !== itemIds.length) {
+    throw new Error("The lesson references removed catalog activities.");
+  }
+  for (const type of ["question", "vocabulary", "reading", "listening"] as const) {
+    const table = {
+      question: "questions", vocabulary: "vocabulary_entries",
+      reading: "readings", listening: "listenings",
+    }[type];
+    const ids = (items ?? []).filter((item) => item.entity_type === type)
+      .map((item) => item.entity_id);
+    if (!ids.length) continue;
+    // Use the same active/deleted rules as the established catalog practice.
+    const { data: valid, error: entityError } = await admin.from(table)
+      .select("id").in("id", ids)
+      .eq("status", "active").is("deleted_at", null);
+    if (entityError) throw new Error(entityError.message);
+    if ((valid ?? []).length !== new Set(ids).size) {
+      throw new Error("Publish requires every referenced activity to be active.");
+    }
+  }
+}
+
 async function lessonOutcomes(revisionId: string, studentId: string): Promise<LessonStepOutcome[]> {
   const { adminClient } = await import("./security.server");
   const admin = await adminClient();
@@ -196,7 +228,8 @@ export const publishLessonDraft = createServerFn({ method: "POST" })
       .eq("state", "draft").maybeSingle();
     if (error) throw new Error(error.message);
     if (!draft) throw new Error("Lesson draft not found.");
-    parseSteps(draft.steps);
+    const validatedSteps = parseSteps(draft.steps);
+    await verifyPublishableActivities(data.catalogId, validatedSteps);
     // Atomic transition: the previous published revision is archived in the
     // same DB transaction; historical student progress is never rewritten.
     const { data: result, error: publishError } = await admin.rpc(
