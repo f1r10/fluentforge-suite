@@ -95,9 +95,11 @@ function StudentLesson() {
             </>
           )}
           {step.kind === "activity" && step.state === "available" && (
-            <p className="text-sm text-muted-foreground">
-              This graded activity is awaiting integration with the existing practice grader.
-            </p>
+            <Button asChild variant="outline">
+              <Link to="/student/catalogs/$id" params={{ id }}>
+                Practise this lesson activity
+              </Link>
+            </Button>
           )}
         </section>
       ))}
