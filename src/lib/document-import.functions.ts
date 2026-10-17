@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Database } from "../integrations/supabase/types";
 import { z } from "zod";
 import { vocabularyMetadataWarning, isTeacherApprovableValidationState } from "./vocabulary-review-policy";
+import { classifySenseAgainstExisting } from "./vocabulary-sense";
 import { requireTeacher } from "./teacher-middleware";
 import { validateQuestionInput } from "./question-schema";
 import { getProcessingService, type ProcessingImportItem } from "./processing.service";
@@ -2426,18 +2427,59 @@ async function prepareItems(
           ? raw["learning_language"].trim().toLowerCase()
           : "en";
       if (word) {
-        const { data: duplicate, error: duplicateError } = await admin
+        // Compare lexical senses, not only the lemma. A single English word
+        // can have separate noun/verb and even same-POS source meanings.
+        const { data: possibleSenses, error: duplicateError } = await admin
           .from("vocabulary_entries")
-          .select("id")
+          .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations(language,value)")
           .ilike("word", word)
           .eq("learning_language", learningLanguage)
           .is("deleted_at", null)
-          .limit(1)
-          .maybeSingle();
+          .limit(200);
         if (duplicateError) throw new Error(duplicateError.message);
-        if (duplicate) {
-          duplicateOf = duplicate.id;
+        const sourceTranslations = Array.isArray(raw["translations"])
+          ? (raw["translations"] as Array<{ language: string; value: string }>)
+          : [];
+        const incomingSense = {
+          word,
+          learning_language: learningLanguage,
+          part_of_speech: typeof raw["part_of_speech"] === "string" ? raw["part_of_speech"] : null,
+          definition: typeof raw["definition"] === "string" ? raw["definition"] : null,
+          notes: typeof raw["notes"] === "string" ? raw["notes"] : null,
+          translations: sourceTranslations,
+        };
+        const match = classifySenseAgainstExisting(
+          incomingSense,
+          ((possibleSenses ?? []) as Array<{
+            id: string; word: string; learning_language: string;
+            part_of_speech: string | null; definition: string | null;
+            notes: string | null;
+            vocabulary_translations: Array<{ language: string; value: string }> | null;
+          }>).map((record) => ({
+            id: record.id,
+            word: record.word,
+            learning_language: record.learning_language,
+            part_of_speech: record.part_of_speech,
+            definition: record.definition,
+            notes: record.notes,
+            translations: record.vocabulary_translations ?? [],
+          })),
+        );
+        if (match.exactDuplicateId) {
+          duplicateOf = match.exactDuplicateId;
           duplicateKind = "exact";
+        } else if (match.needsTeacherReview) {
+          // Ambiguous identical spellings must not be auto-approved. An editor
+          // can inspect the source, adjust the sense/POS and clear warnings.
+          const existingWarnings = Array.isArray(raw["import_warnings"])
+            ? (raw["import_warnings"] as unknown[]).map(String) : [];
+          item.payload = {
+            ...raw,
+            import_warnings: [
+              ...existingWarnings,
+              "An existing word has the same spelling but the sense is not clearly identical or distinct. Verify its meaning, part of speech and translation before approving.",
+            ],
+          };
         }
       }
     }
