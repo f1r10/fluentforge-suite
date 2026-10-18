@@ -8,6 +8,7 @@ type PublishedLesson = Database["public"]["Tables"]["lesson_revisions"]["Row"];
 
 export type LessonItemAccess = {
   revisionId: string;
+  enforceCatalogLocks: boolean;
   allowedItemIds: Set<string>;
   stepByItemId: Map<string, { id: string; mode: LessonStep["mode"]; state: "locked" | "available" | "completed" }>;
 } | null;
@@ -74,5 +75,6 @@ export async function lessonItemAccess(
     });
     if (step.state !== "locked") allowedItemIds.add(definition.itemId);
   }
-  return { revisionId: lesson.id, allowedItemIds, stepByItemId };
+  return { revisionId: lesson.id, enforceCatalogLocks: lesson.enforce_catalog_locks,
+    allowedItemIds, stepByItemId };
 }
