@@ -134,6 +134,12 @@ async function verifyPublishableActivities(catalogId: string, steps: LessonStep[
   )) {
     throw new Error("Reading and Listening steps support view completion only.");
   }
+  if (steps.some((step) =>
+    step.kind === "activity" && step.mode === "view" &&
+    ["question", "vocabulary"].includes(typeById.get(step.itemId!) ?? "")
+  )) {
+    throw new Error("Questions and vocabulary require server-graded attempt/pass completion.");
+  }
   for (const type of ["question", "vocabulary", "reading", "listening"] as const) {
     const table = {
       question: "questions", vocabulary: "vocabulary_entries",
