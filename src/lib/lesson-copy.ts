@@ -2,6 +2,10 @@
  * English strings remain canonical test labels.
  */
 const en: Record<string, string> = {
+  "View or listen without a grade": "View or listen without a grade",
+  "Open this catalog activity": "Open this catalog activity",
+  "I viewed or listened": "I viewed or listened",
+  "Activity viewed.": "Activity viewed.",
   "Restrict catalog practice to unlocked lesson activities": "Restrict catalog practice to unlocked lesson activities",
   "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.",
   "Back to catalog": "Back to catalog",
@@ -52,6 +56,10 @@ const en: Record<string, string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.": "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.",
 };
 const az: Record<string,string> = {
+  "View or listen without a grade": "Qiymət almadan oxu və ya dinlə",
+  "Open this catalog activity": "Kataloq tapşırığını aç",
+  "I viewed or listened": "Oxudum və ya dinlədim",
+  "Activity viewed.": "Baxış tamamlandı.",
   "Restrict catalog practice to unlocked lesson activities": "Kataloq məşqlərini yalnız açılmış dərs tapşırıqları ilə məhdudlaşdır",
   "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Standart olaraq bağlıdır. Müəllim bu seçimi aktivləşdirməyincə dərsin dərc edilməsi əvvəlki kataloq məşqlərini məhdudlaşdırmır.",
   "Back to catalog":"Kataloqa qayıt",
@@ -80,6 +88,10 @@ const az: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Kataloq materiallarından ardıcıl dərs qur. Yeni versiya köhnə tələbə nəticələrini dəyişmir.",
 };
 const ru: Record<string,string> = {
+  "View or listen without a grade": "Прочитать или прослушать без оценки",
+  "Open this catalog activity": "Открыть задание каталога",
+  "I viewed or listened": "Я прочитал(а) или прослушал(а)",
+  "Activity viewed.": "Просмотр завершён.",
   "Restrict catalog practice to unlocked lesson activities": "Ограничивать задания каталога открытыми шагами урока",
   "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "По умолчанию выключено. Публикация урока не ограничивает обычную практику каталога, пока это не включено.",
   "Back to catalog":"Вернуться в каталог",
@@ -108,6 +120,10 @@ const ru: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Создайте урок из материалов каталога. Новая версия не изменит прежние результаты учащихся.",
 };
 const tr: Record<string,string> = {
+  "View or listen without a grade": "Puan almadan oku veya dinle",
+  "Open this catalog activity": "Katalog etkinliğini aç",
+  "I viewed or listened": "Okudum veya dinledim",
+  "Activity viewed.": "Etkinlik görüntülendi.",
   "Restrict catalog practice to unlocked lesson activities": "Katalog alıştırmalarını açılmış ders adımlarıyla sınırla",
   "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Varsayılan olarak kapalıdır. Bu seçenek etkinleştirilmedikçe ders yayımlamak önceki katalog alıştırmalarını kısıtlamaz.",
   "Back to catalog":"Kataloğa dön",
