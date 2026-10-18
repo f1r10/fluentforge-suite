@@ -268,7 +268,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
 
     const lessonAccess = await lessonItemAccess(admin, data.catalogId, studentId);
     const items = (rawItems ?? []).filter(
-      (item) => !lessonAccess || lessonAccess.allowedItemIds.has(item.id),
+      (item) => !lessonAccess?.enforceCatalogLocks || lessonAccess.allowedItemIds.has(item.id),
     );
     const directQuestionIds = items.filter((x) => x.entity_type === "question").map((x) => x.entity_id);
     const vocabularyIds = items.filter((x) => x.entity_type === "vocabulary").map((x) => x.entity_id);
@@ -695,7 +695,7 @@ async function loadAllowedQuestions(
 
   const lessonAccess = await lessonItemAccess(admin, catalogId, studentId);
   const permittedItems = (catalogItems ?? []).filter(
-    (item) => !lessonAccess || lessonAccess.allowedItemIds.has(item.id),
+    (item) => !lessonAccess?.enforceCatalogLocks || lessonAccess.allowedItemIds.has(item.id),
   );
   const directItems = new Map(
     permittedItems.filter((x) => x.entity_type === "question").map((x) => [x.entity_id, x.id]),
@@ -875,7 +875,7 @@ export const submitVocabularyPracticeAnswer = createServerFn({
         );
       }
       const access = await lessonItemAccess(admin, data.catalogId, studentId);
-      if (access && !access.allowedItemIds.has(catalogItem.id)) {
+      if (access?.enforceCatalogLocks && !access.allowedItemIds.has(catalogItem.id)) {
         throw new Error("Complete the earlier required lesson steps first.");
       }
     }
