@@ -9,6 +9,9 @@ create table if not exists public.lesson_revisions (
   title text not null check (length(trim(title)) between 1 and 200),
   description text not null default '',
   sequential boolean not null default true,
+  -- Backwards compatible: publishing a lesson does NOT alter ordinary catalog
+  -- practice unless the teacher explicitly enables strict catalog locking.
+  enforce_catalog_locks boolean not null default false,
   steps jsonb not null default '[]'::jsonb
     check (jsonb_typeof(steps) = 'array' and jsonb_array_length(steps) between 1 and 100),
   created_at timestamptz not null default now(),
@@ -65,10 +68,10 @@ begin
     if not (old.state='published' and new.state='superseded'
       and current_setting('fluentforge.lesson_publish', true) = 'true'
       and (old.id,old.catalog_id,old.revision,old.title,old.description,
-           old.sequential,old.steps,old.created_at,old.published_at)
+           old.sequential,old.enforce_catalog_locks,old.steps,old.created_at,old.published_at)
        is not distinct from
           (new.id,new.catalog_id,new.revision,new.title,new.description,
-           new.sequential,new.steps,new.created_at,new.published_at)) then
+           new.sequential,new.enforce_catalog_locks,new.steps,new.created_at,new.published_at)) then
       raise exception 'Published lesson revisions are immutable';
     end if;
   end if;
