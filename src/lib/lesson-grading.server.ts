@@ -24,6 +24,9 @@ export async function recordGradedLessonActivity(
   if (!access) return; // legacy catalogs behave exactly as before
   const step = access.stepByItemId.get(catalogItemId);
   if (!step || step.state === "locked") {
+    // Unrestricted catalog practice remains unchanged. Attempts made before
+    // a lesson step is unlocked do not automatically advance lesson progress.
+    if (!access.enforceCatalogLocks) return;
     throw new Error("This lesson activity is not unlocked.");
   }
 
