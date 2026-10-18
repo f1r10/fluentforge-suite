@@ -37,6 +37,7 @@ const lessonInputSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().max(5000).default(""),
   sequential: z.boolean().default(true),
+  enforce_catalog_locks: z.boolean().default(false),
   steps: z.array(lessonStepSchema).min(1).max(100),
 }).strict();
 const lessonIdentitySchema = z.object({ catalogId: uuid });
@@ -213,6 +214,7 @@ export const saveLessonDraft = createServerFn({ method: "POST" })
       title: data.title,
       description: data.description,
       sequential: data.sequential,
+      enforce_catalog_locks: data.enforce_catalog_locks,
       steps: steps as unknown as Json,
     };
     if (draft) {
