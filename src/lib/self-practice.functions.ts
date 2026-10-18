@@ -658,7 +658,7 @@ async function catalogEntityIds(
   if (error) throw new Error(error.message);
   const access = await lessonItemAccess(admin, catalogId, studentId);
   return (data ?? [])
-    .filter((row) => !access || access.allowedItemIds.has(row.id))
+    .filter((row) => !access?.enforceCatalogLocks || access.allowedItemIds.has(row.id))
     .map((row) => row.entity_id);
 }
 
