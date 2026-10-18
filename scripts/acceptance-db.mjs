@@ -140,7 +140,8 @@ async function verifySchemaSecurity() {
   const gradeDef = lessonByName.get("record_lesson_step_grade") ?? "";
   const revisionDef = lessonByName.get("protect_published_lesson_revision") ?? "";
   if (!gradeDef.includes("catalog_id") || !gradeDef.includes("entity_id") ||
-      !gradeDef.includes("event_type") || !gradeDef.includes("score_percent")) {
+      !gradeDef.includes("event_type") || !gradeDef.includes("score_percent") ||
+      !gradeDef.includes("step ->> 'mode' in ('attempt','pass')")) {
     fail("Lesson grade RPC must bind trusted event to catalog/entity and score.");
   } else {
     pass("Lesson grade RPC verifies catalog, entity, event type and score");
