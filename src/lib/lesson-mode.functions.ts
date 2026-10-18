@@ -23,8 +23,8 @@ const lessonStepSchema = z.object({
   if (step.kind === "theory" && (step.mode !== "view" || !step.body?.trim() || step.itemId)) {
     ctx.addIssue({ code: "custom", message: "A theory step must contain text and use view completion." });
   }
-  if (step.kind === "activity" && (!step.itemId || step.mode === "view" || step.body)) {
-    ctx.addIssue({ code: "custom", message: "An activity step must reference a catalog item and use attempt/pass." });
+  if (step.kind === "activity" && (!step.itemId || step.body)) {
+    ctx.addIssue({ code: "custom", message: "An activity step must reference a catalog item." });
   }
   if (step.mode === "pass" && step.minScorePercent === undefined) {
     ctx.addIssue({ code: "custom", message: "A passing step needs a minimum score." });
@@ -124,14 +124,15 @@ async function verifyPublishableActivities(catalogId: string, steps: LessonStep[
   if ((items ?? []).length !== itemIds.length) {
     throw new Error("The lesson references removed catalog activities.");
   }
-  // Reading/Listening contain multiple contextual questions. An individual
-  // answer cannot safely count as a passing score for their whole activity.
-  // They remain available in legacy catalogs but are not publishable steps
-  // until their aggregate server grading is implemented and tested.
-  if ((items ?? []).some((item) =>
-    item.entity_type === "reading" || item.entity_type === "listening"
+  // Contextual Reading/Listening do not yet have trusted aggregate scores:
+  // they can be a *self-acknowledged view* step, never attempt/pass. This
+  // permits teacher-guided sequences without inventing a graded result.
+  const typeById = new Map((items ?? []).map((item) => [item.id, item.entity_type]));
+  if (steps.some((step) =>
+    step.kind === "activity" && step.mode !== "view" &&
+    ["reading", "listening"].includes(typeById.get(step.itemId!) ?? "")
   )) {
-    throw new Error("Reading and Listening steps need aggregate grading before publishing.");
+    throw new Error("Reading and Listening steps support view completion only.");
   }
   for (const type of ["question", "vocabulary", "reading", "listening"] as const) {
     const table = {
@@ -299,8 +300,9 @@ export const markLessonTheoryViewed = createServerFn({ method: "POST" })
     }
     const steps = parseSteps(lesson.steps);
     const step = steps.find((item) => item.id === data.stepId);
-    if (!step || step.kind !== "theory" || step.mode !== "view") {
-      throw new Error("Only theory reading can be acknowledged without grading.");
+    if (!step || step.mode !== "view" ||
+      (step.kind !== "theory" && step.kind !== "activity")) {
+      throw new Error("Only view-mode lesson steps can be acknowledged without grading.");
     }
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
