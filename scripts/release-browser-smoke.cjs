@@ -474,6 +474,14 @@ async function gotoHydrated(page, path) {
     await page.getByRole("combobox", { name: "Add catalog activity" })
       .selectOption({ index: 1 });
     await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
+    // Default-off preserves existing catalog practice. This test deliberately
+    // opts in before asserting locked-step behavior on the student side.
+    const lockToggle = page.getByRole("checkbox", {
+      name: /Restrict catalog practice to unlocked lesson activities/,
+    });
+    assert(!(await lockToggle.isChecked()),
+      "Publishing a new lesson must default to leaving legacy practice available.");
+    await lockToggle.check();
     await page.getByRole("button", { name: "Save draft" }).first().click();
     await page.getByRole("button", { name: "Publish draft" }).first()
       .waitFor({ state: "visible", timeout: 20000 });
