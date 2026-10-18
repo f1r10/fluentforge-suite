@@ -151,6 +151,21 @@ async function verifySchemaSecurity() {
     pass("Published lesson immutability guard requires publication context");
   }
 
+  const catalogLockCols = await sql`
+    select column_default, is_nullable
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'lesson_revisions'
+      and column_name = 'enforce_catalog_locks'
+  `;
+  if (catalogLockCols.length !== 1 ||
+      !String(catalogLockCols[0].column_default ?? "").includes("false") ||
+      catalogLockCols[0].is_nullable !== "NO" ||
+      !revisionDef.includes("enforce_catalog_locks")) {
+    fail("Lesson catalog lockdown must default OFF and remain immutable after publication.");
+  } else {
+    pass("Catalog locking defaults off, persists and is immutable in published revisions");
+  }
+
   const resetColumns = await sql`
     select column_name
     from information_schema.columns
