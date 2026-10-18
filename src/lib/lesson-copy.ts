@@ -2,6 +2,8 @@
  * English strings remain canonical test labels.
  */
 const en: Record<string, string> = {
+  "Restrict catalog practice to unlocked lesson activities": "Restrict catalog practice to unlocked lesson activities",
+  "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.",
   "Back to catalog": "Back to catalog",
   "Theory completed.": "Theory completed.",
   "Could not save progress.": "Could not save progress.",
@@ -50,6 +52,8 @@ const en: Record<string, string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.": "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.",
 };
 const az: Record<string,string> = {
+  "Restrict catalog practice to unlocked lesson activities": "Kataloq məşqlərini yalnız açılmış dərs tapşırıqları ilə məhdudlaşdır",
+  "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Standart olaraq bağlıdır. Müəllim bu seçimi aktivləşdirməyincə dərsin dərc edilməsi əvvəlki kataloq məşqlərini məhdudlaşdırmır.",
   "Back to catalog":"Kataloqa qayıt",
   "Theory completed.":"Qayda tamamlandı.", "Could not save progress.":"İrəliləyiş saxlanmadı.", "Lesson progress":"Dərs irəliləyişi","Lesson Mode":"Ardıcıl dərs",
   "My lesson":"Dərsim","Save draft":"Qaralamanı saxla",
@@ -76,6 +80,8 @@ const az: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Kataloq materiallarından ardıcıl dərs qur. Yeni versiya köhnə tələbə nəticələrini dəyişmir.",
 };
 const ru: Record<string,string> = {
+  "Restrict catalog practice to unlocked lesson activities": "Ограничивать задания каталога открытыми шагами урока",
+  "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "По умолчанию выключено. Публикация урока не ограничивает обычную практику каталога, пока это не включено.",
   "Back to catalog":"Вернуться в каталог",
   "Theory completed.":"Теория завершена.", "Could not save progress.":"Не удалось сохранить прогресс.", "Lesson progress":"Прогресс урока","Lesson Mode":"Последовательный урок",
   "My lesson":"Мой урок","Save draft":"Сохранить черновик","Publish draft":"Опубликовать",
@@ -102,6 +108,8 @@ const ru: Record<string,string> = {
   "Create ordered steps from existing catalog content. Publish a new revision without changing learners' prior results.":"Создайте урок из материалов каталога. Новая версия не изменит прежние результаты учащихся.",
 };
 const tr: Record<string,string> = {
+  "Restrict catalog practice to unlocked lesson activities": "Katalog alıştırmalarını açılmış ders adımlarıyla sınırla",
+  "Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.": "Varsayılan olarak kapalıdır. Bu seçenek etkinleştirilmedikçe ders yayımlamak önceki katalog alıştırmalarını kısıtlamaz.",
   "Back to catalog":"Kataloğa dön",
   "Theory completed.":"Konu tamamlandı.", "Could not save progress.":"İlerleme kaydedilemedi.", "Lesson progress":"Ders ilerlemesi","Lesson Mode":"Sıralı ders","My lesson":"Dersim",
   "Save draft":"Taslağı kaydet","Publish draft":"Yayımla",
