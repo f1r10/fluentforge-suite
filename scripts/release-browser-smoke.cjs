@@ -101,6 +101,7 @@ async function gotoHydrated(page, path) {
 
   const browser = await chromium.launch({ headless: true });
   let activePage;
+  let unassignedStudentAccessKey;
 
   try {
     const teacherContext = await browser.newContext();
@@ -919,6 +920,21 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] Question Bank exported as printable PDF with answer option");
 
+    // A second unassigned student must not see or advance the first student's
+    // published lesson; this catches cross-student IDOR/BOLA regressions.
+    await gotoHydrated(page, "/teacher/students");
+    await page.getByRole("button", { name: "Add student" }).click();
+    const otherDialog = page.getByRole("dialog");
+    await otherDialog.locator("#fn").fill("Isolated");
+    await otherDialog.locator("#ln").fill("Learner");
+    await otherDialog.locator("#un").fill("isolated.student");
+    await otherDialog.locator('form button[type="submit"]').click();
+    unassignedStudentAccessKey = (
+      (await page.getByRole("dialog").locator("code").textContent()) || ""
+    ).trim();
+    assert(unassignedStudentAccessKey.length >= 10,
+      "Unassigned student did not receive an access key.");
+
     await teacherContext.close();
 
     const reloginContext = await browser.newContext();
@@ -932,6 +948,22 @@ async function gotoHydrated(page, path) {
     await expectPath(reloginPage, "**/teacher", "teacher credential login");
     await reloginContext.close();
     console.log("[ok] teacher can sign in again with credentials");
+
+    const deniedContext = await browser.newContext();
+    const deniedPage = await deniedContext.newPage();
+    activePage = deniedPage;
+    await useEnglish(deniedPage);
+    await gotoHydrated(deniedPage, "/");
+    await deniedPage.locator("#key").fill(unassignedStudentAccessKey);
+    await deniedPage.locator('form button[type="submit"]').click();
+    await expectPath(deniedPage, "**/student", "unassigned student access-key login");
+    await gotoHydrated(deniedPage, `/student/lessons/${releaseCatalogId}`);
+    await deniedPage.getByText("Lesson is not assigned to you.", { exact: false })
+      .waitFor({ timeout: 20000 });
+    assert(!(await deniedPage.getByText("Theory for the student's released lesson.").count()),
+      "An unassigned student must not see a teacher's private lesson content.");
+    console.log("[ok] unassigned second student cannot read another student's lesson");
+    await deniedContext.close();
 
     const studentContext = await browser.newContext();
     const studentPage = await studentContext.newPage();
