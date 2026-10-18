@@ -80,7 +80,7 @@ function LessonEditor() {
         title: item.title.slice(0, 200),
         itemId: item.id,
         required: true,
-        mode: "attempt",
+        mode: ["reading", "listening"].includes(item.entity_type) ? "view" : "attempt",
       }],
     }));
   };
@@ -248,14 +248,22 @@ function LessonEditor() {
                 <select className="rounded-md border bg-background p-2"
                   value={step.mode}
                   onChange={(event) => {
-                    const mode = event.target.value as "attempt" | "pass";
+                    const mode = event.target.value as "view" | "attempt" | "pass";
                     change(step.id, {
                       mode,
                       minScorePercent: mode === "pass" ? (step.minScorePercent ?? 70) : undefined,
                     });
                   }}>
-                  <option value="attempt">{l("Attempting the activity")}</option>
-                  <option value="pass">{l("Passing with minimum score")}</option>
+                  {["reading", "listening"].includes(
+                    catalog.items.find((item) => item.id === step.itemId)?.entity_type ?? "",
+                  ) ? (
+                    <option value="view">{l("View or listen without a grade")}</option>
+                  ) : (
+                    <>
+                      <option value="attempt">{l("Attempting the activity")}</option>
+                      <option value="pass">{l("Passing with minimum score")}</option>
+                    </>
+                  )}
                 </select>
                 {step.mode === "pass" && (
                   <label className="flex items-center gap-2">
