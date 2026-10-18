@@ -924,8 +924,10 @@ async function gotoHydrated(page, path) {
     await mediaActivitySelect.selectOption({ index: 1 });
     await mediaActivitySelect.selectOption({ index: 2 });
     await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
-    await page.getByText("View or listen without a grade")
-      .first().waitFor({ timeout: 20000 });
+    const viewRules = page.locator("article select")
+      .filter({ has: page.locator('option[value="view"]') });
+    assert(await viewRules.count() === 2,
+      "Reading and Listening must both use view-only completion rules.");
     await page.getByRole("button", { name: "Publish draft" }).first().click();
     await page.getByText(/Published revision 1/).waitFor({ timeout: 20000 });
     console.log("[ok] teacher published Reading and Listening as ungraded view-only lesson steps");
