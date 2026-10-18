@@ -886,6 +886,50 @@ async function gotoHydrated(page, path) {
     await listeningDialog.waitFor({ state: "hidden", timeout: 20000 });
     console.log("[ok] teacher previewed Listening activity, media and questions as a whole");
 
+    // An ungraded lesson with contextual Reading and Listening can be
+    // published safely. No individual contextual answer is treated as a
+    // verified passing grade for an entire media activity.
+    await gotoHydrated(page, "/teacher/catalogs");
+    await page.getByRole("button", { name: /^(New catalog|Add catalog)$/ }).click();
+    const mediaCatalogDialog = page.getByRole("dialog");
+    await mediaCatalogDialog.locator("input").first().fill("Release Media Lesson");
+    await mediaCatalogDialog.getByRole("button", { name: "Create" }).click();
+    await expectPath(page, "**/teacher/catalogs/**", "media lesson catalog workspace");
+    const releaseMediaCatalogId = page.url().split("/").filter(Boolean).at(-1);
+    assert(releaseMediaCatalogId && /^[0-9a-f-]{36}$/i.test(releaseMediaCatalogId),
+      "Media catalog must have a stable UUID.");
+    await page.getByRole("button", { name: "Add content" }).click();
+    const mediaContentDialog = page.getByRole("dialog");
+    for (const title of ["Release Reading", "Release Listening"]) {
+      const row = mediaContentDialog.getByText(title, { exact: true })
+        .locator("xpath=ancestor::li");
+      await row.getByRole("checkbox").click();
+    }
+    await mediaContentDialog.getByRole("button", { name: /^Add \(2\)$/ }).click();
+    await page.getByText("Release Reading", { exact: true })
+      .waitFor({ timeout: 20000 });
+    const mediaAssignmentPanel = page
+      .getByRole("heading", { name: "Students", level: 3 })
+      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+    await mediaAssignmentPanel.getByRole("button", { name: "Add", exact: true }).click();
+    const mediaAssignmentDialog = page.getByRole("dialog");
+    await mediaAssignmentDialog.getByText(student.username, { exact: true })
+      .locator("xpath=ancestor::li")
+      .getByRole("button", { name: "Add", exact: true }).click();
+    await mediaAssignmentDialog.getByRole("button", { name: "Close", exact: true }).first().click();
+    await gotoHydrated(page, `/teacher/lessons/${releaseMediaCatalogId}`);
+    await page.getByRole("heading", { name: /Lesson Mode — Release Media Lesson/ })
+      .waitFor({ timeout: 20000 });
+    const mediaActivitySelect = page.getByRole("combobox", { name: "Add catalog activity" });
+    await mediaActivitySelect.selectOption({ index: 1 });
+    await mediaActivitySelect.selectOption({ index: 2 });
+    await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
+    await page.getByText("View or listen without a grade")
+      .first().waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Publish draft" }).first().click();
+    await page.getByText(/Published revision 1/).waitFor({ timeout: 20000 });
+    console.log("[ok] teacher published Reading and Listening as ungraded view-only lesson steps");
+
     await gotoHydrated(page, "/teacher/exports");
     await page
       .getByRole("heading", { name: "Export Center", level: 1 })
@@ -1047,6 +1091,21 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     await secondDeviceContext.close();
     console.log("[ok] assigned student's graded progress persisted on both devices after refresh");
+
+    await gotoHydrated(studentPage, `/student/lessons/${releaseMediaCatalogId}`);
+    await studentPage.getByRole("heading", { name: "Release Media Lesson" })
+      .waitFor({ timeout: 20000 });
+    const mediaViewButtons = studentPage.getByRole("button", { name: "I viewed or listened" });
+    await mediaViewButtons.first().click();
+    await studentPage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("button", { name: "I viewed or listened" }).click();
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await studentPage.reload({ waitUntil: "networkidle" });
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] Reading/Listening view acknowledgements persist without fabricated scores");
 
     await gotoHydrated(studentPage, "/student/library");
     await studentPage
