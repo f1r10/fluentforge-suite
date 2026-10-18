@@ -170,7 +170,10 @@ begin
     on item.id = (step ->> 'itemId')::uuid
    and item.catalog_id = revision.catalog_id
   where revision.id = p_revision_id and revision.state = 'published'
-    and step ->> 'id' = p_step_id and step ->> 'kind' = 'activity';
+    and step ->> 'id' = p_step_id and step ->> 'kind' = 'activity'
+    -- View-mode steps are self-acknowledged and cannot receive fabricated
+    -- grades from individual Reading/Listening questions.
+    and step ->> 'mode' in ('attempt','pass');
   if not found then
     raise exception 'Lesson activity does not belong to the published revision';
   end if;
