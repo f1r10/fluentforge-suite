@@ -996,9 +996,27 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     await studentPage.getByText("Locked", { exact: true }).first()
       .waitFor({ timeout: 20000 });
+
+    // The same student is permitted on two devices; completion must be
+    // durable and visible after refreshing the other independent session.
+    const secondDeviceContext = await browser.newContext();
+    const secondDevicePage = await secondDeviceContext.newPage();
+    await useEnglish(secondDevicePage);
+    await gotoHydrated(secondDevicePage, "/");
+    await secondDevicePage.locator("#key").fill(accessKey);
+    await secondDevicePage.locator('form button[type="submit"]').click();
+    await expectPath(secondDevicePage, "**/student", "same student on second device");
+    await gotoHydrated(secondDevicePage, `/student/lessons/${releaseCatalogId}`);
+    await secondDevicePage.getByText("Locked", { exact: true }).first()
+      .waitFor({ timeout: 20000 });
+
     await studentPage.getByRole("button", { name: "I have read this" }).click();
     await studentPage.getByText("1 of 2 required steps completed")
       .waitFor({ timeout: 20000 });
+    await secondDevicePage.reload({ waitUntil: "networkidle" });
+    await secondDevicePage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] lesson theory progress persists across both allowed student devices");
     console.log("[ok] later graded activity remains locked until teacher-authored theory completed");
 
     await gotoHydrated(studentPage, `/student/catalogs/${releaseCatalogId}`);
@@ -1024,7 +1042,11 @@ async function gotoHydrated(page, path) {
     await studentPage.reload();
     await studentPage.getByText("Lesson complete.")
       .waitFor({ timeout: 20000 });
-    console.log("[ok] assigned student completed graded lesson and progress persisted after refresh");
+    await secondDevicePage.reload({ waitUntil: "networkidle" });
+    await secondDevicePage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await secondDeviceContext.close();
+    console.log("[ok] assigned student's graded progress persisted on both devices after refresh");
 
     await gotoHydrated(studentPage, "/student/library");
     await studentPage
