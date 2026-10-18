@@ -31,14 +31,14 @@ function StudentLesson() {
     queryFn: () => getStudentLesson({ data: { catalogId: id } }),
   });
   const [busyStepId, setBusyStepId] = useState<string | null>(null);
-  const markViewed = async (revisionId: string, stepId: string) => {
+  const markViewed = async (revisionId: string, stepId: string, isActivity = false) => {
     setBusyStepId(stepId);
     try {
       await markLessonTheoryViewed({ data: {
         catalogId: id, revisionId, stepId,
       }});
       await refetch();
-      toast.success(l("Theory completed."));
+      toast.success(l(isActivity ? "Activity viewed." : "Theory completed."));
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : l("Could not save progress."));
     } finally {
@@ -99,11 +99,19 @@ function StudentLesson() {
             </>
           )}
           {step.kind === "activity" && step.state === "available" && (
-            <Button asChild variant="outline">
-              <Link to="/student/catalogs/$id" params={{ id }}>
-                {l("Practise this lesson activity")}
-              </Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline">
+                <Link to="/student/catalogs/$id" params={{ id }}>
+                  {l("Open this catalog activity")}
+                </Link>
+              </Button>
+              {step.mode === "view" && (
+                <Button onClick={() => markViewed(lesson.id, step.id, true)}
+                  disabled={busyStepId !== null}>
+                  {l(busyStepId === step.id ? "Saving…" : "I viewed or listened")}
+                </Button>
+              )}
+            </div>
           )}
         </section>
       ))}
