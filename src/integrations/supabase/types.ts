@@ -23,6 +23,7 @@ export type Database = {
           title: string
           description: string
           sequential: boolean
+          enforce_catalog_locks: boolean
           steps: Json
           created_at: string
           published_at: string | null
@@ -35,6 +36,7 @@ export type Database = {
           title: string
           description?: string
           sequential?: boolean
+          enforce_catalog_locks?: boolean
           steps: Json
           created_at?: string
           published_at?: string | null
@@ -47,6 +49,7 @@ export type Database = {
           title?: string
           description?: string
           sequential?: boolean
+          enforce_catalog_locks?: boolean
           steps?: Json
           created_at?: string
           published_at?: string | null
