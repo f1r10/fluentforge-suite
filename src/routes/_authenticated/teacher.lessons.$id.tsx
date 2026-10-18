@@ -17,8 +17,8 @@ export const Route = createFileRoute("/_authenticated/teacher/lessons/$id")({
   head: () => ({ meta: [{ title: "Lesson mode | FluentForge" }] }),
 });
 
-type Draft = { title: string; description: string; sequential: boolean; steps: LessonStep[] };
-const emptyDraft: Draft = { title: "", description: "", sequential: true, steps: [] };
+type Draft = { title: string; description: string; sequential: boolean; enforce_catalog_locks: boolean; steps: LessonStep[] };
+const emptyDraft: Draft = { title: "", description: "", sequential: true, enforce_catalog_locks: false, steps: [] };
 
 function LessonEditor() {
   const { lang } = useI18n();
@@ -42,6 +42,7 @@ function LessonEditor() {
       title: source?.title || versions.catalog.name,
       description: source?.description ?? "",
       sequential: source?.sequential ?? true,
+      enforce_catalog_locks: source?.enforce_catalog_locks ?? false,
       steps: Array.isArray(source?.steps) ? source.steps as unknown as LessonStep[] : [],
     });
   }, [versions]);
@@ -147,7 +148,7 @@ function LessonEditor() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={save} disabled={saving}>{l("Save draft")}</Button>
           <Button onClick={publish} disabled={saving || draft.steps.length === 0}>
-            Publish draft
+            {l("Publish draft")}
           </Button>
         </div>
       </div>
@@ -174,6 +175,18 @@ function LessonEditor() {
           <input type="checkbox" checked={draft.sequential}
             onChange={(event) => setDraft((x) => ({ ...x, sequential: event.target.checked }))}/>
           {l("Lock later required activities until earlier required steps are completed")}
+        </label>
+        <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+          <input className="mt-1" type="checkbox" checked={draft.enforce_catalog_locks}
+            onChange={(event) => setDraft((x) => ({
+              ...x, enforce_catalog_locks: event.target.checked,
+            }))}/>
+          <span>
+            <span className="font-medium">{l("Restrict catalog practice to unlocked lesson activities")}</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {l("Off by default. Publishing a lesson does not restrict existing catalog practice unless enabled.")}
+            </span>
+          </span>
         </label>
       </section>
 
