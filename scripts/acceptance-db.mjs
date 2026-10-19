@@ -152,6 +152,14 @@ async function verifySchemaSecurity() {
   } else {
     pass("Published lesson immutability guard requires publication context");
   }
+  // PostgreSQL custom configuration variables are freely settable; an
+  // authenticated role must not gain restore powers by setting the flag.
+  if (!revisionDef.includes("Unprivileged lesson restore context is forbidden") ||
+      !revisionDef.includes("current_user")) {
+    fail("Lesson restore context lacks an independent privileged-role check.");
+  } else {
+    pass("Lesson restore bypass rejects user-settable GUC spoofing");
+  }
 
   const catalogLockCols = await sql`
     select column_default, is_nullable
