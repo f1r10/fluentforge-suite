@@ -753,7 +753,8 @@ BEGIN
     RETURNING id INTO v_backup;
   SELECT jsonb_agg(jsonb_build_object(
     'category','activity','event_type','restore_test',
-    'details',jsonb_build_object('source_seq',n)
+    'details',jsonb_build_object('source_seq',n),
+    'created_at','2026-10-19T00:00:00Z'
   )) INTO v_events FROM generate_series(1,250) AS n;
   SELECT public.restore_event_batch(v_backup,'activity_events',0,v_events)
     INTO v_count;
@@ -773,7 +774,8 @@ BEGIN
   SELECT public.restore_event_batch(v_backup,'activity_events',1,
     jsonb_build_array(jsonb_build_object(
       'category','activity','event_type','restore_test',
-      'details',jsonb_build_object('source_seq',251))))
+      'details',jsonb_build_object('source_seq',251),
+      'created_at','2026-10-19T00:00:00Z')))
     INTO v_count;
   IF v_count <> 1 THEN RAISE EXCEPTION 'Second batch failed'; END IF;
   SELECT count(*) INTO v_count FROM public.activity_events
