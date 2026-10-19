@@ -83,6 +83,12 @@ export async function recordVerifiedLessonAttempts(
   if (!grades.length) return;
   const lesson = await latestPublishedLesson(admin, catalogId);
   if (!lesson) return;
+  // A separate catalog practice remains available, but an out-of-order
+  // attempt must not unlock later stages of a sequential lesson.
+  const progress = await computeLessonProgress(admin, studentId, lesson);
+  const allowed = new Set(
+    progress.steps.filter(step => step.state !== "locked").map(step => step.id),
+  );
 
   const rows: Array<{
     student_id: string; catalog_id: string; revision: number;
@@ -96,7 +102,7 @@ export async function recordVerifiedLessonAttempts(
       (grade.entity_type !== "question" ||
         candidate.question_version === grade.question_version),
     );
-    if (!step) continue;
+    if (!step || !allowed.has(step.id)) continue;
     rows.push({
       student_id: studentId,
       catalog_id: catalogId,
