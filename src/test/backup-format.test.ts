@@ -115,6 +115,23 @@ describe("backup row sanitization", () => {
     expect(result).not.toHaveProperty("search");
   });
 
+  it("restores lesson grades without dangling historical event IDs", () => {
+    const result = sanitizeBackupRow("lesson_step_progress", {
+      revision_id: "lesson-revision",
+      student_id: "learner",
+      step_id: "activity-1",
+      last_graded_event_id: 123456,
+      best_score_percent: 92,
+      attempted_at: "2026-10-18T15:00:00Z",
+      viewed_at: null,
+      teacher_approved: false,
+    });
+
+    expect(result?.["last_graded_event_id"]).toBeNull();
+    expect(result?.["best_score_percent"]).toBe(92);
+    expect(result?.["attempted_at"]).toBe("2026-10-18T15:00:00Z");
+  });
+
   it("drops non-allowlisted system settings", () => {
     expect(
       sanitizeBackupRow("system_settings", {
