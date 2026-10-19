@@ -242,10 +242,15 @@ function CatalogWorkspace() {
           <h1 className="text-2xl font-bold">{data.name}</h1>
           {data.description && <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{data.description}</p>}
         </div>
-        <Button variant="ghost" className="text-destructive" onClick={removeCatalog}>
-          <Trash2 className="h-4 w-4" />
-          {t("delete")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/teacher/lessons/$id" params={{ id }}>Lesson Mode</Link>
+          </Button>
+          <Button variant="ghost" className="text-destructive" onClick={removeCatalog}>
+            <Trash2 className="h-4 w-4" />
+            {t("delete")}
+          </Button>
+        </div>
       </div>
 
       <section className="rounded-md border border-border p-4">

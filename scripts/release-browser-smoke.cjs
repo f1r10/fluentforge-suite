@@ -101,6 +101,7 @@ async function gotoHydrated(page, path) {
 
   const browser = await chromium.launch({ headless: true });
   let activePage;
+  let unassignedStudentAccessKey;
 
   try {
     const teacherContext = await browser.newContext();
@@ -458,6 +459,36 @@ async function gotoHydrated(page, path) {
       .getByText(student.username, { exact: true })
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
+
+    // Lesson Mode extends the existing catalog: theory locks the graded
+    // question until read; grading from catalog practice completes the lesson.
+    // Existing catalogs with no published lesson retain legacy behavior.
+    const releaseCatalogId = page.url().split("/").filter(Boolean).at(-1);
+    assert(releaseCatalogId && /^[0-9a-f-]{36}$/i.test(releaseCatalogId),
+      "Created catalog must have a stable UUID.");
+    await gotoHydrated(page, `/teacher/lessons/${releaseCatalogId}`);
+    await page.getByRole("heading", { name: /Lesson Mode — Release Catalog/ })
+      .waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Add theory" }).click();
+    await page.locator("article textarea").first()
+      .fill("Theory for the student's released lesson.");
+    await page.getByRole("combobox", { name: "Add catalog activity" })
+      .selectOption({ index: 1 });
+    await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
+    // Default-off preserves existing catalog practice. This test deliberately
+    // opts in before asserting locked-step behavior on the student side.
+    const lockToggle = page.getByRole("checkbox", {
+      name: /Restrict catalog practice to unlocked lesson activities/,
+    });
+    assert(!(await lockToggle.isChecked()),
+      "Publishing a new lesson must default to leaving legacy practice available.");
+    await lockToggle.check();
+    await page.getByRole("button", { name: "Save draft" }).first().click();
+    await page.getByRole("button", { name: "Publish draft" }).first()
+      .waitFor({ state: "visible", timeout: 20000 });
+    await page.getByRole("button", { name: "Publish draft" }).first().click();
+    await page.getByText(/Published revision 1/).waitFor({ timeout: 20000 });
+    console.log("[ok] teacher saved and atomically published a lesson revision");
 
     await gotoHydrated(page, "/teacher/exams");
     await page
@@ -855,6 +886,52 @@ async function gotoHydrated(page, path) {
     await listeningDialog.waitFor({ state: "hidden", timeout: 20000 });
     console.log("[ok] teacher previewed Listening activity, media and questions as a whole");
 
+    // An ungraded lesson with contextual Reading and Listening can be
+    // published safely. No individual contextual answer is treated as a
+    // verified passing grade for an entire media activity.
+    await gotoHydrated(page, "/teacher/catalogs");
+    await page.getByRole("button", { name: /^(New catalog|Add catalog)$/ }).click();
+    const mediaCatalogDialog = page.getByRole("dialog");
+    await mediaCatalogDialog.locator("input").first().fill("Release Media Lesson");
+    await mediaCatalogDialog.getByRole("button", { name: "Create" }).click();
+    await expectPath(page, "**/teacher/catalogs/**", "media lesson catalog workspace");
+    const releaseMediaCatalogId = page.url().split("/").filter(Boolean).at(-1);
+    assert(releaseMediaCatalogId && /^[0-9a-f-]{36}$/i.test(releaseMediaCatalogId),
+      "Media catalog must have a stable UUID.");
+    await page.getByRole("button", { name: "Add content" }).click();
+    const mediaContentDialog = page.getByRole("dialog");
+    for (const title of ["Release Reading", "Release Listening"]) {
+      const row = mediaContentDialog.getByText(title, { exact: true })
+        .locator("xpath=ancestor::li");
+      await row.getByRole("checkbox").click();
+    }
+    await mediaContentDialog.getByRole("button", { name: /^Add \(2\)$/ }).click();
+    await page.getByText("Release Reading", { exact: true })
+      .waitFor({ timeout: 20000 });
+    const mediaAssignmentPanel = page
+      .getByRole("heading", { name: "Students", level: 3 })
+      .locator("xpath=ancestor::div[contains(@class,'rounded-md')][1]");
+    await mediaAssignmentPanel.getByRole("button", { name: "Add", exact: true }).click();
+    const mediaAssignmentDialog = page.getByRole("dialog");
+    await mediaAssignmentDialog.getByText(student.username, { exact: true })
+      .locator("xpath=ancestor::li")
+      .getByRole("button", { name: "Add", exact: true }).click();
+    await mediaAssignmentDialog.getByRole("button", { name: "Close", exact: true }).first().click();
+    await gotoHydrated(page, `/teacher/lessons/${releaseMediaCatalogId}`);
+    await page.getByRole("heading", { name: /Lesson Mode — Release Media Lesson/ })
+      .waitFor({ timeout: 20000 });
+    const mediaActivitySelect = page.getByRole("combobox", { name: "Add catalog activity" });
+    await mediaActivitySelect.selectOption({ index: 1 });
+    await mediaActivitySelect.selectOption({ index: 2 });
+    await page.getByText("Step 2 — activity").waitFor({ timeout: 20000 });
+    const viewRules = page.locator("article select")
+      .filter({ has: page.locator('option[value="view"]') });
+    assert(await viewRules.count() === 2,
+      "Reading and Listening must both use view-only completion rules.");
+    await page.getByRole("button", { name: "Publish draft" }).first().click();
+    await page.getByText(/Published revision 1/).waitFor({ timeout: 20000 });
+    console.log("[ok] teacher published Reading and Listening as ungraded view-only lesson steps");
+
     await gotoHydrated(page, "/teacher/exports");
     await page
       .getByRole("heading", { name: "Export Center", level: 1 })
@@ -889,6 +966,21 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] Question Bank exported as printable PDF with answer option");
 
+    // A second unassigned student must not see or advance the first student's
+    // published lesson; this catches cross-student IDOR/BOLA regressions.
+    await gotoHydrated(page, "/teacher/students");
+    await page.getByRole("button", { name: "Add student" }).click();
+    const otherDialog = page.getByRole("dialog");
+    await otherDialog.locator("#fn").fill("Isolated");
+    await otherDialog.locator("#ln").fill("Learner");
+    await otherDialog.locator("#un").fill("isolated.student");
+    await otherDialog.locator('form button[type="submit"]').click();
+    unassignedStudentAccessKey = (
+      (await page.getByRole("dialog").locator("code").textContent()) || ""
+    ).trim();
+    assert(unassignedStudentAccessKey.length >= 10,
+      "Unassigned student did not receive an access key.");
+
     await teacherContext.close();
 
     const reloginContext = await browser.newContext();
@@ -902,6 +994,22 @@ async function gotoHydrated(page, path) {
     await expectPath(reloginPage, "**/teacher", "teacher credential login");
     await reloginContext.close();
     console.log("[ok] teacher can sign in again with credentials");
+
+    const deniedContext = await browser.newContext();
+    const deniedPage = await deniedContext.newPage();
+    activePage = deniedPage;
+    await useEnglish(deniedPage);
+    await gotoHydrated(deniedPage, "/");
+    await deniedPage.locator("#key").fill(unassignedStudentAccessKey);
+    await deniedPage.locator('form button[type="submit"]').click();
+    await expectPath(deniedPage, "**/student", "unassigned student access-key login");
+    await gotoHydrated(deniedPage, `/student/lessons/${releaseCatalogId}`);
+    await deniedPage.getByText("Lesson is not assigned to you.", { exact: false })
+      .waitFor({ timeout: 20000 });
+    assert(!(await deniedPage.getByText("Theory for the student's released lesson.").count()),
+      "An unassigned student must not see a teacher's private lesson content.");
+    console.log("[ok] unassigned second student cannot read another student's lesson");
+    await deniedContext.close();
 
     const studentContext = await browser.newContext();
     const studentPage = await studentContext.newPage();
@@ -927,20 +1035,79 @@ async function gotoHydrated(page, path) {
     await assignedCatalog.waitFor({ timeout: 20000 });
     console.log("[ok] directly assigned catalog is visible to the student");
 
-    await assignedCatalog.click();
-    await studentPage
-      .getByRole("heading", { name: "Release Catalog", level: 1 })
+    await gotoHydrated(studentPage, `/student/lessons/${releaseCatalogId}`);
+    await studentPage.getByRole("heading", { name: "Release Catalog", level: 1 })
       .waitFor({ timeout: 20000 });
-    await studentPage
-      .getByText("New practice", { exact: true })
+    await studentPage.getByText("Theory for the student's released lesson.")
       .waitFor({ timeout: 20000 });
-    await studentPage
-      .getByRole("button", { name: "Generate practice", exact: true })
+    await studentPage.getByText("Locked", { exact: true }).first()
+      .waitFor({ timeout: 20000 });
+
+    // The same student is permitted on two devices; completion must be
+    // durable and visible after refreshing the other independent session.
+    const secondDeviceContext = await browser.newContext();
+    const secondDevicePage = await secondDeviceContext.newPage();
+    await useEnglish(secondDevicePage);
+    await gotoHydrated(secondDevicePage, "/");
+    await secondDevicePage.locator("#key").fill(accessKey);
+    await secondDevicePage.locator('form button[type="submit"]').click();
+    await expectPath(secondDevicePage, "**/student", "same student on second device");
+    await gotoHydrated(secondDevicePage, `/student/lessons/${releaseCatalogId}`);
+    await secondDevicePage.getByText("Locked", { exact: true }).first()
+      .waitFor({ timeout: 20000 });
+
+    await studentPage.getByRole("button", { name: "I have read this" }).click();
+    await studentPage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    await secondDevicePage.reload({ waitUntil: "networkidle" });
+    await secondDevicePage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] lesson theory progress persists across both allowed student devices");
+    console.log("[ok] later graded activity remains locked until teacher-authored theory completed");
+
+    await gotoHydrated(studentPage, `/student/catalogs/${releaseCatalogId}`);
+    await studentPage.getByRole("heading", { name: "Release Catalog", level: 1 })
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByText("New practice", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("button", { name: "Generate practice", exact: true })
       .click();
-    await studentPage
-      .getByText("Runtime PDF import works?", { exact: true })
+    await studentPage.getByText("Runtime PDF import works?", { exact: true })
       .waitFor({ timeout: 30000 });
-    console.log("[ok] student can open an assigned catalog and generate catalog practice");
+    await studentPage.getByText("Yes", { exact: true }).first()
+      .locator("xpath=ancestor::label").getByRole("checkbox").click();
+    await studentPage.getByRole("button", { name: "Check answer", exact: true })
+      .first().click();
+    await studentPage.getByText("Correct", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] existing catalog grader supplied authoritative lesson score");
+
+    await gotoHydrated(studentPage, `/student/lessons/${releaseCatalogId}`);
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await studentPage.reload();
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await secondDevicePage.reload({ waitUntil: "networkidle" });
+    await secondDevicePage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await secondDeviceContext.close();
+    console.log("[ok] assigned student's graded progress persisted on both devices after refresh");
+
+    await gotoHydrated(studentPage, `/student/lessons/${releaseMediaCatalogId}`);
+    await studentPage.getByRole("heading", { name: "Release Media Lesson" })
+      .waitFor({ timeout: 20000 });
+    const mediaViewButtons = studentPage.getByRole("button", { name: "I viewed or listened" });
+    await mediaViewButtons.first().click();
+    await studentPage.getByText("1 of 2 required steps completed")
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("button", { name: "I viewed or listened" }).click();
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    await studentPage.reload({ waitUntil: "networkidle" });
+    await studentPage.getByText("Lesson complete.")
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] Reading/Listening view acknowledgements persist without fabricated scores");
 
     await gotoHydrated(studentPage, "/student/library");
     await studentPage

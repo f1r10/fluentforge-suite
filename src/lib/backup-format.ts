@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const BACKUP_MAGIC = "FLUENTFORGE_BACKUP";
-export const BACKUP_VERSION = 1;
-export const BACKUP_SCHEMA = "2026-10-06/v1";
+export const BACKUP_VERSION = 2;
+export const BACKUP_SCHEMA = "2026-10-18/v2";
 
 export const BACKUP_TABLES = [
   "languages",
@@ -34,6 +34,8 @@ export const BACKUP_TABLES = [
   "student_vocabulary_state",
   "catalogs",
   "catalog_items",
+  "lesson_revisions",
+  "lesson_step_progress",
   "catalog_assignments",
   "exams",
   "exam_sections",
@@ -110,7 +112,41 @@ const packageSchema = z.object({
 export type FluentForgeBackup = z.infer<typeof packageSchema>;
 
 export function parseBackupPackage(value: unknown): FluentForgeBackup {
-  const parsed = packageSchema.parse(value);
+  // V1 archives remain restorable after the additive Lesson Mode migration.
+  // Do not rewrite existing content or fabricate progress: new tables are empty
+  // when loading a pre-Lesson-Mode backup.
+  let candidate = value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const old = value as Record<string, unknown>;
+    if (old["version"] === 1 && old["schema"] === "2026-10-06/v1") {
+      const tables = old["tables"];
+      const manifest = old["manifest"];
+      if (tables && typeof tables === "object" && !Array.isArray(tables) &&
+          manifest && typeof manifest === "object" && !Array.isArray(manifest)) {
+        const oldTables = tables as Record<string, unknown>;
+        if ("lesson_revisions" in oldTables || "lesson_step_progress" in oldTables) {
+          throw new Error("V1 archive contains unexpected lesson tables.");
+        }
+        const rawManifest = manifest as Record<string, unknown>;
+        const counts = rawManifest["row_counts"];
+        candidate = {
+          ...old,
+          version: BACKUP_VERSION,
+          schema: BACKUP_SCHEMA,
+          tables: { ...oldTables, lesson_revisions: [], lesson_step_progress: [] },
+          manifest: {
+            ...rawManifest,
+            row_counts: {
+              ...(counts && typeof counts === "object" ? counts : {}),
+              lesson_revisions: 0,
+              lesson_step_progress: 0,
+            },
+          },
+        };
+      }
+    }
+  }
+  const parsed = packageSchema.parse(candidate);
   const allowed = new Set<string>(BACKUP_TABLES);
 
   for (const table of Object.keys(parsed.tables)) {
@@ -160,6 +196,13 @@ export function sanitizeBackupRow(
   }
   if (table === "activity_events" || table === "audit_logs") {
     delete row["id"];
+  }
+  if (table === "lesson_step_progress") {
+    // Old activity_events IDs are intentionally not restored: new identity
+    // values are allocated when those rows are inserted later. Never carry
+    // a stale FK into lesson progress (or point at an unrelated event).
+    // The authoritative grade/completion snapshot remains unchanged.
+    row["last_graded_event_id"] = null;
   }
   if (
     table === "system_settings" &&

@@ -51,6 +51,8 @@ const RESTORE_ORDER: BackupTable[] = [
   "student_vocabulary_state",
   "catalogs",
   "catalog_items",
+  "lesson_revisions",
+  "lesson_step_progress",
   "catalog_assignments",
   "exams",
   "exam_sections",
@@ -1019,6 +1021,19 @@ async function restoreTable(
     .map((row) => sanitizeBackupRow(table, row))
     .filter((row): row is Record<string, unknown> => !!row);
   if (!rows.length) return;
+
+  if (table === "lesson_revisions") {
+    // The immutable publication trigger correctly rejects plain inserts of
+    // published/superseded rows. Restore via the service-role-only, atomic,
+    // idempotent RPC; never disable the trigger for normal requests.
+    for (const batch of chunks(rows, 250)) {
+      const { error } = await admin.rpc("restore_lesson_revision_rows", {
+        p_rows: batch,
+      });
+      if (error) throw new Error(`Could not restore lesson revisions: ${error.message}`);
+    }
+    return;
+  }
 
   if (table === "system_settings") {
     rows = rows.map((row) => {
