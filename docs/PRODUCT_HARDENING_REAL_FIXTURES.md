@@ -1,6 +1,6 @@
 # FluentForge product hardening — real-source acceptance
 
-Status: **work in progress**, not a production-ready release. Changes are
+Status: **work in progress**, not a production-ready release. Integrated candidate: PR #14. CI and isolated host tests are distinct gates. Changes are
 prepared on an isolated branch. Existing QA01, exam attempts, teacher accounts,
 and stored imports must remain compatible.
 
@@ -88,10 +88,12 @@ regression-based routing before replacing the working default.
 
 ### Gate C — Lesson Mode / complete learning journey
 - [x] Pure lesson progress and completion rules exist.
-- [ ] Versioned published lesson snapshots built on existing catalog items.
-- [ ] Server-side access/unlock/checkpoint APIs + DB constraint/RLS.
-- [ ] Teacher editor/publish and student Continue learning screens.
-- [ ] Two-device concurrent progress, independent catalogs unaffected, backfill.
+- [x] Versioned published lesson snapshots built on existing catalog items (PR #12 implementation).
+- [x] Server-side access/unlock/checkpoint APIs + DB constraint/RLS (CI coverage, not live UAT).
+- [x] Teacher editor/publish and student Continue learning screens (synthetic browser smoke).
+- [x] Two-device progress, independent catalogs unaffected (automated regression).
+- [ ] Graded Reading/Listening activity rather than clearly labelled view-only acknowledgement.
+- [ ] Real teacher/student acceptance on representative content and devices.
 
 ### Backup preflight (safe to run on the real EC2 host)
 
