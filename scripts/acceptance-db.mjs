@@ -57,6 +57,7 @@ async function verifySchemaSecurity() {
     "audit_logs",
     "lesson_revisions",
     "lesson_step_progress",
+    "backup_event_restore_batches",
   ];
   const rlsRows = await sql`
     select c.relname as table_name, c.relrowsecurity as enabled
@@ -90,6 +91,7 @@ async function verifySchemaSecurity() {
     "publish_lesson_revision",
     "record_lesson_step_grade",
     "restore_lesson_revision_rows",
+    "restore_event_batch",
   ];
   const functionRows = await sql`
     select
@@ -736,8 +738,57 @@ async function verifyLessonRestoreRpc() {
   }
 }
 
+async function verifyIdempotentEventRestore() {
+  await sql.unsafe("begin");
+  try {
+    await sql.unsafe(\`DO $test$
+DECLARE
+  v_backup uuid;
+  v_events jsonb;
+  v_count integer;
+  v_blocked boolean := false;
+BEGIN
+  INSERT INTO public.backups(kind,status,manifest,restore_state)
+    VALUES ('manual','processing','{}'::jsonb,'{}'::jsonb)
+    RETURNING id INTO v_backup;
+  SELECT jsonb_agg(jsonb_build_object(
+    'category','activity','event_type','restore_test',
+    'details',jsonb_build_object('source_seq',n)
+  )) INTO v_events FROM generate_series(1,250) AS n;
+  SELECT public.restore_event_batch(v_backup,'activity_events',0,v_events)
+    INTO v_count;
+  IF v_count <> 250 THEN RAISE EXCEPTION 'Initial 250-event restore failed'; END IF;
+  SELECT public.restore_event_batch(v_backup,'activity_events',0,v_events)
+    INTO v_count;
+  IF v_count <> 0 THEN RAISE EXCEPTION 'Replay duplicated first batch'; END IF;
+  SELECT count(*) INTO v_count FROM public.activity_events
+    WHERE event_type='restore_test';
+  IF v_count <> 250 THEN RAISE EXCEPTION 'Replay count mismatch'; END IF;
+  BEGIN
+    PERFORM public.restore_event_batch(v_backup,'activity_events',0,
+      jsonb_build_array(jsonb_build_object('event_type','tampered')));
+  EXCEPTION WHEN raise_exception THEN v_blocked := true;
+  END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'Conflicting event replay accepted'; END IF;
+  SELECT public.restore_event_batch(v_backup,'activity_events',1,
+    jsonb_build_array(jsonb_build_object(
+      'category','activity','event_type','restore_test',
+      'details',jsonb_build_object('source_seq',251))))
+    INTO v_count;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Second batch failed'; END IF;
+  SELECT count(*) INTO v_count FROM public.activity_events
+    WHERE event_type='restore_test';
+  IF v_count <> 251 THEN RAISE EXCEPTION 'Multi-batch total incorrect'; END IF;
+END $test$;\`);
+    pass("Interrupted append-only batch retry is idempotent and detects altered replay");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
 try {
   await verifySchemaSecurity();
+  await verifyIdempotentEventRestore();
   await verifyLessonRestoreRpc();
   await verifyPerformance();
 
