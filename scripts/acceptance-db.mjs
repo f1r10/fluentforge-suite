@@ -741,7 +741,7 @@ async function verifyLessonRestoreRpc() {
 async function verifyIdempotentEventRestore() {
   await sql.unsafe("begin");
   try {
-    await sql.unsafe(\`DO $test$
+    await sql.unsafe(`DO $test$
 DECLARE
   v_backup uuid;
   v_events jsonb;
@@ -779,7 +779,7 @@ BEGIN
   SELECT count(*) INTO v_count FROM public.activity_events
     WHERE event_type='restore_test';
   IF v_count <> 251 THEN RAISE EXCEPTION 'Multi-batch total incorrect'; END IF;
-END $test$;\`);
+END $test$;`);
     pass("Interrupted append-only batch retry is idempotent and detects altered replay");
   } finally {
     await sql.unsafe("rollback");
