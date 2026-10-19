@@ -802,10 +802,28 @@ async function gradeAndLog(
           needs_review: result.needs_review,
         } as never,
       })),
-    ).select("id");
+    ).select("id,entity_id");
     if (error) throw new Error(error.message);
     const { recordReviewEvents } = await import("./review-schedule.server");
     await recordReviewEvents(admin, loggedEvents ?? []);
+    try {
+      const { recordVerifiedLessonAttempts } = await import("./lesson-progress.server");
+      const eventIds = new Map((loggedEvents ?? []).map(event => [event.entity_id, event.id]));
+      await recordVerifiedLessonAttempts(admin, studentId, catalogId,
+        results.filter(result =>
+          !result.needs_review && result.max_score > 0 &&
+          eventIds.has(result.question_id),
+        ).map(result => ({
+          entity_type: "question" as const,
+          entity_id: result.question_id,
+          question_version: result.question_version,
+          activity_event_id: eventIds.get(result.question_id)!,
+          score_percent: (result.score / result.max_score) * 100,
+        })));
+    } catch (lessonError) {
+      // A failed optional lesson event must not erase a correct legacy grade.
+      console.error("Lesson attempt progress not saved", lessonError);
+    }
   }
 
   return results.map(({ response, duration_ms, ...result }) => result);
@@ -963,6 +981,19 @@ export const submitVocabularyPracticeAnswer = createServerFn({
     if (data.mode !== "flashcard" && gradedEvent) {
       const { recordReviewEvents } = await import("./review-schedule.server");
       await recordReviewEvents(admin, [gradedEvent]);
+      if (data.catalogId && correct !== null) {
+        try {
+          const { recordVerifiedLessonAttempts } = await import("./lesson-progress.server");
+          await recordVerifiedLessonAttempts(admin, studentId, data.catalogId, [{
+            entity_type: "vocabulary",
+            entity_id: entry.id,
+            activity_event_id: gradedEvent.id,
+            score_percent: correct ? 100 : 0,
+          }]);
+        } catch (lessonError) {
+          console.error("Lesson vocabulary progress not saved", lessonError);
+        }
+      }
     }
 
     return {
