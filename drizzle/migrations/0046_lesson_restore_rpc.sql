@@ -6,7 +6,13 @@ create or replace function public.protect_published_lesson_revision()
 returns trigger language plpgsql set search_path = public as $lesson_guard$
 begin
   -- This flag is only set by the service-role restore RPC below.
+  -- A custom PostgreSQL GUC is not an authorization boundary: any role
+  -- may set arbitrary fluentforge.* flags in its own session. Only a
+  -- privileged SECURITY DEFINER restore call may bypass immutability.
   if current_setting('fluentforge.lesson_restore', true) = 'true' then
+    if current_user not in ('postgres', 'service_role') then
+      raise exception 'Unprivileged lesson restore context is forbidden';
+    end if;
     return new;
   end if;
   if TG_OP = 'INSERT' then
