@@ -679,8 +679,19 @@ async function verifyPerformance() {
   }
 }
 
+async function verifyLessonPublication() {
+  await sql.unsafe("begin");
+  try {
+    await sql.unsafe("DO $lesson$\nDECLARE\n  v_catalog uuid;\n  v_question uuid;\n  v_item uuid;\n  v_rev integer;\n  v_original boolean;\n  v_blocked boolean := false;\n  v_steps jsonb;\nBEGIN\n  INSERT INTO public.catalogs(name,status) VALUES ('Lesson acceptance','active') RETURNING id INTO v_catalog;\n  INSERT INTO public.questions(question_type,prompt,status)\n    VALUES ('single_choice','Acceptance lesson question','active') RETURNING id INTO v_question;\n  INSERT INTO public.catalog_items(catalog_id,entity_type,entity_id)\n    VALUES (v_catalog,'question',v_question) RETURNING id INTO v_item;\n  v_steps := jsonb_build_array(jsonb_build_object('id',v_item,'required',true,'mode','attempt'));\n  INSERT INTO public.lesson_drafts(catalog_id,sequential,steps)\n    VALUES (v_catalog,true,v_steps);\n  SELECT public.publish_catalog_lesson(v_catalog) INTO v_rev;\n  IF v_rev <> 1 THEN RAISE EXCEPTION 'Initial lesson revision not 1'; END IF;\n  IF (SELECT steps->0->>'entity_id' FROM public.lesson_publications\n      WHERE catalog_id = v_catalog AND revision = 1) <> v_question::text THEN\n    RAISE EXCEPTION 'Lesson snapshot missing canonical item ID';\n  END IF;\n  UPDATE public.lesson_drafts SET sequential=false WHERE catalog_id=v_catalog;\n  SELECT public.publish_catalog_lesson(v_catalog) INTO v_rev;\n  IF v_rev <> 2 THEN RAISE EXCEPTION 'Second lesson revision not 2'; END IF;\n  SELECT sequential INTO v_original FROM public.lesson_publications\n    WHERE catalog_id=v_catalog AND revision=1;\n  IF v_original IS DISTINCT FROM true THEN\n    RAISE EXCEPTION 'Old lesson snapshot changed on republish';\n  END IF;\n  BEGIN\n    UPDATE public.lesson_publications SET title='tampered'\n      WHERE catalog_id=v_catalog AND revision=1;\n  EXCEPTION WHEN raise_exception THEN\n    v_blocked := true;\n  END;\n  IF NOT v_blocked THEN\n    RAISE EXCEPTION 'Published revision unexpectedly editable';\n  END IF;\nEND $lesson$;");
+    pass("Lesson publication revisions and immutable snapshots");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
 try {
   await verifySchemaSecurity();
+  await verifyLessonPublication();
   await verifyPerformance();
 
   if (failures.length) {
