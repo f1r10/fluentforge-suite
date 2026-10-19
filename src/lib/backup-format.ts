@@ -197,6 +197,13 @@ export function sanitizeBackupRow(
   if (table === "activity_events" || table === "audit_logs") {
     delete row["id"];
   }
+  if (table === "lesson_step_progress") {
+    // Old activity_events IDs are intentionally not restored: new identity
+    // values are allocated when those rows are inserted later. Never carry
+    // a stale FK into lesson progress (or point at an unrelated event).
+    // The authoritative grade/completion snapshot remains unchanged.
+    row["last_graded_event_id"] = null;
+  }
   if (
     table === "system_settings" &&
     typeof row["key"] === "string" &&
