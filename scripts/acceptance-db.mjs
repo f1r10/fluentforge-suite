@@ -89,6 +89,7 @@ async function verifySchemaSecurity() {
     "student_domain_progress",
     "publish_lesson_revision",
     "record_lesson_step_grade",
+    "restore_lesson_revision_rows",
   ];
   const functionRows = await sql`
     select
