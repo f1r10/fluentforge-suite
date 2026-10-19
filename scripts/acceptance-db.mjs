@@ -781,6 +781,24 @@ BEGIN
   SELECT count(*) INTO v_count FROM public.activity_events
     WHERE event_type='restore_test';
   IF v_count <> 251 THEN RAISE EXCEPTION 'Multi-batch total incorrect'; END IF;
+  -- Audit logs use an independent ledger namespace from activity events.
+  SELECT public.restore_event_batch(v_backup,'audit_logs',0,
+    jsonb_build_array(jsonb_build_object(
+      'actor_type','system','action','restore_audit_test',
+      'details',jsonb_build_object('source','fixture'),
+      'created_at','2026-10-19T00:00:00Z')))
+    INTO v_count;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Initial audit restore failed'; END IF;
+  SELECT public.restore_event_batch(v_backup,'audit_logs',0,
+    jsonb_build_array(jsonb_build_object(
+      'actor_type','system','action','restore_audit_test',
+      'details',jsonb_build_object('source','fixture'),
+      'created_at','2026-10-19T00:00:00Z')))
+    INTO v_count;
+  IF v_count <> 0 THEN RAISE EXCEPTION 'Audit retry duplicated event'; END IF;
+  SELECT count(*) INTO v_count FROM public.audit_logs
+    WHERE action='restore_audit_test';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Audit replay count incorrect'; END IF;
 END $test$;`);
     pass("Interrupted append-only batch retry is idempotent and detects altered replay");
   } finally {
