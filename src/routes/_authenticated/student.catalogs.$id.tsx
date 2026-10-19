@@ -26,6 +26,7 @@ import {
 } from "@/components/app/VocabularyPracticeCard";
 import type { VocabularyPracticeMode } from "@/lib/vocabulary-practice";
 import { useI18n } from "@/lib/i18n";
+import { LessonProgress } from "@/components/app/LessonProgress";
 
 const practiceQuery = (id: string) =>
   queryOptions({
@@ -223,6 +224,17 @@ function PracticePage() {
           {feedbackMode === "instant" ? t("instant_feedback") : t("feedback_after_finish")}
         </div>
       </header>
+
+      <LessonProgress
+        catalogId={id}
+        titles={data.blocks.map((block) => ({
+          id: block.item_id,
+          title: block.kind === "question" ? block.question.prompt
+            : block.kind === "vocabulary" ? block.entry.word
+            : block.kind === "reading" ? block.reading.title
+            : block.listening.title,
+        }))}
+      />
 
       <section className="mb-6 space-y-3 rounded-md border border-border p-4">
         <div>
