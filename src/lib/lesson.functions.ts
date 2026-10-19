@@ -74,6 +74,9 @@ export const saveLessonDraft = createServerFn({method:"POST"})
   .inputValidator((input)=>draftInput.parse(input))
   .handler(async ({data,context}) => {
     validateLessonStepRules(data.steps);
+    if (!data.steps.some(step => step.required)) {
+      throw new Error("A lesson must have at least one required step.");
+    }
     const {adminClient,audit} = await import("./security.server");
     const admin=await adminClient();
     const catalog=await admin.from("catalogs").select("id")
