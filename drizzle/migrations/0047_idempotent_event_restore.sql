@@ -14,8 +14,7 @@ grant select, insert on public.backup_event_restore_batches to service_role;
 alter table public.backup_event_restore_batches enable row level security;
 
 create or replace function public.restore_event_batch(
-  p_backup_id uuid, p_table text, p_index integer, p_rows jsonb,
-  p_sha256 text
+  p_backup_id uuid, p_table text, p_index integer, p_rows jsonb
 ) returns integer language plpgsql security definer
 set search_path = public as $$
 declare
@@ -26,12 +25,14 @@ begin
   if p_backup_id is null or p_table not in ('activity_events','audit_logs')
      or p_index is null or p_index < 0 or p_rows is null
      or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 250
-     or p_sha256 is null or p_sha256 !~ '^[a-f0-9]{64}$' then
+     then
     raise exception 'Invalid append-only restore batch';
   end if;
   if not exists (select 1 from public.backups where id = p_backup_id) then
     raise exception 'Unknown backup restore job';
   end if;
+
+  expected_sha := encode(extensions.digest(convert_to(p_rows::text, 'UTF8'), 'sha256'), 'hex');
 
   -- Prevent concurrent replays of the same batch; the ledger and event rows
   -- commit in the SAME database transaction.
@@ -39,16 +40,10 @@ begin
   select * into previous from public.backup_event_restore_batches
     where backup_id=p_backup_id and event_table=p_table and batch_index=p_index;
   if found then
-    if previous.content_sha256 <> p_sha256 or previous.row_count <> jsonb_array_length(p_rows) then
+    if previous.content_sha256 <> expected_sha or previous.row_count <> jsonb_array_length(p_rows) then
       raise exception 'Conflicting event batch replay refused';
     end if;
     return 0;
-  end if;
-
-  -- PostgreSQL recomputes the digest instead of trusting the client marker.
-  expected_sha := encode(extensions.digest(convert_to(p_rows::text, 'UTF8'), 'sha256'), 'hex');
-  if expected_sha <> p_sha256 then
-    raise exception 'Event batch checksum mismatch';
   end if;
 
   if p_table = 'activity_events' then
@@ -68,10 +63,10 @@ begin
   inserted := jsonb_array_length(p_rows);
   insert into public.backup_event_restore_batches
     (backup_id,event_table,batch_index,row_count,content_sha256)
-    values (p_backup_id,p_table,p_index,inserted,p_sha256);
+    values (p_backup_id,p_table,p_index,inserted,expected_sha);
   return inserted;
 end $$;
-revoke all on function public.restore_event_batch(uuid,text,integer,jsonb,text)
+revoke all on function public.restore_event_batch(uuid,text,integer,jsonb)
   from public,anon,authenticated;
-grant execute on function public.restore_event_batch(uuid,text,integer,jsonb,text) to service_role;
+grant execute on function public.restore_event_batch(uuid,text,integer,jsonb) to service_role;
 notify pgrst, 'reload schema';
