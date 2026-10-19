@@ -496,6 +496,15 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     console.log("[ok] catalog can be assigned directly to a student and refreshes immediately");
 
+    const lessonEditor = page.locator('section[aria-label="Lesson sequence"]');
+    await lessonEditor.waitFor({ timeout: 20000 });
+    const lessonRow = lessonEditor.getByText("Runtime PDF import works?", { exact: true })
+      .locator("xpath=ancestor::label[1]");
+    await lessonRow.getByRole("checkbox").click();
+    await lessonEditor.getByRole("button", { name: "Review and publish" }).click();
+    await lessonEditor.getByText("Published revision: 1").waitFor({ timeout: 20000 });
+    console.log("[ok] teacher published an immutable revision of an assigned catalog lesson");
+
     await gotoHydrated(page, "/teacher/exams");
     await page
       .getByRole("button", { name: "New exam", exact: true })
@@ -971,6 +980,9 @@ async function gotoHydrated(page, path) {
     await studentPage
       .getByText("New practice", { exact: true })
       .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("region", { name: "My lesson" })
+      .getByText("Completed steps: 0/1").waitFor({ timeout: 20000 });
+    console.log("[ok] student sees only assigned published lesson revision and progress");
     await studentPage
       .getByRole("button", { name: "Generate practice", exact: true })
       .click();
