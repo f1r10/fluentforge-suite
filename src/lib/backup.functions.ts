@@ -645,7 +645,7 @@ export const restoreApplicationBackup = createServerFn({ method: "POST" })
 
     for (const table of RESTORE_ORDER) {
       if (state.completed_tables.includes(table)) continue;
-      await restoreTable(admin, table, backup.tables[table] ?? []);
+      await restoreTable(admin, table, backup.tables[table] ?? [], row.id);
       state.completed_tables.push(table);
       await saveRestoreState(admin, row.id, state);
     }
@@ -1016,6 +1016,7 @@ async function restoreTable(
   admin: any,
   table: BackupTable,
   inputRows: Record<string, unknown>[],
+  backupId: string,
 ) {
   let rows = inputRows
     .map((row) => sanitizeBackupRow(table, row))
@@ -1066,7 +1067,18 @@ async function restoreTable(
   }
 
   if (table === "activity_events" || table === "audit_logs") {
-    await insertBatches(admin, table, rows);
+    for (let index = 0; index * 250 < rows.length; index += 1) {
+      const batch = rows.slice(index * 250, (index + 1) * 250);
+      // The service-only RPC inserts the batch and checkpoints it in
+      // the same transaction, so a crash cannot duplicate historical events.
+      const { error } = await admin.rpc("restore_event_batch", {
+        p_backup_id: backupId,
+        p_table: table,
+        p_index: index,
+        p_rows: batch,
+      });
+      if (error) throw new Error(`Could not restore ${table} batch ${index}: ${error.message}`);
+    }
     return;
   }
 
@@ -1081,18 +1093,6 @@ async function upsertBatches(
 ) {
   for (const batch of chunks(rows, 250)) {
     const { error } = await admin.from(table).upsert(batch);
-    if (error) throw new Error(`Could not restore ${table}: ${error.message}`);
-  }
-}
-
-async function insertBatches(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  admin: any,
-  table: string,
-  rows: Record<string, unknown>[],
-) {
-  for (const batch of chunks(rows, 250)) {
-    const { error } = await admin.from(table).insert(batch);
     if (error) throw new Error(`Could not restore ${table}: ${error.message}`);
   }
 }
