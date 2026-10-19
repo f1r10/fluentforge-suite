@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Database } from "../integrations/supabase/types";
 import { z } from "zod";
 import { vocabularyMetadataWarning, isTeacherApprovableValidationState } from "./vocabulary-review-policy";
+import { classifySenseAgainstExisting } from "./vocabulary-sense";
 import { requireTeacher } from "./teacher-middleware";
 import { validateQuestionInput } from "./question-schema";
 import { getProcessingService, type ProcessingImportItem } from "./processing.service";
@@ -298,6 +299,17 @@ function validateImportItemPayload(
       return { state: "ready", message: null };
     }
     if (itemType === "vocabulary") {
+      const reviewWarnings =
+        payload && typeof payload === "object" &&
+        Array.isArray((payload as Record<string, unknown>)["import_warnings"])
+          ? (payload as Record<string, unknown>)["import_warnings"] as unknown[]
+          : [];
+      if (reviewWarnings.length) {
+        return {
+          state: "needs_fix",
+          message: reviewWarnings.map(String).join(" "),
+        };
+      }
       const parsed = vocabularyImportPayloadSchema.parse(payload);
       const suspiciousRawRow =
         /^\s*\d{1,4}[.)]\s+/.test(parsed.word) ||
@@ -1344,36 +1356,43 @@ export const approveHighConfidenceItems = createServerFn({ method: "POST" })
     z.object({ jobId: z.string().uuid(), threshold: z.number().min(0.5).max(1).default(0.9) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { data: candidates, error: candidateError } = await context.supabase
-      .from("import_items")
-      .select("id,item_type,payload,duplicate_of,created_entity_id")
-      .eq("job_id", data.jobId)
-      .eq("decision", "pending")
-      .gte("confidence", data.threshold)
-      .is("duplicate_of", null);
-    if (candidateError) throw new Error(candidateError.message);
+    // PostgREST limits single responses, so a 1,801-row vocabulary review
+    // must not silently stop after the first 1,000 high-confidence candidates.
+    let approved = 0;
+    let needsReview = 0;
+    let cursor: string | null = null;
+    while (true) {
+      let query = context.supabase
+        .from("import_items")
+        .select("id,item_type,payload,duplicate_of,created_entity_id")
+        .eq("job_id", data.jobId)
+        .eq("decision", "pending")
+        .gte("confidence", data.threshold)
+        .is("duplicate_of", null)
+        .order("id")
+        .limit(200);
+      if (cursor) query = query.gt("id", cursor);
+      const { data: candidates, error: candidateError } = await query;
+      if (candidateError) throw new Error(candidateError.message);
+      if (!candidates?.length) break;
 
-    const readyIds = (candidates ?? [])
-      .filter(
-        (item) =>
-          !item.created_entity_id &&
-          validateImportItemPayload(item.item_type, item.payload).state ===
-            "ready",
-      )
-      .map((item) => item.id);
-
-    if (readyIds.length) {
-      await updateImportItemDecisionInChunks(
-        context.supabase,
-        readyIds,
-        "approved",
-      );
+      const readyIds = candidates
+        .filter(
+          (item) =>
+            !item.created_entity_id &&
+            validateImportItemPayload(item.item_type, item.payload).state ===
+              "ready",
+        )
+        .map((item) => item.id);
+      if (readyIds.length) {
+        await updateImportItemDecisionInChunks(context.supabase, readyIds, "approved");
+        approved += readyIds.length;
+      }
+      needsReview += candidates.length - readyIds.length;
+      cursor = candidates[candidates.length - 1]!.id;
+      if (candidates.length < 200) break;
     }
-
-    return {
-      approved: readyIds.length,
-      needsReview: (candidates?.length ?? 0) - readyIds.length,
-    };
+    return { approved, needsReview };
   });
 
 export const commitDocumentImport = createServerFn({ method: "POST" })
@@ -1393,16 +1412,28 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       throw new Error("Import job or source file not found.");
     }
 
-    const { data: items, error: itemsError } = await admin
-      .from("import_items")
-      .select("*")
-      .eq("job_id", data.jobId)
-      .eq("decision", "approved")
-      .order("page", { ascending: true, nullsFirst: false })
-      .order("created_at");
-    if (itemsError) throw new Error(itemsError.message);
-
-    const approvedRows = items ?? [];
+    // Never rely on PostgREST's per-response limit here: returning just the
+    // first 1,000 approvals can permanently strand the remaining C1 entries.
+    // This must be stable across repeated, resumable commit batches.
+    const approvedRows: Array<Database["public"]["Tables"]["import_items"]["Row"]> = [];
+    for (let offset = 0; ; offset += 200) {
+      const { data: page, error: itemsError } = await admin
+        .from("import_items")
+        .select("*")
+        .eq("job_id", data.jobId)
+        .eq("decision", "approved")
+        .order("page", { ascending: true, nullsFirst: false })
+        .order("created_at")
+        .order("id")
+        .range(offset, offset + 199);
+      if (itemsError) throw new Error(itemsError.message);
+      const batch = (page ?? []) as Array<Database["public"]["Tables"]["import_items"]["Row"]>;
+      approvedRows.push(...batch);
+      if (batch.length < 200) break;
+      if (approvedRows.length >= 50_000) {
+        throw new Error("Import commit exceeds 50,000 items. Split the source file.");
+      }
+    }
     const invalidApproved = approvedRows.filter(
       (item) =>
         !!item.duplicate_of ||
@@ -1480,16 +1511,25 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       // Recover any core entries left behind by an interrupted previous
       // batch before creating new rows. Provenance carries the import-item ID,
       // so retries do not duplicate vocabulary entries.
-      const { data: existingCreated, error: existingCreatedError } = await admin
-        .from("vocabulary_entries")
-        .select("id,provenance")
-        .eq("source_file_id", job.source_file_id)
-        .contains("provenance", {
-          import: { job_id: job.id },
-        } as never)
-        .is("deleted_at", null);
-      if (existingCreatedError) {
-        throw new Error(existingCreatedError.message);
+      const existingCreated: Array<{ id: string; provenance: unknown }> = [];
+      for (let offset = 0; ; offset += 200) {
+        const { data: batch, error: existingCreatedError } = await admin
+          .from("vocabulary_entries")
+          .select("id,provenance")
+          .eq("source_file_id", job.source_file_id)
+          .contains("provenance", {
+            import: { job_id: job.id },
+          } as never)
+          .is("deleted_at", null)
+          .order("id")
+          .range(offset, offset + 199);
+        if (existingCreatedError) throw new Error(existingCreatedError.message);
+        const rows = (batch ?? []) as Array<{ id: string; provenance: unknown }>;
+        existingCreated.push(...rows);
+        if (rows.length < 200) break;
+        if (existingCreated.length >= 50_000) {
+          throw new Error("Import recovery exceeds 50,000 rows.");
+        }
       }
 
       const itemToEntity = new Map<string, string>();
@@ -2384,6 +2424,57 @@ async function prepareItems(
   sha256: (input: string) => string,
 ) {
   const out: Array<Record<string, unknown>> = [];
+  type ExistingSenseLookup = {
+    id: string; word: string; learning_language: string;
+    part_of_speech: string | null; definition: string | null;
+    notes: string | null;
+    translations: Array<{ language: string; value: string }>;
+  };
+  const normalizedLemma = (word: string) =>
+    word.normalize("NFKC").trim().replace(/\s+/g, " ")
+      .toLocaleLowerCase("en").replace(/i\u0307/g, "i");
+  const lookupKey = (language: string, word: string) =>
+    `${language.toLowerCase()}::${normalizedLemma(word)}`;
+
+  const incomingWords = new Map<string, Set<string>>();
+  for (const item of items) {
+    if (item.item_type !== "vocabulary") continue;
+    const word = typeof item.payload?.["word"] === "string"
+      ? String(item.payload["word"]).trim() : "";
+    const language = typeof item.payload?.["learning_language"] === "string"
+      ? String(item.payload["learning_language"]).trim().toLowerCase() : "en";
+    if (!word) continue;
+    if (!incomingWords.has(language)) incomingWords.set(language, new Set());
+    incomingWords.get(language)!.add(word);
+  }
+
+  // Batch-fetch existing senses using an indexed server-only RPC. This
+  // avoids 1,801 HTTP lookups for a single C1 teacher vocabulary document.
+  // Keep a legacy lookup fallback until every deployed DB has migration 0045.
+  const existingByLemma = new Map<string, ExistingSenseLookup[]>();
+  let legacySenseLookup = false;
+  for (const [language, sourceWords] of incomingWords) {
+    if (legacySenseLookup) break;
+    for (const words of chunks([...sourceWords], 40)) {
+      const { data: found, error } = await admin.rpc(
+        "lookup_vocabulary_import_senses",
+        { _language: language, _words: words },
+      );
+      if (error) {
+        if (/could not find the function|function .* does not exist|pgrst202/i.test(error.message)) {
+          legacySenseLookup = true;
+          break;
+        }
+        throw new Error(error.message);
+      }
+      for (const row of (found ?? []) as ExistingSenseLookup[]) {
+        const key = lookupKey(row.learning_language, row.word);
+        const bucket = existingByLemma.get(key) ?? [];
+        bucket.push(row);
+        existingByLemma.set(key, bucket);
+      }
+    }
+  }
 
   for (const item of items) {
     let duplicateOf: string | null = null;
@@ -2426,18 +2517,56 @@ async function prepareItems(
           ? raw["learning_language"].trim().toLowerCase()
           : "en";
       if (word) {
-        const { data: duplicate, error: duplicateError } = await admin
-          .from("vocabulary_entries")
-          .select("id")
-          .ilike("word", word)
-          .eq("learning_language", learningLanguage)
-          .is("deleted_at", null)
-          .limit(1)
-          .maybeSingle();
-        if (duplicateError) throw new Error(duplicateError.message);
-        if (duplicate) {
-          duplicateOf = duplicate.id;
+        // Compare lexical senses, not only the lemma. A single English word
+        // can have separate noun/verb and even same-POS source meanings.
+        let possibleSenses: Array<ExistingSenseLookup & {
+          vocabulary_translations?: Array<{ language: string; value: string }>;
+        }> = [];
+        if (legacySenseLookup) {
+          const { data: fetched, error: duplicateError } = await admin
+            .from("vocabulary_entries")
+            .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations(language,value)")
+            .ilike("word", word)
+            .eq("learning_language", learningLanguage)
+            .is("deleted_at", null)
+            .limit(200);
+          if (duplicateError) throw new Error(duplicateError.message);
+          possibleSenses = (fetched ?? []).map((row: ExistingSenseLookup & {
+            vocabulary_translations?: Array<{ language: string; value: string }>;
+          }) => ({ ...row, translations: row.vocabulary_translations ?? [] }));
+        } else {
+          possibleSenses = existingByLemma.get(lookupKey(learningLanguage, word)) ?? [];
+        }
+        const sourceTranslations = Array.isArray(raw["translations"])
+          ? (raw["translations"] as Array<{ language: string; value: string }>)
+          : [];
+        const incomingSense = {
+          word,
+          learning_language: learningLanguage,
+          part_of_speech: typeof raw["part_of_speech"] === "string" ? raw["part_of_speech"] : null,
+          definition: typeof raw["definition"] === "string" ? raw["definition"] : null,
+          notes: typeof raw["notes"] === "string" ? raw["notes"] : null,
+          translations: sourceTranslations,
+        };
+        const match = classifySenseAgainstExisting(
+          incomingSense,
+          possibleSenses,
+        );
+        if (match.exactDuplicateId) {
+          duplicateOf = match.exactDuplicateId;
           duplicateKind = "exact";
+        } else if (match.needsTeacherReview) {
+          // Ambiguous identical spellings must not be auto-approved. An editor
+          // can inspect the source, adjust the sense/POS and clear warnings.
+          const existingWarnings = Array.isArray(raw["import_warnings"])
+            ? (raw["import_warnings"] as unknown[]).map(String) : [];
+          item.payload = {
+            ...raw,
+            import_warnings: [
+              ...existingWarnings,
+              "An existing word has the same spelling but the sense is not clearly identical or distinct. Verify its meaning, part of speech and translation before approving.",
+            ],
+          };
         }
       }
     }

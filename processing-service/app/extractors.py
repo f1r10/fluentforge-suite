@@ -658,6 +658,47 @@ def detect_candidates(
                     }
                     question["payload"] = payload
 
+        # A picture/clock-based short-answer question is not self-contained
+        # just because its text is parseable. The original 100-exercise PDF
+        # uses four clock drawings followed by blanks; no answer can be
+        # safely recovered from the text layer. Explicitly block bulk
+        # approval until the teacher attaches the visual and supplies an
+        # answer. Avoid suppressing ordinary text questions on the page.
+        visual_time_task = bool(re.search(
+            r"\b(?:telling the time|draw the hands on the clocks?|what time is it)\b",
+            page_text,
+            re.IGNORECASE,
+        ))
+        if visual_time_task:
+            for question in questions:
+                payload = question.get("payload") or {}
+                if payload.get("question_type") not in {"fill_blank", "short_answer"}:
+                    continue
+                answer_key = payload.get("answer_key") or {}
+                has_accepted_answer = any(
+                    answer
+                    for group in answer_key.get("blanks", [])
+                    if isinstance(group, list)
+                    for answer in group
+                )
+                assets = (
+                    payload.get("import_context", {}).get("assets", [])
+                    if isinstance(payload.get("import_context"), dict)
+                    else []
+                )
+                if not has_accepted_answer and any(
+                    asset.get("kind") == "image_region"
+                    for asset in assets if isinstance(asset, dict)
+                ):
+                    payload["import_warnings"] = [
+                        "Image-dependent clock question: attach the relevant source image "
+                        "and enter a teacher-verified answer before approving."
+                    ]
+                    question["payload"] = payload
+                    question["confidence"] = min(
+                        float(question.get("confidence") or 0), 0.45
+                    )
+
         candidates.extend(questions)
 
         layout = _page_layout_elements(page)
@@ -2470,14 +2511,20 @@ def _questions_from_text(
         q.pop("_nested_numbering", None)
         answer = answer_key.get(number) or (global_answers or {}).get(number)
         if len(options) >= 2:
-            fixed_ids = {option["id"] for option in options}
-            if fixed_ids == {"true", "false"} and len(options) == 2:
+            # The Beginner teacher PDF uses A/B-labeled checkbox answers:
+            # 'A □ TRUE / B □ FALSE'. Map by option text, not ID alone.
+            normalized_options = [
+                re.sub(r"\s+", "_", str(option["text"]).strip().casefold())
+                for option in options
+            ]
+            option_labels = set(normalized_options)
+            if len(options) == 2 and option_labels == {"true", "false"}:
                 fixed_type = "true_false"
                 fixed_labels = ["True", "False"]
-            elif fixed_ids == {"true", "false", "not_given"} and len(options) == 3:
+            elif len(options) == 3 and option_labels == {"true", "false", "not_given"}:
                 fixed_type = "true_false_not_given"
                 fixed_labels = ["True", "False", "Not Given"]
-            elif fixed_ids == {"yes", "no", "not_given"} and len(options) == 3:
+            elif len(options) == 3 and option_labels == {"yes", "no", "not_given"}:
                 fixed_type = "yes_no_not_given"
                 fixed_labels = ["Yes", "No", "Not Given"]
             else:
@@ -2498,6 +2545,19 @@ def _questions_from_text(
                          if label.casefold().replace(" ", "_") == normalized_answer.replace(" ", "_")),
                         None,
                     )
+                    if not answer_text:
+                        # Letter keys can refer to labelled fixed choices, and
+                        # their order is not guaranteed to be True then False.
+                        answer_text = next(
+                            (
+                                label
+                                for source_option, label_key in zip(options, normalized_options)
+                                for label in fixed_labels
+                                if source_option["id"] == normalized_answer
+                                and label.casefold().replace(" ", "_") == label_key
+                            ),
+                            None,
+                        )
                 payload = {
                     "question_type": fixed_type,
                     "prompt": q["prompt"],
