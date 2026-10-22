@@ -14,6 +14,14 @@ describe("approved PDF question image geometry", () => {
     expect(crop?.width).toBeCloseTo(0.458);
     expect(crop?.height).toBeCloseTo(0.316);
   });
+  it("retains a PDF table as a renderable stimulus when no image is embedded", () => {
+    const crop = importedQuestionImageCrop({ assets: [
+      { kind: "table", crop: { x: 0.1, y: 0.2, width: 0.7, height: 0.4 } },
+    ] });
+    expect(crop?.x).toBeCloseTo(0.092);
+    expect(crop?.width).toBeCloseTo(0.716);
+  });
+
   it("returns null for a text-only question", () => {
     expect(importedQuestionImageCrop({ assets: [] })).toBeNull();
     expect(importedQuestionImageCrop(null)).toBeNull();
