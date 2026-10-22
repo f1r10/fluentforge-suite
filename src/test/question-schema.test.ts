@@ -40,6 +40,36 @@ describe("question schema", () => {
     expect(q.answer_key).toEqual({ correct: ["a"] });
   });
 
+  it("retains imported PNG media on multiple-choice and fixed-choice revalidation", () => {
+    const mediaId = "22222222-2222-4222-8222-222222222222";
+    const choice = validateQuestionInput({
+      ...base,
+      question_type: "single_choice",
+      payload: {
+        media_id: mediaId,
+        options: [{ id: "a", text: "One" }, { id: "b", text: "Two" }],
+      },
+      answer_key: { correct: ["a"] },
+    });
+    expect((choice.payload as { media_id: string }).media_id).toBe(mediaId);
+
+    const fixed = validateQuestionInput({
+      ...base,
+      question_type: "true_false",
+      payload: { media_id: mediaId },
+      answer_key: { correct: ["True"] },
+    });
+    expect((fixed.payload as { media_id: string }).media_id).toBe(mediaId);
+    expect(() => validateQuestionInput({
+      ...base,
+      question_type: "single_choice",
+      payload: { media_id: "not-a-uuid", options: [
+        { id: "a", text: "One" }, { id: "b", text: "Two" },
+      ] },
+      answer_key: { correct: ["a"] },
+    })).toThrow();
+  });
+
   it("rejects more than one correct answer for single choice", () => {
     expect(() =>
       validateQuestionInput({
