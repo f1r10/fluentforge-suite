@@ -116,6 +116,12 @@ def _extract_pdf(path: Path) -> Extraction:
         )
         chunks.append(text)
 
+    # The teacher's original PDFs can embed the same logo/checkbox art on
+    # every page (A2/BTU/Beginner). They are page furniture, not question
+    # diagrams. Do not associate them with arbitrary question crops.
+    removed_decorations = _suppress_repeated_pdf_decorations(pages)
+    total_images = sum(len(page["images"]) for page in pages)
+
     return Extraction(
         "pdf_layout_ocr" if used_ocr else "pdf_layout_native",
         pages,
@@ -126,8 +132,50 @@ def _extract_pdf(path: Path) -> Extraction:
             "ocr_pages": sum(1 for p in pages if p["method"] == "ocr"),
             "tables": total_tables,
             "image_regions": total_images,
+            "decorative_image_regions_filtered": removed_decorations,
         },
     )
+
+
+def _suppress_repeated_pdf_decorations(pages: list[dict[str, Any]]) -> int:
+    """Exclude repeating small/header/footer images without losing diagrams.
+
+    Match by PDF xref across distinct pages, not raw count: one decorative
+    icon can occur many times on a single page. A larger instructional
+    diagram in the body stays available even when repeated across pages.
+    """
+    if len(pages) < 3:
+        return 0
+    from collections import defaultdict
+
+    seen_pages: dict[int, set[int]] = defaultdict(set)
+    for page in pages:
+        for image in page.get("images") or []:
+            if isinstance(image.get("xref"), int):
+                seen_pages[image["xref"]].add(int(page.get("page") or 0))
+
+    frequent = {
+        xref for xref, occurrences in seen_pages.items()
+        if len(occurrences) >= max(3, int(len(pages) * 0.6 + 0.999))
+    }
+    removed = 0
+    for page in pages:
+        preserved = []
+        for image in page.get("images") or []:
+            crop = image.get("crop") or {}
+            x, y = float(crop.get("x", 0)), float(crop.get("y", 0))
+            width, height = float(crop.get("width", 0)), float(crop.get("height", 0))
+            # Tiny repeated checkbox marks and repeated page-edge branding
+            # cannot supply an educational answer in isolation.
+            decoration = image.get("xref") in frequent and (
+                width * height <= 0.003 or y <= 0.10 or y + height >= 0.90
+            )
+            if decoration:
+                removed += 1
+            else:
+                preserved.append(image)
+        page["images"] = preserved
+    return removed
 
 
 def _page_blocks(page: fitz.Page) -> list[dict[str, Any]]:
