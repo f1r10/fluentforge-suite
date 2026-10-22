@@ -584,8 +584,9 @@ export const getRestorePreview = createServerFn({ method: "GET" })
       },
       target,
       canRestore:
-        resumable ||
-        Object.values(target).every((count) => Number(count) === 0),
+        state.status !== "completed" &&
+        (resumable ||
+          Object.values(target).every((count) => Number(count) === 0)),
       resumable,
       restoreState: state,
     };
