@@ -80,6 +80,40 @@ function minimalPdfBuffer() {
   return buffer;
 }
 
+function visualPdfBuffer() {
+  const { deflateSync } = require("node:zlib");
+  const instructions = Buffer.from(
+    "BT /F1 14 Tf 70 690 Td (1. Visual image import works?) Tj 0 -25 Td (A. Yes) Tj 0 -25 Td (B. No) Tj ET\n" +
+    "q 140 0 0 140 90 510 cm /Im1 Do Q\n" +
+    "BT /F1 10 Tf 70 76 Td (Answer Key:) Tj 0 -14 Td (1. A) Tj ET\n", "ascii",
+  );
+  const imageData = deflateSync(Buffer.from([255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0]));
+  const stream = (meta, bytes) => Buffer.concat([
+    Buffer.from(`<< ${meta} /Length ${bytes.length} >>\nstream\n`, "ascii"),
+    bytes,
+    Buffer.from("\nendstream", "ascii"),
+  ]);
+  const objects = [null,
+    Buffer.from("<< /Type /Catalog /Pages 2 0 R >>"),
+    Buffer.from("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+    Buffer.from("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /XObject << /Im1 6 0 R >> >> /Contents 5 0 R >>"),
+    Buffer.from("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+    stream("", instructions),
+    stream("/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode", imageData),
+  ];
+  const parts = [Buffer.from("%PDF-1.4\n", "ascii")];
+  const offsets = [0];
+  for (let i = 1; i < objects.length; i++) {
+    offsets.push(parts.reduce((total, part) => total + part.byteLength, 0));
+    parts.push(Buffer.from(`${i} 0 obj\n`), objects[i], Buffer.from("\nendobj\n"));
+  }
+  const endOffset = parts.reduce((total, part) => total + part.byteLength, 0);
+  const xref = "xref\n0 7\n0000000000 65535 f \n" +
+    offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  const trailer = `trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${endOffset}\n%%EOF\n`;
+  return Buffer.concat([...parts, Buffer.from(xref), Buffer.from(trailer)]);
+}
+
 async function useEnglish(page) {
   await page.addInitScript(() => {
     localStorage.setItem("ui_lang", "en");
@@ -277,6 +311,47 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 20000 });
     await page.keyboard.press("Escape");
     console.log("[ok] teacher previewed Question Bank item with student renderer");
+
+    // Full synthetic visual-PDF path: teacher review -> private PNG ->
+    // Question Bank preview. This uses a real embedded PDF image, not a mock.
+    await gotoHydrated(page, "/teacher/sources");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "release-visual-diagram.pdf",
+      mimeType: "application/pdf",
+      buffer: visualPdfBuffer(),
+    });
+    const visualDialog = page.getByRole("dialog");
+    await visualDialog.getByText(/^(needs_review|completed)$/)
+      .waitFor({ timeout: 60000 });
+    const visualRow = visualDialog.locator("article")
+      .filter({ hasText: "Visual image import works?" }).first();
+    await visualRow.waitFor({ timeout: 20000 });
+    await visualDialog.getByRole("button", { name: /Approve all valid/ }).click();
+    await visualDialog.getByRole("button", { name: /Import approved/ }).click();
+    await visualDialog.getByText("completed", { exact: true })
+      .waitFor({ timeout: 30000 });
+    await page.keyboard.press("Escape");
+
+    await gotoHydrated(page, "/teacher/questions");
+    const visualQuestionRow = page
+      .getByText("Visual image import works?", { exact: true })
+      .locator("xpath=ancestor::li");
+    await visualQuestionRow.waitFor({ timeout: 20000 });
+    await visualQuestionRow.getByRole("button", { name: "Preview", exact: true }).click();
+    const visualPreview = page.getByRole("dialog")
+      .filter({ has: page.getByRole("heading", { name: "Preview", exact: true }) });
+    const visualImage = visualPreview.locator("img").first();
+    await visualImage.waitFor({ timeout: 20000 });
+    const imageSrc = await visualImage.getAttribute("src");
+    assert(imageSrc, "Imported visual PDF question is missing signed image media URL.");
+    const imageResponse = await page.request.get(new URL(imageSrc, baseUrl).toString());
+    assert(imageResponse.ok(), "Imported visual question PNG cannot be loaded.");
+    const imageBytes = await imageResponse.body();
+    assert(imageBytes.subarray(0, 8).equals(
+      Buffer.from([137,80,78,71,13,10,26,10]),
+    ), "Imported PDF diagram is not a PNG.");
+    await page.keyboard.press("Escape");
+    console.log("[ok] visual PDF diagram extracted, preserved as private media and visible in question preview");
 
     // A document without a recognizable question used to be permanently
     // stuck as raw_text/not_importable. The teacher must be able to convert
