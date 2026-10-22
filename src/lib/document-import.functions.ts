@@ -1,4 +1,5 @@
 import { sourceNeedsVisualProvenance } from "./import-source-retention";
+import { importedQuestionImageCrop } from "./import-visual-crop";
 import { createServerFn } from "@tanstack/react-start";
 import type { Database } from "../integrations/supabase/types";
 import { z } from "zod";
@@ -263,6 +264,107 @@ function normalizeImportedQuestion(raw: Record<string, unknown>) {
       : [],
     force: true,
   });
+}
+
+async function materializeImportedQuestionImage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  job: { id: string; source_file_id: string; source_files: unknown },
+  item: { id: string; page: number | null },
+  importContext: Record<string, unknown> | null,
+  currentMediaId: unknown,
+): Promise<string | null> {
+  // A teacher-supplied media attachment always takes precedence.
+  if (typeof currentMediaId === "string" && currentMediaId.trim()) {
+    return currentMediaId;
+  }
+  const crop = importedQuestionImageCrop(importContext);
+  if (!crop) return null;
+
+  const source = job.source_files as {
+    storage_path: string | null;
+    original_filename: string;
+    mime_type: string | null;
+  } | null;
+  if (!source?.storage_path ||
+      !source.original_filename.toLowerCase().endsWith(".pdf") ||
+      !item.page || item.page < 1) {
+    throw new Error("Image-dependent question requires its original PDF and valid source page.");
+  }
+
+  // Stable path allows an interrupted import commit to continue without
+  // making a second media row or overwriting different uploaded content.
+  const storagePath = `import-crops/${job.id}/${item.id}.png`;
+  const { data: existingRow, error: lookupError } = await admin
+    .from("media_assets")
+    .select("id")
+    .eq("storage_path", storagePath)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (lookupError) throw new Error(lookupError.message);
+  if (existingRow) return existingRow.id;
+
+  const { data: sourceUrl, error: signedError } = await admin.storage
+    .from(SOURCE_BUCKET)
+    .createSignedUrl(source.storage_path, 10 * 60);
+  if (signedError || !sourceUrl) {
+    throw new Error(signedError?.message ?? "Could not open PDF for visual import.");
+  }
+
+  const png = await getProcessingService().renderDocumentCrop({
+    sourceUrl: sourceUrl.signedUrl,
+    filename: source.original_filename,
+    page: item.page,
+    crop,
+  });
+  if (!png.byteLength || png.byteLength > 8 * MiB) {
+    throw new Error("PDF source image is empty or exceeds the 8 MB image limit.");
+  }
+  const bytes = Buffer.from(png);
+  const { createHash } = await import("node:crypto");
+  const hash = (value: Buffer) => createHash("sha256").update(value).digest("hex");
+  const checksum = hash(bytes);
+
+  const { error: uploadError } = await admin.storage.from("media")
+    .upload(storagePath, bytes, { contentType: "image/png", upsert: false });
+  if (uploadError) {
+    const { data: alreadyUploaded, error: downloadError } = await admin.storage
+      .from("media").download(storagePath);
+    if (downloadError || !alreadyUploaded ||
+        hash(Buffer.from(await alreadyUploaded.arrayBuffer())) !== checksum) {
+      throw new Error("Existing imported image differs from the source; refusing overwrite.");
+    }
+  }
+
+  const { data: created, error: createError } = await admin
+    .from("media_assets")
+    .insert({
+      kind: "image",
+      storage_path: storagePath,
+      original_filename: `source-question-${item.id}.png`,
+      mime_type: "image/png",
+      size_bytes: bytes.byteLength,
+      metadata: {
+        generated_from_pdf: true,
+        import_job_id: job.id,
+        import_item_id: item.id,
+        source_file_id: job.source_file_id,
+        source_page: item.page,
+        source_crop: crop,
+        sha256: checksum,
+      },
+    })
+    .select("id")
+    .single();
+  if (createError || !created) {
+    // A concurrent import might have committed the same deterministic path.
+    const { data: raced } = await admin.from("media_assets")
+      .select("id").eq("storage_path", storagePath)
+      .is("deleted_at", null).maybeSingle();
+    if (!raced) throw new Error(createError?.message ?? "Could not register imported PDF image.");
+    return raced.id;
+  }
+  return created.id;
 }
 
 function validationMessage(error: unknown) {
@@ -2165,12 +2267,22 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
 
       const { topicIds: _topics, tags, force: _force, ...fields } =
         validated;
+      const mediaId = await materializeImportedQuestionImage(
+        admin,
+        job,
+        item,
+        importContext,
+        (fields.payload as Record<string, unknown> | undefined)?.["media_id"],
+      );
+      const enrichedPayload = mediaId
+        ? { ...(fields.payload as Record<string, unknown>), media_id: mediaId }
+        : fields.payload;
       const contentHash = sha256(
         JSON.stringify([
           fields.question_type,
           fields.prompt.trim().toLowerCase().replace(/\s+/g, " "),
           fields.answer_key,
-          fields.payload,
+          enrichedPayload,
         ]),
       );
 
@@ -2200,6 +2312,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         .from("questions")
         .insert({
           ...fields,
+          payload: enrichedPayload,
           status:
             readingContext?.status ??
             listeningContext?.status ??
@@ -2248,6 +2361,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         version: 1,
         snapshot: {
           ...fields,
+          payload: enrichedPayload,
           context_kind: readingContext
             ? "reading"
             : listeningContext
