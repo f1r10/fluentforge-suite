@@ -32,6 +32,32 @@ describe("lesson sequencing", () => {
     expect(result.steps.every((step) => step.state === "available")).toBe(true);
     expect(result.complete).toBe(false);
   });
+  it("uses view acknowledgements for Reading/Listening, never fabricated passing scores", () => {
+    const course = [
+      { id: "theory", required: true, mode: "view" as const },
+      { id: "reading", required: true, mode: "view" as const },
+      { id: "listening", required: true, mode: "view" as const },
+      { id: "quiz", required: true, mode: "pass" as const, minScorePercent: 70 },
+    ];
+    const first = evaluateLessonProgress(course, [
+      { id: "theory", viewed: true },
+      // A graded contextual question does not count as a Reading view.
+      { id: "reading", attempted: true, bestScorePercent: 100 },
+    ]);
+    expect(first.steps.map((item) => item.state)).toEqual([
+      "completed", "available", "locked", "locked",
+    ]);
+    const second = evaluateLessonProgress(course, [
+      { id: "theory", viewed: true },
+      { id: "reading", viewed: true },
+      { id: "listening", viewed: true },
+      { id: "quiz", bestScorePercent: 70 },
+    ]);
+    expect(second.complete).toBe(true);
+    expect(second.steps.map((item) => item.state)).toEqual([
+      "completed", "completed", "completed", "completed",
+    ]);
+  });
   it("rejects invalid lesson definitions", () => {
     expect(() => validateLessonStepRules([
       { id: "a", required: true, mode: "pass" },

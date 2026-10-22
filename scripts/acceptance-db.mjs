@@ -55,6 +55,9 @@ async function verifySchemaSecurity() {
     "export_jobs",
     "backups",
     "audit_logs",
+    "lesson_revisions",
+    "lesson_step_progress",
+    "backup_event_restore_batches",
   ];
   const rlsRows = await sql`
     select c.relname as table_name, c.relrowsecurity as enabled
@@ -85,6 +88,10 @@ async function verifySchemaSecurity() {
     "student_practice_daily_stats",
     "student_streak_stats",
     "student_domain_progress",
+    "publish_lesson_revision",
+    "record_lesson_step_grade",
+    "restore_lesson_revision_rows",
+    "restore_event_batch",
   ];
   const functionRows = await sql`
     select
@@ -121,6 +128,54 @@ async function verifySchemaSecurity() {
     })
   ) {
     pass("Service-only RPC privileges are enforced");
+  }
+
+  // Guardrail for lesson completion: service-role execution alone does not
+  // establish that a grading event belongs to the catalog activity. Require
+  // explicit binding and prevent outside publication/supersession.
+  const lessonFunctions = await sql`
+    select p.proname, pg_get_functiondef(p.oid) as body
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('record_lesson_step_grade', 'protect_published_lesson_revision')
+  `;
+  const lessonByName = new Map(lessonFunctions.map((x) => [x.proname, x.body]));
+  const gradeDef = lessonByName.get("record_lesson_step_grade") ?? "";
+  const revisionDef = lessonByName.get("protect_published_lesson_revision") ?? "";
+  if (!gradeDef.includes("catalog_id") || !gradeDef.includes("entity_id") ||
+      !gradeDef.includes("event_type") || !gradeDef.includes("score_percent") ||
+      !/step\s*->>\s*'mode'[\s\S]{0,180}attempt[\s\S]{0,130}pass/i.test(gradeDef)) {
+    fail("Lesson grade RPC must bind trusted event to catalog/entity and score.");
+  } else {
+    pass("Lesson grade RPC verifies catalog, entity, event type and score");
+  }
+  if (!revisionDef.includes("fluentforge.lesson_publish")) {
+    fail("Published lesson transitions must be restricted to atomic publisher.");
+  } else {
+    pass("Published lesson immutability guard requires publication context");
+  }
+  // PostgreSQL custom configuration variables are freely settable; an
+  // authenticated role must not gain restore powers by setting the flag.
+  if (!revisionDef.includes("Unprivileged lesson restore context is forbidden") ||
+      !revisionDef.includes("current_user")) {
+    fail("Lesson restore context lacks an independent privileged-role check.");
+  } else {
+    pass("Lesson restore bypass rejects user-settable GUC spoofing");
+  }
+
+  const catalogLockCols = await sql`
+    select column_default, is_nullable
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'lesson_revisions'
+      and column_name = 'enforce_catalog_locks'
+  `;
+  if (catalogLockCols.length !== 1 ||
+      !String(catalogLockCols[0].column_default ?? "").includes("false") ||
+      catalogLockCols[0].is_nullable !== "NO" ||
+      !revisionDef.includes("enforce_catalog_locks")) {
+    fail("Lesson catalog lockdown must default OFF and remain immutable after publication.");
+  } else {
+    pass("Catalog locking defaults off, persists and is immutable in published revisions");
   }
 
   const resetColumns = await sql`
@@ -673,8 +728,88 @@ async function verifyPerformance() {
   }
 }
 
+async function verifyLessonRestoreRpc() {
+  await sql.unsafe("begin");
+  try {
+    await sql.unsafe("DO $verify_restore$\nDECLARE\n  v_catalog uuid;\n  v_revision uuid := gen_random_uuid();\n  v_record jsonb;\n  v_inserted integer;\n  v_blocked boolean;\nBEGIN\n  INSERT INTO public.catalogs(name,status)\n    VALUES ('Restore acceptance catalog','active')\n    RETURNING id INTO v_catalog;\n  v_record := jsonb_build_object(\n    'id',v_revision,'catalog_id',v_catalog,'revision',1,\n    'state','published','title','Restore acceptance',\n    'description','','sequential',true,'enforce_catalog_locks',false,\n    'steps',jsonb_build_array(jsonb_build_object(\n      'id',gen_random_uuid(),'kind','theory','title','Introduction',\n      'required',true,'mode','view','body','Read this introduction')),\n    'created_at',now(),'published_at',now()\n  );\n  SELECT public.restore_lesson_revision_rows(jsonb_build_array(v_record))\n    INTO v_inserted;\n  IF v_inserted <> 1 THEN\n    RAISE EXCEPTION 'Published revision could not be restored';\n  END IF;\n  SELECT public.restore_lesson_revision_rows(jsonb_build_array(v_record))\n    INTO v_inserted;\n  IF v_inserted <> 0 THEN\n    RAISE EXCEPTION 'Retry duplicated previously restored revision';\n  END IF;\n  v_blocked := false;\n  BEGIN\n    PERFORM public.restore_lesson_revision_rows(jsonb_build_array(\n      jsonb_set(v_record,'{title}','\"tampered\"'::jsonb)\n    ));\n  EXCEPTION WHEN raise_exception THEN\n    v_blocked := true;\n  END;\n  IF NOT v_blocked THEN\n    RAISE EXCEPTION 'Restore overwrote a conflicting published revision';\n  END IF;\n  v_blocked := false;\n  BEGIN\n    UPDATE public.lesson_revisions SET title='tampered' WHERE id=v_revision;\n  EXCEPTION WHEN raise_exception THEN\n    v_blocked := true;\n  END;\n  IF NOT v_blocked THEN\n    RAISE EXCEPTION 'Immutable lesson was editable outside restore RPC';\n  END IF;\nEND $verify_restore$;");
+    pass("Restricted lesson restore supports idempotent retry and rejects tampering");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
+async function verifyIdempotentEventRestore() {
+  await sql.unsafe("begin");
+  try {
+    await sql.unsafe(`DO $test$
+DECLARE
+  v_backup uuid;
+  v_events jsonb;
+  v_count integer;
+  v_blocked boolean := false;
+BEGIN
+  INSERT INTO public.backups(kind,status,manifest,restore_state)
+    VALUES ('manual','processing','{}'::jsonb,'{}'::jsonb)
+    RETURNING id INTO v_backup;
+  SELECT jsonb_agg(jsonb_build_object(
+    'category','activity','event_type','restore_test',
+    'details',jsonb_build_object('source_seq',n),
+    'created_at','2026-10-19T00:00:00Z'
+  )) INTO v_events FROM generate_series(1,250) AS n;
+  SELECT public.restore_event_batch(v_backup,'activity_events',0,v_events)
+    INTO v_count;
+  IF v_count <> 250 THEN RAISE EXCEPTION 'Initial 250-event restore failed'; END IF;
+  SELECT public.restore_event_batch(v_backup,'activity_events',0,v_events)
+    INTO v_count;
+  IF v_count <> 0 THEN RAISE EXCEPTION 'Replay duplicated first batch'; END IF;
+  SELECT count(*) INTO v_count FROM public.activity_events
+    WHERE event_type='restore_test';
+  IF v_count <> 250 THEN RAISE EXCEPTION 'Replay count mismatch'; END IF;
+  BEGIN
+    PERFORM public.restore_event_batch(v_backup,'activity_events',0,
+      jsonb_build_array(jsonb_build_object('event_type','tampered')));
+  EXCEPTION WHEN raise_exception THEN v_blocked := true;
+  END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'Conflicting event replay accepted'; END IF;
+  SELECT public.restore_event_batch(v_backup,'activity_events',1,
+    jsonb_build_array(jsonb_build_object(
+      'category','activity','event_type','restore_test',
+      'details',jsonb_build_object('source_seq',251),
+      'created_at','2026-10-19T00:00:00Z')))
+    INTO v_count;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Second batch failed'; END IF;
+  SELECT count(*) INTO v_count FROM public.activity_events
+    WHERE event_type='restore_test';
+  IF v_count <> 251 THEN RAISE EXCEPTION 'Multi-batch total incorrect'; END IF;
+  -- Audit logs use an independent ledger namespace from activity events.
+  SELECT public.restore_event_batch(v_backup,'audit_logs',0,
+    jsonb_build_array(jsonb_build_object(
+      'actor_type','system','action','restore_audit_test',
+      'details',jsonb_build_object('source','fixture'),
+      'created_at','2026-10-19T00:00:00Z')))
+    INTO v_count;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Initial audit restore failed'; END IF;
+  SELECT public.restore_event_batch(v_backup,'audit_logs',0,
+    jsonb_build_array(jsonb_build_object(
+      'actor_type','system','action','restore_audit_test',
+      'details',jsonb_build_object('source','fixture'),
+      'created_at','2026-10-19T00:00:00Z')))
+    INTO v_count;
+  IF v_count <> 0 THEN RAISE EXCEPTION 'Audit retry duplicated event'; END IF;
+  SELECT count(*) INTO v_count FROM public.audit_logs
+    WHERE action='restore_audit_test';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Audit replay count incorrect'; END IF;
+END $test$;`);
+    pass("Interrupted append-only batch retry is idempotent and detects altered replay");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
 try {
   await verifySchemaSecurity();
+  await verifyIdempotentEventRestore();
+  await verifyLessonRestoreRpc();
   await verifyPerformance();
 
   if (failures.length) {

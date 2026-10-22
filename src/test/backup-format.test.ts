@@ -78,6 +78,22 @@ describe("FluentForge backup format", () => {
   });
 });
 
+describe("legacy backups", () => {
+  it("restores complete V1 archives without inventing lesson progress", () => {
+    const legacy = emptyPackage();
+    legacy.version = 1;
+    legacy.schema = "2026-10-06/v1";
+    delete legacy.tables["lesson_revisions"];
+    delete legacy.tables["lesson_step_progress"];
+    delete legacy.manifest.row_counts["lesson_revisions"];
+    delete legacy.manifest.row_counts["lesson_step_progress"];
+    const loaded = parseBackupPackage(legacy);
+    expect(loaded.version).toBe(2);
+    expect(loaded.tables["lesson_revisions"]).toEqual([]);
+    expect(loaded.tables["lesson_step_progress"]).toEqual([]);
+  });
+});
+
 describe("backup row sanitization", () => {
   it("removes student auth linkage", () => {
     const result = sanitizeBackupRow("students", {
@@ -97,6 +113,23 @@ describe("backup row sanitization", () => {
     });
 
     expect(result).not.toHaveProperty("search");
+  });
+
+  it("restores lesson grades without dangling historical event IDs", () => {
+    const result = sanitizeBackupRow("lesson_step_progress", {
+      revision_id: "lesson-revision",
+      student_id: "learner",
+      step_id: "activity-1",
+      last_graded_event_id: 123456,
+      best_score_percent: 92,
+      attempted_at: "2026-10-18T15:00:00Z",
+      viewed_at: null,
+      teacher_approved: false,
+    });
+
+    expect(result?.["last_graded_event_id"]).toBeNull();
+    expect(result?.["best_score_percent"]).toBe(92);
+    expect(result?.["attempted_at"]).toBe("2026-10-18T15:00:00Z");
   });
 
   it("drops non-allowlisted system settings", () => {

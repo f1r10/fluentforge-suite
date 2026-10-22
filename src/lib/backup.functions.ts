@@ -51,6 +51,8 @@ const RESTORE_ORDER: BackupTable[] = [
   "student_vocabulary_state",
   "catalogs",
   "catalog_items",
+  "lesson_revisions",
+  "lesson_step_progress",
   "catalog_assignments",
   "exams",
   "exam_sections",
@@ -582,8 +584,9 @@ export const getRestorePreview = createServerFn({ method: "GET" })
       },
       target,
       canRestore:
-        resumable ||
-        Object.values(target).every((count) => Number(count) === 0),
+        state.status !== "completed" &&
+        (resumable ||
+          Object.values(target).every((count) => Number(count) === 0)),
       resumable,
       restoreState: state,
     };
@@ -643,7 +646,7 @@ export const restoreApplicationBackup = createServerFn({ method: "POST" })
 
     for (const table of RESTORE_ORDER) {
       if (state.completed_tables.includes(table)) continue;
-      await restoreTable(admin, table, backup.tables[table] ?? []);
+      await restoreTable(admin, table, backup.tables[table] ?? [], row.id);
       state.completed_tables.push(table);
       await saveRestoreState(admin, row.id, state);
     }
@@ -995,16 +998,23 @@ async function restoreStorage(
 ) {
   for (const object of backup.storage) {
     const bytes = Buffer.from(object.data_base64, "base64");
+    // A restarted restore may encounter an object already uploaded in a
+    // previous pass. Never overwrite it without proving it is identical.
     const { error } = await admin.storage
       .from(object.bucket)
       .upload(object.path, bytes, {
         contentType: object.mime_type ?? "application/octet-stream",
-        upsert: true,
+        upsert: false,
       });
     if (error) {
-      throw new Error(
-        `Could not restore ${object.bucket}/${object.path}: ${error.message}`,
+      const existing = await downloadObject(admin, object.bucket, object.path).catch(
+        () => null,
       );
+      if (!existing || (await sha256Buffer(existing)) !== object.sha256) {
+        throw new Error(
+          `Could not safely restore ${object.bucket}/${object.path}: existing object differs or upload failed (${error.message})`,
+        );
+      }
     }
   }
 }
@@ -1014,11 +1024,25 @@ async function restoreTable(
   admin: any,
   table: BackupTable,
   inputRows: Record<string, unknown>[],
+  backupId: string,
 ) {
   let rows = inputRows
     .map((row) => sanitizeBackupRow(table, row))
     .filter((row): row is Record<string, unknown> => !!row);
   if (!rows.length) return;
+
+  if (table === "lesson_revisions") {
+    // The immutable publication trigger correctly rejects plain inserts of
+    // published/superseded rows. Restore via the service-role-only, atomic,
+    // idempotent RPC; never disable the trigger for normal requests.
+    for (const batch of chunks(rows, 250)) {
+      const { error } = await admin.rpc("restore_lesson_revision_rows", {
+        p_rows: batch,
+      });
+      if (error) throw new Error(`Could not restore lesson revisions: ${error.message}`);
+    }
+    return;
+  }
 
   if (table === "system_settings") {
     rows = rows.map((row) => {
@@ -1051,7 +1075,18 @@ async function restoreTable(
   }
 
   if (table === "activity_events" || table === "audit_logs") {
-    await insertBatches(admin, table, rows);
+    for (let index = 0; index * 250 < rows.length; index += 1) {
+      const batch = rows.slice(index * 250, (index + 1) * 250);
+      // The service-only RPC inserts the batch and checkpoints it in
+      // the same transaction, so a crash cannot duplicate historical events.
+      const { error } = await admin.rpc("restore_event_batch", {
+        p_backup_id: backupId,
+        p_table: table,
+        p_index: index,
+        p_rows: batch,
+      });
+      if (error) throw new Error(`Could not restore ${table} batch ${index}: ${error.message}`);
+    }
     return;
   }
 
@@ -1066,18 +1101,6 @@ async function upsertBatches(
 ) {
   for (const batch of chunks(rows, 250)) {
     const { error } = await admin.from(table).upsert(batch);
-    if (error) throw new Error(`Could not restore ${table}: ${error.message}`);
-  }
-}
-
-async function insertBatches(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  admin: any,
-  table: string,
-  rows: Record<string, unknown>[],
-) {
-  for (const batch of chunks(rows, 250)) {
-    const { error } = await admin.from(table).insert(batch);
     if (error) throw new Error(`Could not restore ${table}: ${error.message}`);
   }
 }

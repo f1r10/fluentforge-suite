@@ -64,7 +64,10 @@ function fail(path: (string | number)[], message: string): never {
 }
 
 function parseChoice(input: QuestionInput, multiple: boolean) {
-  const payload = z.object({ options: z.array(optionSchema).min(2).max(100) }).parse(input.payload);
+  const payload = z.object({
+    options: z.array(optionSchema).min(2).max(100),
+    media_id: z.string().uuid().nullable().optional(),
+  }).passthrough().parse(input.payload);
   const answer = z.object({ correct: z.array(id).min(1).max(100) }).parse(input.answer_key);
 
   const optionIds = new Set(payload.options.map((o) => o.id));
@@ -87,7 +90,9 @@ function parseFixedChoice(input: QuestionInput, fixedOptions: string[]) {
   const payload = z
     .object({
       options: z.array(shortText).default(fixedOptions),
+      media_id: z.string().uuid().nullable().optional(),
     })
+    .passthrough()
     .parse(input.payload);
   const answer = z.object({ correct: z.array(answerText).length(1) }).parse(input.answer_key);
   if (!fixedOptions.includes(answer.correct[0]!)) {

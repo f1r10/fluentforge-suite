@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hmac
+
+import fitz
 import os
 import subprocess
 import tempfile
@@ -9,9 +11,9 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
-from .models import DocxReportRequest, DocumentImportRequest, JobCreated, JobView, PdfReportRequest, TranscriptionRequest, YouTubeImportRequest
+from .models import DocxReportRequest, DocumentImportRequest, DocumentCropRequest, JobCreated, JobView, PdfReportRequest, TranscriptionRequest, YouTubeImportRequest
 from .store import create_job, get_job, init_db
-from .worker import start_worker, stop_worker
+from .worker import start_worker, stop_worker, _download_source
 
 
 def verify_key(x_processing_key: str | None = Header(default=None)) -> None:
@@ -53,6 +55,58 @@ def submit_document_import(request: DocumentImportRequest):
 
 
 
+
+
+@app.post(
+    "/v1/documents/pdf-crop",
+    dependencies=[Depends(verify_key)],
+)
+def render_pdf_source_crop(request: DocumentCropRequest):
+    """Materialize a teacher-reviewed image region; never expose full source PDF."""
+    if not request.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=422, detail="Only PDF source crops are supported")
+    crop = request.crop
+    if crop.x + crop.width > 1.00001 or crop.y + crop.height > 1.00001:
+        raise HTTPException(status_code=422, detail="Crop exceeds the source page")
+
+    # The downloader enforces PROCESSING_ALLOWED_SOURCE_HOSTS and byte limits.
+    temp_path = _download_source(str(request.source_url), request.filename)
+    try:
+        try:
+            with fitz.open(temp_path) as document:
+                if request.page > len(document):
+                    raise HTTPException(status_code=422, detail="Source page is missing")
+                page = document[request.page - 1]
+                bounds = page.rect
+                clip = fitz.Rect(
+                    bounds.x0 + crop.x * bounds.width,
+                    bounds.y0 + crop.y * bounds.height,
+                    bounds.x0 + (crop.x + crop.width) * bounds.width,
+                    bounds.y0 + (crop.y + crop.height) * bounds.height,
+                ) & bounds
+                if clip.is_empty or clip.width < 2 or clip.height < 2:
+                    raise HTTPException(status_code=422, detail="Crop is empty")
+                # Bound output resolution to prevent image allocation abuse.
+                scale = min(2.0, 1600.0 / max(clip.width, clip.height))
+                png = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    clip=clip,
+                    alpha=False,
+                ).tobytes("png")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="Could not render PDF crop") from exc
+
+        if len(png) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Rendered crop is too large")
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={"cache-control": "no-store"},
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 @app.post(

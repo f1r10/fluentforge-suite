@@ -14,6 +14,89 @@ export type Database = {
   }
   public: {
     Tables: {
+      lesson_revisions: {
+        Row: {
+          id: string
+          catalog_id: string
+          revision: number
+          state: string
+          title: string
+          description: string
+          sequential: boolean
+          enforce_catalog_locks: boolean
+          steps: Json
+          created_at: string
+          published_at: string | null
+        }
+        Insert: {
+          id?: string
+          catalog_id: string
+          revision: number
+          state?: string
+          title: string
+          description?: string
+          sequential?: boolean
+          enforce_catalog_locks?: boolean
+          steps: Json
+          created_at?: string
+          published_at?: string | null
+        }
+        Update: {
+          id?: string
+          catalog_id?: string
+          revision?: number
+          state?: string
+          title?: string
+          description?: string
+          sequential?: boolean
+          enforce_catalog_locks?: boolean
+          steps?: Json
+          created_at?: string
+          published_at?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "lesson_revisions_catalog_id_fkey"; columns: ["catalog_id"]; isOneToOne: false; referencedRelation: "catalogs"; referencedColumns: ["id"] }
+        ]
+      }
+      lesson_step_progress: {
+        Row: {
+          revision_id: string
+          student_id: string
+          step_id: string
+          viewed_at: string | null
+          attempted_at: string | null
+          best_score_percent: number | null
+          last_graded_event_id: number | null
+          teacher_approved: boolean
+          updated_at: string
+        }
+        Insert: {
+          revision_id: string
+          student_id: string
+          step_id: string
+          viewed_at?: string | null
+          attempted_at?: string | null
+          best_score_percent?: number | null
+          last_graded_event_id?: number | null
+          teacher_approved?: boolean
+          updated_at?: string
+        }
+        Update: {
+          revision_id?: string
+          student_id?: string
+          step_id?: string
+          viewed_at?: string | null
+          attempted_at?: string | null
+          best_score_percent?: number | null
+          last_graded_event_id?: number | null
+          teacher_approved?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "lesson_step_progress_revision_id_fkey"; columns: ["revision_id"]; isOneToOne: false; referencedRelation: "lesson_revisions"; referencedColumns: ["id"] },
+          { foreignKeyName: "lesson_step_progress_student_id_fkey"; columns: ["student_id"]; isOneToOne: false; referencedRelation: "students"; referencedColumns: ["id"] }
+        ]
+      }
       activity_events: {
         Row: {
           attempt_id: string | null
@@ -2763,6 +2846,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      publish_lesson_revision: {
+        Args: { p_catalog_id: string; p_draft_id: string }
+        Returns: string
+      }
+      record_lesson_step_grade: {
+        Args: {
+          p_revision_id: string
+          p_student_id: string
+          p_step_id: string
+          p_score_percent: number | null
+          p_event_id: number
+        }
+        Returns: undefined
+      }
       current_student_id: { Args: never; Returns: string }
       record_review_from_event: {
         Args: { p_event_id: number }

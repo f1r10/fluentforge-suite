@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { lessonItemAccess } from "./lesson-access.server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
@@ -647,14 +648,18 @@ async function catalogEntityIds(
   admin: Admin,
   catalogId: string,
   entityType: "question" | "vocabulary" | "reading" | "listening",
+  studentId: string,
 ) {
   const { data, error } = await admin
     .from("catalog_items")
-    .select("entity_id")
+    .select("id,entity_id")
     .eq("catalog_id", catalogId)
     .eq("entity_type", entityType);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => row.entity_id);
+  const access = await lessonItemAccess(admin, catalogId, studentId);
+  return (data ?? [])
+    .filter((row) => !access?.enforceCatalogLocks || access.allowedItemIds.has(row.id))
+    .map((row) => row.entity_id);
 }
 
 async function selectQuestionPracticeIds(
@@ -698,13 +703,17 @@ async function selectQuestionPracticeIds(
     p_difficulty: pool.difficulty,
   });
   if (result.error) throw new Error(result.error.message);
-  return ((result.data ?? []) as Array<{ question_id: string }>).map(
+  const selected = ((result.data ?? []) as Array<{ question_id: string }>).map(
     (row) => row.question_id,
   );
+  if (!catalogId) return selected;
+  const allowed = new Set(await catalogEntityIds(admin, catalogId, "question", studentId));
+  return selected.filter((id) => allowed.has(id));
 }
 
 async function selectContextPracticeIds(
   admin: Admin,
+  studentId: string,
   assignedIds: string[],
   kind: "reading" | "listening",
   pool:
@@ -723,6 +732,7 @@ async function selectContextPracticeIds(
       admin,
       pool.catalogId!,
       kind,
+      studentId,
     );
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
@@ -831,6 +841,7 @@ async function selectContextPracticeIds(
 
 async function selectVocabularyPracticeItems(
   admin: Admin,
+  studentId: string,
   assignedIds: string[],
   pool: SelfPracticeGenerator["vocabulary"],
 ): Promise<SelfPracticeVocabularyItem[]> {
@@ -845,6 +856,7 @@ async function selectVocabularyPracticeItems(
       admin,
       pool.catalogId!,
       "vocabulary",
+      studentId,
     );
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
@@ -957,17 +969,20 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
         ),
         selectVocabularyPracticeItems(
           admin,
+          studentId,
           assignedIds,
           data.vocabulary,
         ),
         selectContextPracticeIds(
           admin,
+          studentId,
           assignedIds,
           "reading",
           data.readings,
         ),
         selectContextPracticeIds(
           admin,
+          studentId,
           assignedIds,
           "listening",
           data.listenings,

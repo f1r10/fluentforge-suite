@@ -116,6 +116,12 @@ def _extract_pdf(path: Path) -> Extraction:
         )
         chunks.append(text)
 
+    # The teacher's original PDFs can embed the same logo/checkbox art on
+    # every page (A2/BTU/Beginner). They are page furniture, not question
+    # diagrams. Do not associate them with arbitrary question crops.
+    removed_decorations = _suppress_repeated_pdf_decorations(pages)
+    total_images = sum(len(page["images"]) for page in pages)
+
     return Extraction(
         "pdf_layout_ocr" if used_ocr else "pdf_layout_native",
         pages,
@@ -126,8 +132,50 @@ def _extract_pdf(path: Path) -> Extraction:
             "ocr_pages": sum(1 for p in pages if p["method"] == "ocr"),
             "tables": total_tables,
             "image_regions": total_images,
+            "decorative_image_regions_filtered": removed_decorations,
         },
     )
+
+
+def _suppress_repeated_pdf_decorations(pages: list[dict[str, Any]]) -> int:
+    """Exclude repeating small/header/footer images without losing diagrams.
+
+    Match by PDF xref across distinct pages, not raw count: one decorative
+    icon can occur many times on a single page. A larger instructional
+    diagram in the body stays available even when repeated across pages.
+    """
+    if len(pages) < 3:
+        return 0
+    from collections import defaultdict
+
+    seen_pages: dict[int, set[int]] = defaultdict(set)
+    for page in pages:
+        for image in page.get("images") or []:
+            if isinstance(image.get("xref"), int):
+                seen_pages[image["xref"]].add(int(page.get("page") or 0))
+
+    frequent = {
+        xref for xref, occurrences in seen_pages.items()
+        if len(occurrences) >= max(3, int(len(pages) * 0.6 + 0.999))
+    }
+    removed = 0
+    for page in pages:
+        preserved = []
+        for image in page.get("images") or []:
+            crop = image.get("crop") or {}
+            x, y = float(crop.get("x", 0)), float(crop.get("y", 0))
+            width, height = float(crop.get("width", 0)), float(crop.get("height", 0))
+            # Tiny repeated checkbox marks and repeated page-edge branding
+            # cannot supply an educational answer in isolation.
+            decoration = image.get("xref") in frequent and (
+                width * height <= 0.003 or y <= 0.10 or y + height >= 0.90
+            )
+            if decoration:
+                removed += 1
+            else:
+                preserved.append(image)
+        page["images"] = preserved
+    return removed
 
 
 def _page_blocks(page: fitz.Page) -> list[dict[str, Any]]:
@@ -657,6 +705,47 @@ def detect_candidates(
                         "assets": assets,
                     }
                     question["payload"] = payload
+
+        # A picture/clock-based short-answer question is not self-contained
+        # just because its text is parseable. The original 100-exercise PDF
+        # uses four clock drawings followed by blanks; no answer can be
+        # safely recovered from the text layer. Explicitly block bulk
+        # approval until the teacher attaches the visual and supplies an
+        # answer. Avoid suppressing ordinary text questions on the page.
+        visual_time_task = bool(re.search(
+            r"\b(?:telling the time|draw the hands on the clocks?|what time is it)\b",
+            page_text,
+            re.IGNORECASE,
+        ))
+        if visual_time_task:
+            for question in questions:
+                payload = question.get("payload") or {}
+                if payload.get("question_type") not in {"fill_blank", "short_answer"}:
+                    continue
+                answer_key = payload.get("answer_key") or {}
+                has_accepted_answer = any(
+                    answer
+                    for group in answer_key.get("blanks", [])
+                    if isinstance(group, list)
+                    for answer in group
+                )
+                assets = (
+                    payload.get("import_context", {}).get("assets", [])
+                    if isinstance(payload.get("import_context"), dict)
+                    else []
+                )
+                if not has_accepted_answer and any(
+                    asset.get("kind") == "image_region"
+                    for asset in assets if isinstance(asset, dict)
+                ):
+                    payload["import_warnings"] = [
+                        "Image-dependent clock question: attach the relevant source image "
+                        "and enter a teacher-verified answer before approving."
+                    ]
+                    question["payload"] = payload
+                    question["confidence"] = min(
+                        float(question.get("confidence") or 0), 0.45
+                    )
 
         candidates.extend(questions)
 
@@ -2470,14 +2559,20 @@ def _questions_from_text(
         q.pop("_nested_numbering", None)
         answer = answer_key.get(number) or (global_answers or {}).get(number)
         if len(options) >= 2:
-            fixed_ids = {option["id"] for option in options}
-            if fixed_ids == {"true", "false"} and len(options) == 2:
+            # The Beginner teacher PDF uses A/B-labeled checkbox answers:
+            # 'A □ TRUE / B □ FALSE'. Map by option text, not ID alone.
+            normalized_options = [
+                re.sub(r"\s+", "_", str(option["text"]).strip().casefold())
+                for option in options
+            ]
+            option_labels = set(normalized_options)
+            if len(options) == 2 and option_labels == {"true", "false"}:
                 fixed_type = "true_false"
                 fixed_labels = ["True", "False"]
-            elif fixed_ids == {"true", "false", "not_given"} and len(options) == 3:
+            elif len(options) == 3 and option_labels == {"true", "false", "not_given"}:
                 fixed_type = "true_false_not_given"
                 fixed_labels = ["True", "False", "Not Given"]
-            elif fixed_ids == {"yes", "no", "not_given"} and len(options) == 3:
+            elif len(options) == 3 and option_labels == {"yes", "no", "not_given"}:
                 fixed_type = "yes_no_not_given"
                 fixed_labels = ["Yes", "No", "Not Given"]
             else:
@@ -2498,6 +2593,19 @@ def _questions_from_text(
                          if label.casefold().replace(" ", "_") == normalized_answer.replace(" ", "_")),
                         None,
                     )
+                    if not answer_text:
+                        # Letter keys can refer to labelled fixed choices, and
+                        # their order is not guaranteed to be True then False.
+                        answer_text = next(
+                            (
+                                label
+                                for source_option, label_key in zip(options, normalized_options)
+                                for label in fixed_labels
+                                if source_option["id"] == normalized_answer
+                                and label.casefold().replace(" ", "_") == label_key
+                            ),
+                            None,
+                        )
                 payload = {
                     "question_type": fixed_type,
                     "prompt": q["prompt"],

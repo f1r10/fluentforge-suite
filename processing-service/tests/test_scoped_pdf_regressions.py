@@ -204,3 +204,110 @@ def test_present_simple_answer_sheet_creates_fill_blank_questions():
     assert len(questions) == 2
     assert [q["question_type"] for q in questions] == ["fill_blank", "fill_blank"]
     assert [q["answer_key"]["blanks"][0][0] for q in questions] == ["work", "plays"]
+
+
+def test_real_c1_multisense_glosses_survive_native_candidate_detection():
+    # From the teacher's BTU C1 sample, reduced to safe short excerpts.
+    source = exam([
+        "BTU SFL WORD LISTS - C1 LEVEL\n"
+        "1471) projection noun CALCULATION C1\n"
+        "1472) projection noun IMAGE C1\n"
+        "1650) run verb WORKING C1\n"
+        "1651) run verb PUBLISH C1\n"
+    ])
+    items = detect_candidates(source, {
+        "expected_content": "vocabulary", "learning_language": "en",
+    })
+    vocabulary = [
+        item["payload"] for item in items
+        if item["item_type"] == "vocabulary"
+    ]
+    assert len(vocabulary) == 4
+    assert [value["word"] for value in vocabulary] == [
+        "projection", "projection", "run", "run",
+    ]
+    assert [value["part_of_speech"] for value in vocabulary] == [
+        "noun", "noun", "verb", "verb",
+    ]
+    assert [value["notes"] for value in vocabulary] == [
+        "Source sense: CALCULATION", "Source sense: IMAGE",
+        "Source sense: WORKING", "Source sense: PUBLISH",
+    ]
+
+
+def test_beginner_ab_labeled_checkbox_true_false_without_key():
+    # The actual 100-question Beginner PDF prints True/False under A/B
+    # checkboxes instead of canonical naked True/False labels.
+    documents = exam([
+        "76. Sarah and Colin live in a new house.\n"
+        "A  \uf072 TRUE\nB \uf072 FALSE\n"
+        "77. Sarah stays at home every day.\n"
+        "A  \uf072 TRUE\nB \uf072 FALSE\n",
+    ])
+    questions = [
+        item["payload"] for item in detect_candidates(
+            documents, profile={"expected_content": "questions"}
+        ) if item["item_type"] == "question"
+    ]
+    assert len(questions) == 2
+    for question in questions:
+        assert question["question_type"] == "true_false"
+        assert question["payload"]["options"] == ["True", "False"]
+        # Source does not provide a key; require teacher to supply it.
+        assert question["answer_key"] == {"correct": []}
+
+
+def test_checkbox_fixed_choice_maps_letter_key_through_option_label():
+    documents = exam([
+        "1. A week has seven days.\nA) TRUE\nB) FALSE\n"
+        "2. The sun is cold.\nA) FALSE\nB) TRUE\n",
+        "Answer Key:\n1. A\n2. A\n",
+    ])
+    questions = [
+        item["payload"] for item in detect_candidates(
+            documents, profile={"expected_content": "questions"}
+        ) if item["item_type"] == "question"
+    ]
+    assert len(questions) == 2
+    assert [item["question_type"] for item in questions] == ["true_false"] * 2
+    assert [item["answer_key"]["correct"] for item in questions] == [
+        ["True"], ["False"],
+    ]
+
+
+def test_clock_diagram_questions_require_visual_teacher_review():
+    clock_text = (
+        "Exercise 14: Telling the time. What time is it?\n"
+        "81.\n______________\n"
+        "82.\n______________\n"
+    )
+    documents = Extraction(
+        "pdf_layout_native",
+        [{
+            "page": 8, "text": clock_text, "tables": [],
+            "blocks": [
+                {"text": "81.\n____________", "crop": {
+                    "x": .1, "y": .50, "width": .3, "height": .05,
+                }},
+                {"text": "82.\n____________", "crop": {
+                    "x": .5, "y": .52, "width": .3, "height": .05,
+                }},
+            ],
+            "images": [
+                {"xref": 4, "crop": {"x": .1, "y": .45, "width": .2, "height": .1}},
+                {"xref": 5, "crop": {"x": .5, "y": .46, "width": .2, "height": .1}},
+            ],
+        }],
+        [], clock_text, {},
+    )
+    items = detect_candidates(documents, {"expected_content": "questions"})
+    questions = [item for item in items if item["item_type"] == "question"]
+    assert len(questions) == 2
+    for item in questions:
+        assert item["payload"]["question_type"] == "fill_blank"
+        assert item["payload"].get("import_warnings")
+        assert item["confidence"] <= .45
+        assert any(
+            asset["kind"] == "image_region"
+            for asset in item["payload"]["import_context"]["assets"]
+        )
