@@ -12,9 +12,16 @@ export function importedQuestionImageCrop(context: unknown): NormalizedSourceCro
     !!item && typeof item === "object" &&
     (item as Record<string, unknown>)["kind"] === "image_region",
   );
-  if (!images.length) return null;
-  if (images.length > 8) throw new Error("Too many source images for one question.");
-  const crops = images.map((image) => {
+  // A table can carry the information required to answer a question even
+  // when the PDF contains no raster images. Prefer explicit diagram images
+  // over nearby tables to avoid clipping an unrelated whole-page grid.
+  const regions = images.length ? images : assets.filter((item): item is Record<string, unknown> =>
+    !!item && typeof item === "object" &&
+    (item as Record<string, unknown>)["kind"] === "table",
+  );
+  if (!regions.length) return null;
+  if (regions.length > 8) throw new Error("Too many source images for one question.");
+  const crops = regions.map((image) => {
     const value = image["crop"];
     if (!value || typeof value !== "object") {
       throw new Error("Source image region has no PDF coordinates.");
