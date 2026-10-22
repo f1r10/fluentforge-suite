@@ -997,16 +997,23 @@ async function restoreStorage(
 ) {
   for (const object of backup.storage) {
     const bytes = Buffer.from(object.data_base64, "base64");
+    // A restarted restore may encounter an object already uploaded in a
+    // previous pass. Never overwrite it without proving it is identical.
     const { error } = await admin.storage
       .from(object.bucket)
       .upload(object.path, bytes, {
         contentType: object.mime_type ?? "application/octet-stream",
-        upsert: true,
+        upsert: false,
       });
     if (error) {
-      throw new Error(
-        `Could not restore ${object.bucket}/${object.path}: ${error.message}`,
+      const existing = await downloadObject(admin, object.bucket, object.path).catch(
+        () => null,
       );
+      if (!existing || (await sha256Buffer(existing)) !== object.sha256) {
+        throw new Error(
+          `Could not safely restore ${object.bucket}/${object.path}: existing object differs or upload failed (${error.message})`,
+        );
+      }
     }
   }
 }
