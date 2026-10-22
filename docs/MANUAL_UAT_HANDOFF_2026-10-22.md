@@ -8,6 +8,33 @@ CI tests a disposable synthetic environment; it does **not** prove the seven pri
 
 Do not overwrite the live EC2 instance or its data. Do not run a destructive restore in production. Create an isolated empty staging Compose project and verify migration history and storage before proceeding.
 
+## Isolated staging bootstrap (no production modifications)
+On a separate UAT host or a workstation with adequate resources, clone this PR
+branch and run:
+
+```bash
+git fetch origin chatgpt/integration-hardening-lessons-20261019
+git switch chatgpt/integration-hardening-lessons-20261019
+bash scripts/setup-isolated-uat.sh
+```
+
+The bootstrap creates a fresh `.env.uat.local`, uses Docker Compose project
+`fluentforge-uat` (separate database/media/processing volumes), and binds the
+application to `127.0.0.1:3100`. It refuses to overwrite an existing UAT
+environment. On a remote host, reach it over SSH port forwarding, not by
+exposing the UAT service on the public interface:
+
+```bash
+ssh -L 3100:127.0.0.1:3100 <uat-host>
+```
+
+Then open `http://127.0.0.1:3100/`. Perform initial teacher setup with the
+generated setup token from the private environment file, and create **disposable**
+students for the acceptance scenarios. Do not reuse production credentials.
+The script builds a fresh *empty* staging environment, **not** an EC2 restore
+verification. Use a different staging Compose project for isolated disaster
+recovery experiments; never restore onto these newly created UAT records.
+
 ## Operator preflight (read-only)
 1. Record the deployed commit, Docker/Compose versions, disk free space, TLS certificate expiry and /health. Save logs with secrets redacted.
 2. Take a PostgreSQL custom-format backup and storage snapshots, record checksums and the snapshot consistency caveat.
