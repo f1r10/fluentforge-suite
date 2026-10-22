@@ -37,6 +37,9 @@ jobs:
       - name: Check migration runner syntax
         run: node --check scripts/migrate.mjs
 
+      - name: Validate isolated UAT installer syntax
+        run: bash -n scripts/setup-isolated-uat.sh
+
 
   processing-service:
     runs-on: ubuntu-latest
