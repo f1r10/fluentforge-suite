@@ -8,6 +8,21 @@ import { validateQuestionInput } from "./question-schema";
 import { getProcessingService, type ProcessingImportItem } from "./processing.service";
 
 const SOURCE_BUCKET = "sources";
+
+// PDF and image originals are required to reconstruct source page regions.
+// Import metadata currently stores normalized visual coordinates, not a
+// separately persisted student-safe crop. Never delete the only source
+// during commit, even if the upload requested cleanup. A separate explicit
+// retention operation can be offered once crops have been materialized.
+export function sourceNeedsVisualProvenance(
+  mimeType: string | null | undefined,
+  filename: string | null | undefined,
+): boolean {
+  return mimeType === "application/pdf" ||
+    !!mimeType?.toLowerCase().startsWith("image/") ||
+    /\.(?:pdf|png|jpe?g|webp|bmp|tiff?)$/i.test(filename ?? "");
+}
+
 const MiB = 1024 * 1024;
 
 const POSTGREST_ID_CHUNK = 50;
@@ -1404,7 +1419,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
 
     const { data: job, error: jobError } = await admin
       .from("import_jobs")
-      .select("id,source_file_id,status,source_files(storage_path,keep_original)")
+      .select("id,source_file_id,status,source_files(storage_path,keep_original,mime_type,original_filename)")
       .eq("id", data.jobId)
       .maybeSingle();
     if (jobError) throw new Error(jobError.message);
@@ -1757,9 +1772,12 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
       const source = job.source_files as unknown as {
         storage_path: string | null;
         keep_original: boolean;
+        mime_type: string | null;
+        original_filename: string;
       } | null;
       let originalDeleted = false;
-      if (completed && source?.storage_path && !source.keep_original) {
+      if (completed && source?.storage_path && !source.keep_original &&
+      !sourceNeedsVisualProvenance(source.mime_type, source.original_filename)) {
         const { error: removeError } = await admin.storage
           .from(SOURCE_BUCKET)
           .remove([source.storage_path]);
@@ -2340,10 +2358,13 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
     const source = job.source_files as unknown as {
       storage_path: string | null;
       keep_original: boolean;
+      mime_type: string | null;
+      original_filename: string;
     } | null;
 
     let originalDeleted = false;
-    if (completed && source?.storage_path && !source.keep_original) {
+    if (completed && source?.storage_path && !source.keep_original &&
+      !sourceNeedsVisualProvenance(source.mime_type, source.original_filename)) {
       const { error: removeError } = await admin.storage
         .from(SOURCE_BUCKET)
         .remove([source.storage_path]);
