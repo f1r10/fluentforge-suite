@@ -1,3 +1,4 @@
+import { sourceNeedsVisualProvenance } from "./import-source-retention";
 import { createServerFn } from "@tanstack/react-start";
 import type { Database } from "../integrations/supabase/types";
 import { z } from "zod";
@@ -9,19 +10,6 @@ import { getProcessingService, type ProcessingImportItem } from "./processing.se
 
 const SOURCE_BUCKET = "sources";
 
-// PDF and image originals are required to reconstruct source page regions.
-// Import metadata currently stores normalized visual coordinates, not a
-// separately persisted student-safe crop. Never delete the only source
-// during commit, even if the upload requested cleanup. A separate explicit
-// retention operation can be offered once crops have been materialized.
-export function sourceNeedsVisualProvenance(
-  mimeType: string | null | undefined,
-  filename: string | null | undefined,
-): boolean {
-  return mimeType === "application/pdf" ||
-    !!mimeType?.toLowerCase().startsWith("image/") ||
-    /\.(?:pdf|png|jpe?g|webp|bmp|tiff?)$/i.test(filename ?? "");
-}
 
 const MiB = 1024 * 1024;
 
