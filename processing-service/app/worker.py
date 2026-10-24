@@ -192,6 +192,10 @@ def _process_youtube_import(job: dict) -> None:
             "retries": 3,
             "fragment_retries": 3,
             "overwrites": False,
+            # yt-dlp enables Deno by default, but this image deliberately
+            # ships supported Node 22 instead. EJS comes from yt-dlp[default].
+            # Never fetch remote solver code dynamically.
+            "js_runtimes": {"node": {}},
         }
         if cookies_file:
             ydl_opts["cookiefile"] = cookies_file
