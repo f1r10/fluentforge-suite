@@ -702,7 +702,7 @@ export const getListeningStudentPreview = createServerFn({ method: "GET" })
         ? admin
             .from("media_assets")
             .select(
-              "id,kind,storage_path,external_url,mime_type,duration_seconds",
+              "id,kind,storage_path,external_url,mime_type,duration_seconds,metadata",
             )
             .eq("id", listening.media_id)
             .is("deleted_at", null)
@@ -765,11 +765,12 @@ export const getListeningStudentPreview = createServerFn({ method: "GET" })
       typeof listening.playback_rules === "object"
         ? (listening.playback_rules as Record<string, unknown>)
         : {};
+    const { presentedMediaKind } = await import("./youtube-media");
     const media = mediaResult.data;
     const resolvedMedia = media
       ? {
           id: media.id,
-          kind: media.kind,
+          kind: presentedMediaKind(media),
           external_url: await resolveMediaUrl(admin, media, 60 * 60),
           mime_type: media.mime_type,
           duration_seconds: media.duration_seconds,
