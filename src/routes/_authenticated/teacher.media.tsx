@@ -40,7 +40,7 @@ function MediaLibraryPage() {
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaRow | null>(null);
   const [youtubeOpen, setYoutubeOpen] = useState(false);
-  const [youtubeFallbackUrl, setYoutubeFallbackUrl] = useState<string | null>(null);
+  const [youtubeDraft, setYoutubeDraft] = useState<{ url: string; mode: "download" | "reference" } | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["media-library", search, kind, includeDeleted, page],
@@ -173,7 +173,7 @@ function MediaLibraryPage() {
           <Button
             variant="outline"
             onClick={() => {
-              setYoutubeFallbackUrl(null);
+              setYoutubeDraft(null);
               setYoutubeOpen(true);
             }}
           >
@@ -212,10 +212,17 @@ function MediaLibraryPage() {
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Button type="button" size="sm" variant="outline"
                         onClick={() => {
-                          setYoutubeFallbackUrl(job.source_url);
+                          setYoutubeDraft({ url: job.source_url, mode: "reference" });
                           setYoutubeOpen(true);
                         }}>
                         {t("youtube_save_link_instead")}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost"
+                        onClick={() => {
+                          setYoutubeDraft({ url: job.source_url, mode: "download" });
+                          setYoutubeOpen(true);
+                        }}>
+                        {t("youtube_retry_download")}
                       </Button>
                       <span className="text-xs text-muted-foreground">
                         {t("youtube_reference_privacy_note")}
@@ -354,9 +361,9 @@ function MediaLibraryPage() {
       {preview && <PreviewDialog media={preview} onClose={() => setPreview(null)} />}
       {youtubeOpen && (
         <YouTubeImportDialog
-          key={youtubeFallbackUrl ?? "new"}
-          initialUrl={youtubeFallbackUrl ?? ""}
-          initialMode={youtubeFallbackUrl ? "reference" : "download"}
+          key={youtubeDraft ? `${youtubeDraft.mode}:${youtubeDraft.url}` : "new"}
+          initialUrl={youtubeDraft?.url ?? ""}
+          initialMode={youtubeDraft?.mode ?? "download"}
           onClose={() => {
             setYoutubeOpen(false);
             setYoutubeFallbackUrl(null);
