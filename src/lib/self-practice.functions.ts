@@ -46,6 +46,7 @@ const vocabularyPoolSchema = commonPoolSchema.extend({
   direction: z
     .enum(["word_to_translation", "translation_to_word", "mixed"])
     .default("word_to_translation"),
+  questionStyle: z.enum(["typed", "multiple_choice", "flashcard"]).default("typed"),
   translationLanguage: z.string().trim().min(2).max(10).default("az"),
   topicIds: z.array(z.string().uuid()).max(100).default([]),
 });
@@ -118,6 +119,9 @@ export type SelfPracticeVocabularyItem = {
   learningLanguage: string;
   level: string | null;
   partOfSpeech: string | null;
+  questionStyle?: "typed" | "multiple_choice" | "flashcard";
+  options?: string[];
+  studyAnswer?: string;
 };
 
 type LoadedQuestion = {
@@ -899,37 +903,44 @@ async function selectVocabularyPracticeItems(
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const candidates = (data ?? []).flatMap((row) => {
+  const pairs = (data ?? []).flatMap((row) => {
     const translations = (row.vocabulary_translations ?? []) as Array<{
-      language: string;
-      value: string;
+      language: string; value: string;
     }>;
-    const target = translations.find(
-      (translation) =>
-        translation.language.toLowerCase() ===
-        pool.translationLanguage.toLowerCase(),
+    const target = translations.find((translation) =>
+      translation.language.toLowerCase() === pool.translationLanguage.toLowerCase(),
     );
-    if (!target) return [];
-
-    const direction =
-      pool.direction === "mixed"
-        ? Math.random() < 0.5
-          ? ("word_to_translation" as const)
-          : ("translation_to_word" as const)
-        : pool.direction;
-
-    return [
-      {
-        entryId: row.id,
-        prompt:
-          direction === "word_to_translation" ? row.word : target.value,
-        direction,
-        targetLanguage: target.language,
-        learningLanguage: row.learning_language,
-        level: row.level,
-        partOfSpeech: row.part_of_speech,
-      },
-    ];
+    return target ? [{ row, target }] : [];
+  });
+  const candidates: SelfPracticeVocabularyItem[] = pairs.map(({ row, target }) => {
+    const direction = pool.direction === "mixed"
+      ? (Math.random() < 0.5 ? "word_to_translation" : "translation_to_word")
+      : pool.direction;
+    const correct = direction === "word_to_translation" ? target.value : row.word;
+    // Only the selected options are exposed for a multiple-choice exercise,
+    // never a correct-option index, correct answer key or unselected distractors.
+    const distractors = pairs
+      .filter(({ row: other }) => other.id !== row.id)
+      .map(({ row: other, target: otherTarget }) =>
+        direction === "word_to_translation" ? otherTarget.value : other.word)
+      .filter((value) => value.trim().toLocaleLowerCase() !== correct.trim().toLocaleLowerCase());
+    const unique = [...new Map(distractors.map((value) =>
+      [value.trim().toLocaleLowerCase(), value] as const)).values()];
+    const options = pool.questionStyle === "multiple_choice"
+      ? shuffle([correct, ...shuffle(unique).slice(0, 3)])
+      : undefined;
+    return {
+      entryId: row.id,
+      prompt: direction === "word_to_translation" ? row.word : target.value,
+      direction,
+      targetLanguage: target.language,
+      learningLanguage: row.learning_language,
+      level: row.level,
+      partOfSpeech: row.part_of_speech,
+      questionStyle: pool.questionStyle,
+      options,
+      studyAnswer: pool.questionStyle === "flashcard" ? correct : undefined,
+    };
   });
 
   if (pool.source === "specific") {
@@ -954,6 +965,9 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => generatorSchema.parse(d))
   .handler(async ({ data, context }) => {
+    if (data.sessionMode === "mock_exam" && data.vocabulary.questionStyle === "flashcard") {
+      throw new Error("Flashcards are a learning activity, not an exam question.");
+    }
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
