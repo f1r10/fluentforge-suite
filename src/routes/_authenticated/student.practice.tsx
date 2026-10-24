@@ -328,7 +328,17 @@ function SelfPracticePage() {
     try {
       const effectiveFilters =
         filters.sessionMode === "mock_exam"
-          ? { ...filters, feedbackMode: "end" as const }
+          ? {
+              ...filters,
+              feedbackMode: "end" as const,
+              // A flashcard reveals its answer and cannot appear in an exam.
+              vocabulary: {
+                ...filters.vocabulary,
+                questionStyle: filters.vocabulary.questionStyle === "flashcard"
+                  ? ("typed" as const)
+                  : filters.vocabulary.questionStyle,
+              },
+            }
           : filters;
       const result = await generateSelfPractice({
         data: effectiveFilters,
