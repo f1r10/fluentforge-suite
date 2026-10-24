@@ -10,6 +10,7 @@ import {
 } from "@/components/app/PracticeQuestionCard";
 import { useI18n } from "@/lib/i18n";
 import { ListeningDictation } from "@/components/app/ListeningDictation";
+import { isYouTubeEmbedUrl } from "@/lib/youtube-media";
 
 export type StudentQuestionSet = {
   id: string;
@@ -212,6 +213,7 @@ export function StudentListeningBlock({
   const furthestTimeRef = useRef(0);
   const seekingGuardRef = useRef(false);
   const max = listening.playback_rules.max_plays;
+  const isYouTube = isYouTubeEmbedUrl(listening.media?.external_url);
   const blocked = max != null && playCount >= max && !activeRun;
 
   function handlePlay(event: React.SyntheticEvent<HTMLMediaElement>) {
@@ -287,7 +289,12 @@ export function StudentListeningBlock({
 
       {listening.media?.external_url ? (
         <div>
-          {listening.media.kind === "video" ? (
+          {isYouTube ? (
+            <iframe title={listening.title} src={listening.media.external_url}
+              className="aspect-video w-full rounded-md bg-black"
+              allow="accelerometer; encrypted-media; picture-in-picture; fullscreen"
+              referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />
+          ) : listening.media.kind === "video" ? (
             <video
               className="w-full rounded-md bg-black"
               controls
@@ -310,13 +317,14 @@ export function StudentListeningBlock({
               onPause={handlePause}
             />
           )}
-          {max != null && (
+          {isYouTube && <p className="mt-1 text-xs text-muted-foreground">{t("youtube_uncontrolled_playback_hint")}</p>}
+          {!isYouTube && max != null && (
             <p className="mt-1 text-xs text-muted-foreground">
               {t("plays_used")}: {Math.min(playCount, max)} / {max}
               {blocked ? ` · ${t("play_limit_reached")}` : ""}
             </p>
           )}
-          <p className="mt-1 text-xs text-muted-foreground">
+          {!isYouTube && <p className="mt-1 text-xs text-muted-foreground">
             {listening.playback_rules.allow_pause === false
               ? t("pause_disabled")
               : ""}
@@ -327,7 +335,7 @@ export function StudentListeningBlock({
             listening.playback_rules.allow_rewind === false
               ? ` · ${t("rewind_disabled")}`
               : ""}
-          </p>
+          </p>}
         </div>
       ) : (
         <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
