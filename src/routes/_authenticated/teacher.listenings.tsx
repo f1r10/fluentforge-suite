@@ -689,7 +689,7 @@ function ListeningsPage() {
                     )}
                   </div>
                   <Button type="button" variant="outline" onClick={() => setMediaPickerOpen(true)}>
-                    {t("choose_media")}
+                    {editor.media_id ? t("change_media") : t("choose_media")}
                   </Button>
                   {editor.media_id && (
                     <Button
