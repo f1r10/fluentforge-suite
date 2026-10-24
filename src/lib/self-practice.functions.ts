@@ -884,26 +884,43 @@ async function selectVocabularyPracticeItems(
     if (!allowedIds.length) return [];
   }
 
-  let query = admin
-    .from("vocabulary_entries")
-    .select(
-      "id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)",
-    )
-    .eq("status", "active")
-    .is("deleted_at", null)
-    .limit(1_000);
-
-  if (pool.language) query = query.eq("learning_language", pool.language);
-  if (pool.level) query = query.eq("level", pool.level);
-  if (pool.partOfSpeech) {
-    query = query.eq("part_of_speech", pool.partOfSpeech);
+  // PostgREST returns at most 1,000 rows by default. A teacher's C1
+  // vocabulary PDF has 1,801 lexical records; the practice pool must not
+  // silently hide the later rows. Bound each read and allow large assigned
+  // catalogs without placing thousands of UUIDs in a single URL.
+  const batches: string[][] = allowedIds == null
+    ? [[]]
+    : Array.from({ length: Math.ceil(allowedIds.length / 40) },
+      (_, index) => allowedIds!.slice(index * 40, (index + 1) * 40));
+  const sourceRows: Array<{
+    id: string; word: string; part_of_speech: string | null;
+    learning_language: string; level: string | null;
+    vocabulary_translations: Array<{ language: string; value: string }> | null;
+  }> = [];
+  for (const allowedBatch of batches) {
+    for (let offset = 0; ; offset += 200) {
+      let query = admin
+        .from("vocabulary_entries")
+        .select("id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("id")
+        .range(offset, offset + 199);
+      if (pool.language) query = query.eq("learning_language", pool.language);
+      if (pool.level) query = query.eq("level", pool.level);
+      if (pool.partOfSpeech) query = query.eq("part_of_speech", pool.partOfSpeech);
+      if (allowedBatch.length) query = query.in("id", allowedBatch);
+      const { data: page, error } = await query;
+      if (error) throw new Error(error.message);
+      sourceRows.push(...(page ?? []));
+      if ((page?.length ?? 0) < 200) break;
+      if (sourceRows.length >= 20_000) {
+        throw new Error("Too many vocabulary entries in a single practice pool.");
+      }
+    }
   }
-  if (allowedIds) query = query.in("id", allowedIds);
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const pairs = (data ?? []).flatMap((row) => {
+  const pairs = sourceRows.flatMap((row) => {
     const translations = (row.vocabulary_translations ?? []) as Array<{
       language: string; value: string;
     }>;
@@ -937,7 +954,8 @@ async function selectVocabularyPracticeItems(
       learningLanguage: row.learning_language,
       level: row.level,
       partOfSpeech: row.part_of_speech,
-      questionStyle: pool.questionStyle,
+      questionStyle: pool.questionStyle === "multiple_choice" && (!options || options.length < 2)
+        ? "typed" : pool.questionStyle,
       options,
       studyAnswer: pool.questionStyle === "flashcard" ? correct : undefined,
     };
