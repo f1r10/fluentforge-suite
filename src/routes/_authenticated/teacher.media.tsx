@@ -366,7 +366,7 @@ function MediaLibraryPage() {
           initialMode={youtubeDraft?.mode ?? "download"}
           onClose={() => {
             setYoutubeOpen(false);
-            setYoutubeFallbackUrl(null);
+            setYoutubeDraft(null);
           }}
           onChanged={async () => {
             await Promise.all([
