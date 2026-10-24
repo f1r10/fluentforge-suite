@@ -875,6 +875,15 @@ async function gotoHydrated(page, path) {
           exact: true,
         }),
       });
+    await questionMediaPicker.locator("select").selectOption("youtube");
+    const selectedYouTube = questionMediaPicker.locator("li")
+      .filter({ hasText: "YouTube 26PrgjTboVQ" });
+    await selectedYouTube.getByRole("button", { name: "Select" }).click();
+    await readingQuestionDialog.locator(
+      'iframe[src="https://www.youtube-nocookie.com/embed/26PrgjTboVQ"]',
+    ).waitFor({ timeout: 20000 });
+    console.log("[ok] linked YouTube media appears in question picker and previews as an embed");
+    await readingQuestionDialog.getByRole("button", { name: "Change media" }).click();
     await questionMediaPicker.locator('input[type="file"]').setInputFiles({
       name: "inline-diagram.png",
       mimeType: "image/png",
@@ -958,6 +967,15 @@ async function gotoHydrated(page, path) {
       .filter({
         has: page.getByRole("heading", { name: "Choose media", exact: true }),
       });
+    await mediaPicker.locator("select").selectOption("youtube");
+    await mediaPicker.getByText("YouTube 26PrgjTboVQ", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await mediaPicker.locator("li").filter({ hasText: "YouTube 26PrgjTboVQ" })
+      .getByRole("button", { name: "Select" }).click();
+    await listeningDialog.getByText("YouTube 26PrgjTboVQ", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] YouTube reference is selectable in Listening media picker");
+    await listeningDialog.getByRole("button", { name: "Change media" }).click();
     await mediaPicker.locator('input[type="file"]').setInputFiles({
       name: "inline-listening.wav",
       mimeType: "audio/wav",
