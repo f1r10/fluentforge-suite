@@ -427,14 +427,14 @@ async function gotoHydrated(page, path) {
     // Organizing an already committed import must not require picking items
     // individually in the Vocabulary or Catalog admin pages.
     const importOrganization = vocabularyImportDialog.locator("details")
-      .filter({ hasText: "İdxal edilən məzmunu kataloq və etiketlərə böl" });
+      .filter({ hasText: "Assign imported content to catalogs and tags" });
     await importOrganization.locator("summary").click();
-    await importOrganization.getByPlaceholder("Məsələn: Nouns")
+    await importOrganization.getByPlaceholder("For example: Nouns")
       .fill("Release Imported Vocabulary");
     await importOrganization.getByPlaceholder("noun, grammar, unit 2")
       .fill("release-import");
-    await importOrganization.getByRole("button", { name: "Təyin et" }).click();
-    await page.getByText("Kataloq və etiketlərə əlavə edildi: 1")
+    await importOrganization.getByRole("button", { name: "Assign" }).click();
+    await page.getByText("Content assigned to catalog and tags: 1")
       .waitFor({ timeout: 30000 });
     console.log("[ok] teacher applied newly created catalog and tag to approved imported vocabulary");
     await page.keyboard.press("Escape");
