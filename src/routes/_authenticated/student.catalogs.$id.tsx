@@ -347,7 +347,7 @@ function PracticePage() {
                   setSequentialVocabulary(event.target.checked);
                   setVocabularyIndex(0);
                 }} />
-              Sözləri bir-bir göstər ({vocabularyEntries.length})
+              {t("catalog_word_one_by_one")} ({vocabularyEntries.length})
             </label>
           )}
         </section>
