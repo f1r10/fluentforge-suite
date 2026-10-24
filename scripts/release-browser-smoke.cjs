@@ -725,6 +725,24 @@ async function gotoHydrated(page, path) {
       .waitFor({ timeout: 30000 });
     console.log("[ok] teacher uploaded visual question stimulus media");
 
+    // Reference mode must work without performing a network download or
+    // storing teacher YouTube authentication cookies on the test server.
+    await page.getByRole("button", { name: "Import YouTube" }).click();
+    const youtubeDialog = page.getByRole("dialog")
+      .filter({ has: page.getByRole("heading", { name: "Import YouTube" }) });
+    await youtubeDialog.locator('input[type="url"]')
+      .fill("https://www.youtube.com/watch?v=26PrgjTboVQ");
+    await youtubeDialog.getByText("Save reference/embed only", { exact: true })
+      .click();
+    await youtubeDialog.getByText(
+      /no video file is downloaded into private storage/i,
+    ).waitFor({ timeout: 20000 });
+    await youtubeDialog.getByRole("button", { name: "Create", exact: true }).click();
+    await youtubeDialog.waitFor({ state: "hidden", timeout: 20000 });
+    await page.getByText("YouTube 26PrgjTboVQ", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] YouTube reference saved and listed without downloader/network dependency");
+
     await gotoHydrated(page, "/teacher/library");
     await page
       .getByRole("heading", { name: "Library", level: 1 })
