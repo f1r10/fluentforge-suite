@@ -1,6 +1,11 @@
 import pytest
 
-from app.worker import _validate_upload_url, _validate_youtube_url
+from app.worker import (
+    YOUTUBE_ACCESS_RESTRICTED,
+    _is_youtube_access_restricted,
+    _validate_upload_url,
+    _validate_youtube_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,3 +56,28 @@ def test_upload_target_respects_allowlist(monkeypatch):
 
     with pytest.raises(ValueError, match="allow-listed"):
         _validate_upload_url("https://evil.example/upload")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "ERROR: [youtube] 26PrgjTboVQ: Sign in to confirm you’re not a bot.",
+        "ERROR: [youtube] abc: Sign in to confirm you're not a bot.",
+        "ERROR: [youtube] abc: This video requires authentication",
+        "ERROR: [youtube] abc: Please sign in",
+    ],
+)
+def test_youtube_bot_or_auth_challenge_has_clear_user_safe_message(error: str):
+    assert _is_youtube_access_restricted(ValueError(error))
+    assert "video was saved" not in YOUTUBE_ACCESS_RESTRICTED.lower()
+    assert "video was not downloaded" in YOUTUBE_ACCESS_RESTRICTED.lower()
+    assert "cookies" not in YOUTUBE_ACCESS_RESTRICTED.lower()
+
+
+def test_unrelated_download_error_not_misclassified():
+    assert not _is_youtube_access_restricted(
+        ValueError("ERROR: [youtube] abc: Requested format is not available")
+    )
+    assert not _is_youtube_access_restricted(
+        ValueError("ERROR: HTTP Error 502: Bad Gateway")
+    )
