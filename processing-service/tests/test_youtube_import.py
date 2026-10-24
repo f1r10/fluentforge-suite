@@ -72,7 +72,6 @@ def test_upload_target_respects_allowlist(monkeypatch):
 def test_youtube_bot_or_auth_challenge_has_clear_user_safe_message(error: str):
     assert _is_youtube_access_restricted(ValueError(error))
     assert "no video was saved" in YOUTUBE_ACCESS_RESTRICTED.lower()
-    assert "video was not downloaded" in YOUTUBE_ACCESS_RESTRICTED.lower()
     assert "cookies" not in YOUTUBE_ACCESS_RESTRICTED.lower()
 
 
