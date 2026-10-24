@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { BookType, ChevronRight, Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BookType, ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -55,6 +55,37 @@ function StudentVocabularyPage() {
   const pageSize = data?.pageSize ?? 40;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const selectedIndex = rows.findIndex((row) => row.id === selectedId);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+
+  function moveWord(step: -1 | 1) {
+    const next = selectedIndex + step;
+    if (next < 0 || next >= rows.length) return;
+    setSelectedId(rows[next]!.id);
+    setPracticeSessionId(crypto.randomUUID());
+  }
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+          (target instanceof HTMLElement && (target.closest("input, textarea, select, [contenteditable='true']") || target.isContentEditable))) {
+        return;
+      }
+      if (event.key === "ArrowRight" && selectedIndex < rows.length - 1) {
+        event.preventDefault();
+        moveWord(1);
+      }
+      if (event.key === "ArrowLeft" && selectedIndex > 0) {
+        event.preventDefault();
+        moveWord(-1);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedId, selectedIndex, rows]);
+
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -181,11 +212,44 @@ function StudentVocabularyPage() {
 
       {selected && (
         <Dialog open onOpenChange={(open) => !open && setSelectedId(null)}>
-          <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+          <DialogContent
+            className="max-h-[92vh] max-w-3xl overflow-y-auto"
+            onTouchStart={(event) => {
+              const touch = event.touches[0];
+              if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
+            }}
+            onTouchEnd={(event) => {
+              const touch = event.changedTouches[0];
+              const start = touchStart.current;
+              touchStart.current = null;
+              if (!start || !touch) return;
+              const deltaX = touch.clientX - start.x;
+              const deltaY = touch.clientY - start.y;
+              if (Math.abs(deltaX) >= 70 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+                moveWord(deltaX < 0 ? 1 : -1);
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>{t("vocabulary")}</DialogTitle>
             </DialogHeader>
+            <div className="flex items-center justify-between gap-3" aria-label={t("vocabulary")}>
+              <Button type="button" size="sm" variant="outline"
+                disabled={selectedIndex <= 0} onClick={() => moveWord(-1)}
+                aria-label={t("back")}>
+                <ChevronLeft className="h-4 w-4" /> {t("back")}
+              </Button>
+              <span className="text-sm text-muted-foreground" aria-live="polite">
+                {selectedIndex + 1} / {rows.length}
+              </span>
+              <Button type="button" size="sm" variant="outline"
+                disabled={selectedIndex >= rows.length - 1} onClick={() => moveWord(1)}
+                aria-label={t("next")}>
+                {t("next")} <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
             <VocabularyPracticeCard
+              key={`${selected.id}:${practiceSessionId}:${mode}`}
               catalogId={null}
               sessionId={practiceSessionId}
               entry={selected}
