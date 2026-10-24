@@ -423,6 +423,20 @@ async function gotoHydrated(page, path) {
     await vocabularyImportDialog
       .getByText("completed", { exact: true })
       .waitFor({ timeout: 20000 });
+
+    // Organizing an already committed import must not require picking items
+    // individually in the Vocabulary or Catalog admin pages.
+    const importOrganization = vocabularyImportDialog.locator("details")
+      .filter({ hasText: "İdxal edilən məzmunu kataloq və etiketlərə böl" });
+    await importOrganization.locator("summary").click();
+    await importOrganization.getByPlaceholder("Məsələn: Nouns")
+      .fill("Release Imported Vocabulary");
+    await importOrganization.getByPlaceholder("noun, grammar, unit 2")
+      .fill("release-import");
+    await importOrganization.getByRole("button", { name: "Təyin et" }).click();
+    await page.getByText("Kataloq və etiketlərə əlavə edildi: 1")
+      .waitFor({ timeout: 30000 });
+    console.log("[ok] teacher applied newly created catalog and tag to approved imported vocabulary");
     await page.keyboard.press("Escape");
 
     await gotoHydrated(page, "/teacher/vocabulary");
@@ -1364,6 +1378,22 @@ async function gotoHydrated(page, path) {
     console.log("[ok] student vocabulary answer checking and part-of-speech filter work");
     await studentPage
       .getByRole("button", { name: "New practice", exact: true })
+      .click();
+    const exerciseField = studentPage
+      .getByText("Vocabulary practice mode", { exact: true })
+      .locator("xpath=..");
+    await exerciseField.locator("select").selectOption("flashcard");
+    await studentPage.getByRole("button", { name: "Generate practice" }).click();
+    await studentPage.getByRole("button", { name: "Show meaning" }).first()
+      .click();
+    await studentPage.getByText("sınaq sözü", { exact: true })
+      .waitFor({ timeout: 20000 });
+    await studentPage.getByRole("button", { name: "I know this" }).first()
+      .click();
+    await studentPage.getByText("Saved as", { exact: true })
+      .waitFor({ timeout: 20000 });
+    console.log("[ok] self-practice vocabulary flashcards reveal the answer and save a learner rating");
+    await studentPage.getByRole("button", { name: "New practice", exact: true })
       .click();
     await studentPage
       .getByText("Session mode", { exact: true })
