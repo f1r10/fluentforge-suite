@@ -893,7 +893,7 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
         pageTo: pageTo.trim() ? Number(pageTo) : null,
       },
     });
-    toast.success(`Kataloq və etiketlərə əlavə edildi: ${result.matched}`);
+    toast.success(`${t("import_assigned_success")}: ${result.matched}`);
     await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
     return result;
   }
@@ -1035,34 +1035,34 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
         )}
         <details className="shrink-0 rounded-md border border-border bg-background px-3 py-2 text-sm">
           <summary className="cursor-pointer font-semibold">
-            İdxal edilən məzmunu kataloq və etiketlərə böl
+            {t("import_organize_title")}
           </summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="space-y-1">
-              <span className="block text-xs text-muted-foreground">Mövcud kataloq</span>
+              <span className="block text-xs text-muted-foreground">{t("import_catalog_existing")}</span>
               <select className="h-9 w-full rounded-md border border-input bg-background px-2"
                 value={catalogId} onChange={(event) => setCatalogId(event.target.value)}>
-                <option value="">Kataloq seçilməyib</option>
+                <option value="">{t("import_catalog_none")}</option>
                 {catalogs.filter((catalog) => catalog.status !== "archived").map((catalog) => (
                   <option key={catalog.id} value={catalog.id}>{catalog.name}</option>
                 ))}
               </select>
             </label>
             <label className="space-y-1">
-              <span className="block text-xs text-muted-foreground">Yeni kataloq yarat (istəyə bağlı)</span>
+              <span className="block text-xs text-muted-foreground">{t("import_catalog_new")}</span>
               <input className="h-9 w-full rounded-md border border-input bg-background px-2"
                 maxLength={120} value={newCatalogName}
                 onChange={(event) => setNewCatalogName(event.target.value)}
-                placeholder="Məsələn: Nouns" />
+                placeholder={t("import_catalog_placeholder"} />
             </label>
             <label className="space-y-1 md:col-span-2">
-              <span className="block text-xs text-muted-foreground">Etiketlər (vergüllə ayır, yenilər avtomatik yaradılır)</span>
+              <span className="block text-xs text-muted-foreground">{t("import_tags_label")}</span>
               <input className="h-9 w-full rounded-md border border-input bg-background px-2"
                 value={tagNames} onChange={(event) => setTagNames(event.target.value)}
-                placeholder="noun, grammar, unit 2" />
+                placeholder={t("import_tags_placeholder")} />
             </label>
             <fieldset className="flex flex-wrap gap-3 md:col-span-2">
-              <legend className="mb-1 text-xs text-muted-foreground">Hansı məzmun növləri?</legend>
+              <legend className="mb-1 text-xs text-muted-foreground">{t("import_content_types")}</legend>
               {(["question", "vocabulary", "reading", "listening"] as const).map((kind) => (
                 <label key={kind} className="flex items-center gap-1">
                   <Checkbox checked={selectedKinds.includes(kind)}
@@ -1075,25 +1075,24 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
             </fieldset>
             <div className="flex gap-3 md:col-span-2">
               <label className="flex-1 space-y-1">
-                <span className="block text-xs text-muted-foreground">Başlanğıc PDF səhifəsi (istəyə bağlı)</span>
+                <span className="block text-xs text-muted-foreground">{t("import_page_from")}</span>
                 <input type="number" min={1} className="h-9 w-full rounded-md border border-input bg-background px-2"
                   value={pageFrom} onChange={(event) => setPageFrom(event.target.value)} />
               </label>
               <label className="flex-1 space-y-1">
-                <span className="block text-xs text-muted-foreground">Son PDF səhifəsi (istəyə bağlı)</span>
+                <span className="block text-xs text-muted-foreground">{t("import_page_to")}</span>
                 <input type="number" min={1} className="h-9 w-full rounded-md border border-input bg-background px-2"
                   value={pageTo} onChange={(event) => setPageTo(event.target.value)} />
               </label>
             </div>
             <div className="flex items-center justify-between gap-3 md:col-span-2">
               <p className="text-xs text-muted-foreground">
-                Seçilən etiket və kataloq təsdiqlənmiş idxalla birlikdə tətbiq olunur.
-                İdxal tamamlanıbsa, aşağıdakı düymə ilə yenidən tətbiq edə bilərsən.
+                {t("import_organize_hint")}
               </p>
               <Button type="button" size="sm" variant="outline"
                 disabled={busy || !hasOrganization || selectedKinds.length === 0 ||
                   !data?.items.some((item) => item.created_entity_id)}
-                onClick={organizeNow}>Təyin et</Button>
+                onClick={organizeNow}>{t("import_assign_action")}</Button>
             </div>
           </div>
         </details>
