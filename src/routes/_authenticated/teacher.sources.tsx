@@ -1053,7 +1053,7 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
               <input className="h-9 w-full rounded-md border border-input bg-background px-2"
                 maxLength={120} value={newCatalogName}
                 onChange={(event) => setNewCatalogName(event.target.value)}
-                placeholder={t("import_catalog_placeholder"} />
+                placeholder={t("import_catalog_placeholder")} />
             </label>
             <label className="space-y-1 md:col-span-2">
               <span className="block text-xs text-muted-foreground">{t("import_tags_label")}</span>
