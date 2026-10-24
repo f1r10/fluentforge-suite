@@ -19,6 +19,30 @@ from .transcriber import transcribe
 
 _STOP = threading.Event()
 
+YOUTUBE_ACCESS_RESTRICTED = (
+    "YOUTUBE_ACCESS_RESTRICTED: YouTube requires additional sign-in or "
+    "has blocked automated downloads from this server. No video was saved. "
+    "Save the link as a YouTube reference for embedded playback where allowed, "
+    "or upload a video file you are authorized to use."
+)
+
+
+def _is_youtube_access_restricted(error: Exception) -> bool:
+    """Recognize provider access challenges; do not misreport them as media corruption."""
+    message = str(error).lower()
+    return any(
+        hint in message
+        for hint in (
+            "sign in to confirm you're not a bot",
+            "sign in to confirm you’re not a bot",
+            "confirm you are not a bot",
+            "confirm you're not a bot",
+            "this video requires authentication",
+            "please sign in",
+            "login required",
+        )
+    )
+
 
 def start_worker() -> threading.Thread:
     thread = threading.Thread(target=_loop, name="processing-worker", daemon=True)
@@ -173,8 +197,15 @@ def _process_youtube_import(job: dict) -> None:
             ydl_opts["cookiefile"] = cookies_file
 
         update_job(job["id"], progress=15)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(source_url, download=True)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(source_url, download=True)
+        except yt_dlp.utils.DownloadError as exc:
+            if _is_youtube_access_restricted(exc):
+                # Avoid persisting a misleading '100% downloaded' status or
+                # suggesting teachers upload private YouTube session cookies.
+                raise ValueError(YOUTUBE_ACCESS_RESTRICTED) from None
+            raise
 
         if not isinstance(info, dict):
             raise ValueError("YouTube extractor returned no media metadata")
