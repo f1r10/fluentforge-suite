@@ -393,7 +393,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const mediaRows = await loadInChunks(listeningMediaIds, (batch) =>
       admin
         .from("media_assets")
-        .select("id,kind,storage_path,external_url,mime_type,duration_seconds")
+        .select("id,kind,storage_path,external_url,mime_type,duration_seconds,metadata")
         .in("id", batch)
         .is("deleted_at", null),
     );
@@ -429,9 +429,11 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     );
     const readings = new Map(readingRowsRaw.map((reading) => [reading.id, reading]));
     const listenings = new Map(listeningRowsRaw.map((listening) => [listening.id, listening]));
+    const { presentedMediaKind } = await import("./youtube-media");
     const resolvedMedia = await Promise.all(
       mediaRows.map(async (asset) => ({
         ...asset,
+        kind: presentedMediaKind(asset),
         external_url: await resolveMediaUrl(admin as never, asset, 60 * 60),
       })),
     );
