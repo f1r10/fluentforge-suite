@@ -1157,6 +1157,12 @@ async function snapshotListening(admin: Admin, listeningId: string) {
   for (const result of [sectionsResult, setsResult, mediaResult]) {
     if (result.error) throw new Error(result.error.message);
   }
+  const { youtubeEmbedUrlForMedia } = await import("./youtube-media");
+  if (youtubeEmbedUrlForMedia(mediaResult.data)) {
+    throw new Error(
+      "YouTube references can be used in lessons and practice but not in controlled listening exams. Upload an authorized audio/video file for exam playback limits.",
+    );
+  }
 
   const setSnapshots = [];
   for (const set of setsResult.data ?? []) {
