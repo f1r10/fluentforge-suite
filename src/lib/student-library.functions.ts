@@ -245,7 +245,7 @@ export async function loadListeningPracticeData(
     ? await admin
         .from("media_assets")
         .select(
-          "id,kind,storage_path,external_url,mime_type,duration_seconds",
+          "id,kind,storage_path,external_url,mime_type,duration_seconds,metadata",
         )
         .in("id", mediaIds)
         .is("deleted_at", null)
@@ -306,9 +306,11 @@ export async function loadListeningPracticeData(
     setsByListening.set(set.listening_id, list);
   }
 
+  const { presentedMediaKind } = await import("./youtube-media");
   const resolvedMedia = await Promise.all(
     (mediaResult.data ?? []).map(async (asset) => ({
       ...asset,
+      kind: presentedMediaKind(asset),
       external_url: await resolveMediaUrl(admin, asset, 60 * 60),
     })),
   );
