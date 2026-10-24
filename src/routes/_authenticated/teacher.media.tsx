@@ -40,6 +40,7 @@ function MediaLibraryPage() {
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaRow | null>(null);
   const [youtubeOpen, setYoutubeOpen] = useState(false);
+  const [youtubeFallbackUrl, setYoutubeFallbackUrl] = useState<string | null>(null);
 
   const { data, isFetching } = useQuery({
     queryKey: ["media-library", search, kind, includeDeleted, page],
@@ -171,7 +172,10 @@ function MediaLibraryPage() {
           />
           <Button
             variant="outline"
-            onClick={() => setYoutubeOpen(true)}
+            onClick={() => {
+              setYoutubeFallbackUrl(null);
+              setYoutubeOpen(true);
+            }}
           >
             <Youtube className="h-4 w-4" />
             {t("import_youtube")}
@@ -198,12 +202,29 @@ function MediaLibraryPage() {
                   <div className="truncate">{job.source_url}</div>
                   {job.error && (
                     <div className="text-xs text-destructive">
-                      {job.error}
+                      {job.error.includes("YOUTUBE_ACCESS_RESTRICTED") ||
+                      /sign in to confirm you.re not a bot/i.test(job.error)
+                        ? t("youtube_access_restricted")
+                        : job.error}
+                    </div>
+                  )}
+                  {job.status === "failed" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button type="button" size="sm" variant="outline"
+                        onClick={() => {
+                          setYoutubeFallbackUrl(job.source_url);
+                          setYoutubeOpen(true);
+                        }}>
+                        {t("youtube_save_link_instead")}
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        {t("youtube_reference_privacy_note")}
+                      </span>
                     </div>
                   )}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {t(job.status)} · {job.progress}%
+                  {t(job.status)}{job.status === "failed" ? "" : ` · ${job.progress}%`}
                 </div>
               </div>
             ))}
@@ -333,7 +354,13 @@ function MediaLibraryPage() {
       {preview && <PreviewDialog media={preview} onClose={() => setPreview(null)} />}
       {youtubeOpen && (
         <YouTubeImportDialog
-          onClose={() => setYoutubeOpen(false)}
+          key={youtubeFallbackUrl ?? "new"}
+          initialUrl={youtubeFallbackUrl ?? ""}
+          initialMode={youtubeFallbackUrl ? "reference" : "download"}
+          onClose={() => {
+            setYoutubeOpen(false);
+            setYoutubeFallbackUrl(null);
+          }}
           onChanged={async () => {
             await Promise.all([
               qc.invalidateQueries({ queryKey: ["youtube-media-imports"] }),
@@ -392,13 +419,17 @@ function PreviewDialog({ media, onClose }: { media: MediaRow; onClose: () => voi
 function YouTubeImportDialog({
   onClose,
   onChanged,
+  initialUrl,
+  initialMode,
 }: {
   onClose: () => void;
   onChanged: () => Promise<void>;
+  initialUrl: string;
+  initialMode: "download" | "reference";
 }) {
   const { t } = useI18n();
-  const [url, setUrl] = useState("");
-  const [mode, setMode] = useState<"download" | "reference">("download");
+  const [url, setUrl] = useState(initialUrl);
+  const [mode, setMode] = useState<"download" | "reference">(initialMode);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [preferredHeight, setPreferredHeight] = useState(1080);
   const [busy, setBusy] = useState(false);
@@ -486,6 +517,12 @@ function YouTubeImportDialog({
               </span>
             </label>
           </div>
+
+          {mode === "reference" && (
+            <p className="rounded-md border border-border p-3 text-xs text-muted-foreground">
+              {t("youtube_reference_privacy_note")}
+            </p>
+          )}
 
           {mode === "download" && (
             <>
