@@ -1843,7 +1843,7 @@ function VocabularyExamCard({
           placeholder={t("type_answer")}
           disabled={!!feedback}
         />
-      )
+      )}
       {style !== "flashcard" && showCheck && !feedback && (
         <div className="mt-3 flex justify-end">
           <Button
