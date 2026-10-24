@@ -34,7 +34,7 @@ function MediaLibraryPage() {
   const qc = useQueryClient();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<"all" | "image" | "audio" | "video" | "document" | "other">("all");
+  const [kind, setKind] = useState<"all" | "image" | "audio" | "video" | "youtube" | "document" | "other">("all");
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [page, setPage] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -264,6 +264,7 @@ function MediaLibraryPage() {
           <option value="image">{t("image")}</option>
           <option value="audio">{t("audio")}</option>
           <option value="video">{t("video")}</option>
+          <option value="youtube">{t("youtube_references")}</option>
           <option value="document">{t("document")}</option>
           <option value="other">{t("other")}</option>
         </select>
