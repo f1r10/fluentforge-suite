@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { lessonItemAccess } from "./lesson-access.server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
@@ -45,6 +46,7 @@ const vocabularyPoolSchema = commonPoolSchema.extend({
   direction: z
     .enum(["word_to_translation", "translation_to_word", "mixed"])
     .default("word_to_translation"),
+  questionStyle: z.enum(["typed", "multiple_choice", "flashcard"]).default("typed"),
   translationLanguage: z.string().trim().min(2).max(10).default("az"),
   topicIds: z.array(z.string().uuid()).max(100).default([]),
 });
@@ -117,6 +119,9 @@ export type SelfPracticeVocabularyItem = {
   learningLanguage: string;
   level: string | null;
   partOfSpeech: string | null;
+  questionStyle?: "typed" | "multiple_choice" | "flashcard";
+  options?: string[];
+  studyAnswer?: string;
 };
 
 type LoadedQuestion = {
@@ -647,14 +652,18 @@ async function catalogEntityIds(
   admin: Admin,
   catalogId: string,
   entityType: "question" | "vocabulary" | "reading" | "listening",
+  studentId: string,
 ) {
   const { data, error } = await admin
     .from("catalog_items")
-    .select("entity_id")
+    .select("id,entity_id")
     .eq("catalog_id", catalogId)
     .eq("entity_type", entityType);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => row.entity_id);
+  const access = await lessonItemAccess(admin, catalogId, studentId);
+  return (data ?? [])
+    .filter((row) => !access?.enforceCatalogLocks || access.allowedItemIds.has(row.id))
+    .map((row) => row.entity_id);
 }
 
 async function selectQuestionPracticeIds(
@@ -698,13 +707,17 @@ async function selectQuestionPracticeIds(
     p_difficulty: pool.difficulty,
   });
   if (result.error) throw new Error(result.error.message);
-  return ((result.data ?? []) as Array<{ question_id: string }>).map(
+  const selected = ((result.data ?? []) as Array<{ question_id: string }>).map(
     (row) => row.question_id,
   );
+  if (!catalogId) return selected;
+  const allowed = new Set(await catalogEntityIds(admin, catalogId, "question", studentId));
+  return selected.filter((id) => allowed.has(id));
 }
 
 async function selectContextPracticeIds(
   admin: Admin,
+  studentId: string,
   assignedIds: string[],
   kind: "reading" | "listening",
   pool:
@@ -723,6 +736,7 @@ async function selectContextPracticeIds(
       admin,
       pool.catalogId!,
       kind,
+      studentId,
     );
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
@@ -831,6 +845,7 @@ async function selectContextPracticeIds(
 
 async function selectVocabularyPracticeItems(
   admin: Admin,
+  studentId: string,
   assignedIds: string[],
   pool: SelfPracticeGenerator["vocabulary"],
 ): Promise<SelfPracticeVocabularyItem[]> {
@@ -845,6 +860,7 @@ async function selectVocabularyPracticeItems(
       admin,
       pool.catalogId!,
       "vocabulary",
+      studentId,
     );
     if (!allowedIds.length) return [];
   } else if (pool.count <= 0) {
@@ -868,56 +884,81 @@ async function selectVocabularyPracticeItems(
     if (!allowedIds.length) return [];
   }
 
-  let query = admin
-    .from("vocabulary_entries")
-    .select(
-      "id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)",
-    )
-    .eq("status", "active")
-    .is("deleted_at", null)
-    .limit(1_000);
-
-  if (pool.language) query = query.eq("learning_language", pool.language);
-  if (pool.level) query = query.eq("level", pool.level);
-  if (pool.partOfSpeech) {
-    query = query.eq("part_of_speech", pool.partOfSpeech);
+  // PostgREST returns at most 1,000 rows by default. A teacher's C1
+  // vocabulary PDF has 1,801 lexical records; the practice pool must not
+  // silently hide the later rows. Bound each read and allow large assigned
+  // catalogs without placing thousands of UUIDs in a single URL.
+  const batches: string[][] = allowedIds == null
+    ? [[]]
+    : Array.from({ length: Math.ceil(allowedIds.length / 40) },
+      (_, index) => allowedIds!.slice(index * 40, (index + 1) * 40));
+  const sourceRows: Array<{
+    id: string; word: string; part_of_speech: string | null;
+    learning_language: string; level: string | null;
+    vocabulary_translations: Array<{ language: string; value: string }> | null;
+  }> = [];
+  for (const allowedBatch of batches) {
+    for (let offset = 0; ; offset += 200) {
+      let query = admin
+        .from("vocabulary_entries")
+        .select("id,word,part_of_speech,learning_language,level,vocabulary_translations(language,value)")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("id")
+        .range(offset, offset + 199);
+      if (pool.language) query = query.eq("learning_language", pool.language);
+      if (pool.level) query = query.eq("level", pool.level);
+      if (pool.partOfSpeech) query = query.eq("part_of_speech", pool.partOfSpeech);
+      if (allowedBatch.length) query = query.in("id", allowedBatch);
+      const { data: page, error } = await query;
+      if (error) throw new Error(error.message);
+      sourceRows.push(...(page ?? []));
+      if ((page?.length ?? 0) < 200) break;
+      if (sourceRows.length >= 20_000) {
+        throw new Error("Too many vocabulary entries in a single practice pool.");
+      }
+    }
   }
-  if (allowedIds) query = query.in("id", allowedIds);
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const candidates = (data ?? []).flatMap((row) => {
+  const pairs = sourceRows.flatMap((row) => {
     const translations = (row.vocabulary_translations ?? []) as Array<{
-      language: string;
-      value: string;
+      language: string; value: string;
     }>;
-    const target = translations.find(
-      (translation) =>
-        translation.language.toLowerCase() ===
-        pool.translationLanguage.toLowerCase(),
+    const target = translations.find((translation) =>
+      translation.language.toLowerCase() === pool.translationLanguage.toLowerCase(),
     );
-    if (!target) return [];
-
-    const direction =
-      pool.direction === "mixed"
-        ? Math.random() < 0.5
-          ? ("word_to_translation" as const)
-          : ("translation_to_word" as const)
-        : pool.direction;
-
-    return [
-      {
-        entryId: row.id,
-        prompt:
-          direction === "word_to_translation" ? row.word : target.value,
-        direction,
-        targetLanguage: target.language,
-        learningLanguage: row.learning_language,
-        level: row.level,
-        partOfSpeech: row.part_of_speech,
-      },
-    ];
+    return target ? [{ row, target }] : [];
+  });
+  const candidates: SelfPracticeVocabularyItem[] = pairs.map(({ row, target }) => {
+    const direction = pool.direction === "mixed"
+      ? (Math.random() < 0.5 ? "word_to_translation" : "translation_to_word")
+      : pool.direction;
+    const correct = direction === "word_to_translation" ? target.value : row.word;
+    // Only the selected options are exposed for a multiple-choice exercise,
+    // never a correct-option index, correct answer key or unselected distractors.
+    const distractors = pairs
+      .filter(({ row: other }) => other.id !== row.id)
+      .map(({ row: other, target: otherTarget }) =>
+        direction === "word_to_translation" ? otherTarget.value : other.word)
+      .filter((value) => value.trim().toLocaleLowerCase() !== correct.trim().toLocaleLowerCase());
+    const unique = [...new Map(distractors.map((value) =>
+      [value.trim().toLocaleLowerCase(), value] as const)).values()];
+    const options = pool.questionStyle === "multiple_choice"
+      ? shuffle([correct, ...shuffle(unique).slice(0, 3)])
+      : undefined;
+    return {
+      entryId: row.id,
+      prompt: direction === "word_to_translation" ? row.word : target.value,
+      direction,
+      targetLanguage: target.language,
+      learningLanguage: row.learning_language,
+      level: row.level,
+      partOfSpeech: row.part_of_speech,
+      questionStyle: pool.questionStyle === "multiple_choice" && (!options || options.length < 2)
+        ? "typed" : pool.questionStyle,
+      options,
+      studyAnswer: pool.questionStyle === "flashcard" ? correct : undefined,
+    };
   });
 
   if (pool.source === "specific") {
@@ -942,6 +983,9 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => generatorSchema.parse(d))
   .handler(async ({ data, context }) => {
+    if (data.sessionMode === "mock_exam" && data.vocabulary.questionStyle === "flashcard") {
+      throw new Error("Flashcards are a learning activity, not an exam question.");
+    }
     const { adminClient } = await import("./security.server");
     const admin = await adminClient();
     const studentId = await getStudentId(context.supabase);
@@ -957,17 +1001,20 @@ export const generateSelfPractice = createServerFn({ method: "POST" })
         ),
         selectVocabularyPracticeItems(
           admin,
+          studentId,
           assignedIds,
           data.vocabulary,
         ),
         selectContextPracticeIds(
           admin,
+          studentId,
           assignedIds,
           "reading",
           data.readings,
         ),
         selectContextPracticeIds(
           admin,
+          studentId,
           assignedIds,
           "listening",
           data.listenings,

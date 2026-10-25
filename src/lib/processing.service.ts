@@ -43,6 +43,13 @@ export interface ProcessingService {
 
   getImportStatus(jobId: string): Promise<ProcessingJobRef>;
 
+  renderDocumentCrop(input: {
+    sourceUrl: string;
+    filename: string;
+    page: number;
+    crop: { x: number; y: number; width: number; height: number };
+  }): Promise<Uint8Array>;
+
   runOCR(input: {
     mediaId: string;
     languages?: string[];
@@ -104,6 +111,9 @@ const notImplemented = async (): Promise<ProcessingJobRef> => ({
 export class PlaceholderProcessingService implements ProcessingService {
   submitDocumentImport = notImplemented;
   getImportStatus = notImplemented;
+  async renderDocumentCrop(): Promise<Uint8Array> {
+    throw new Error("PDF crop rendering requires the processing service.");
+  }
   runOCR = notImplemented;
   extractQuestions = notImplemented;
   extractVocabulary = notImplemented;
@@ -260,6 +270,30 @@ class HttpProcessingService implements ProcessingService {
       items: result.items ?? [],
       result: result.result ?? {},
     };
+  }
+
+  async renderDocumentCrop(input: {
+    sourceUrl: string;
+    filename: string;
+    page: number;
+    crop: { x: number; y: number; width: number; height: number };
+  }): Promise<Uint8Array> {
+    if (!input.filename.toLowerCase().endsWith(".pdf")) {
+      throw new Error("Only PDF sources support visual crop extraction.");
+    }
+    return this.requestBinary(
+      "/v1/documents/pdf-crop",
+      "image/png",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          source_url: this.sourceUrl(input.sourceUrl),
+          filename: input.filename,
+          page: input.page,
+          crop: input.crop,
+        }),
+      },
+    );
   }
 
   runOCR = notImplemented;

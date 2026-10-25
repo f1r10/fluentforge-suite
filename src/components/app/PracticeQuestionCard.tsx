@@ -9,6 +9,7 @@ import { TYPE_BY_ID } from "@/lib/question-types";
 import { useI18n } from "@/lib/i18n";
 import { reportQuestion } from "@/lib/notifications.functions";
 import { toggleFavorite } from "@/lib/student.functions";
+import { isYouTubeEmbedUrl } from "@/lib/youtube-media";
 
 export type PracticeQuestion = {
   id: string;
@@ -602,6 +603,13 @@ function QuestionStimulusMedia({
         {t("media_not_available")}
       </div>
     );
+  }
+
+  if (isYouTubeEmbedUrl(url)) {
+    return <iframe title={question.prompt} src={url}
+      className="mb-4 aspect-video w-full rounded-md bg-black"
+      allow="accelerometer; encrypted-media; picture-in-picture; fullscreen"
+      referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />;
   }
 
   if (kind === "audio") {

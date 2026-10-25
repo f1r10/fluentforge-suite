@@ -1,11 +1,12 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, Headphones, Play } from "lucide-react";
+import { queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Headphones, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getWhoAmI } from "@/lib/teacher.functions";
+import { getStudentLesson } from "@/lib/lesson-mode.functions";
 import {
   finishPractice,
   getStudentCatalogPractice,
@@ -53,6 +54,10 @@ function PracticePage() {
   const { id } = Route.useParams();
   const { t } = useI18n();
   const { data } = useSuspenseQuery(practiceQuery(id));
+  const { data: lesson } = useQuery({
+    queryKey: ["student-lesson", id],
+    queryFn: () => getStudentLesson({ data: { catalogId: id } }),
+  });
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [practiceKind, setPracticeKind] = useState<
     "all" | "question" | "vocabulary" | "reading" | "listening"
@@ -63,6 +68,9 @@ function PracticePage() {
   const [feedback, setFeedback] = useState<Record<string, PracticeFeedback>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [vocabularyMode, setVocabularyMode] = useState<VocabularyPracticeMode>("flashcard");
+  const [sequentialVocabulary, setSequentialVocabulary] = useState(true);
+  const [vocabularyIndex, setVocabularyIndex] = useState(0);
+  const wordTouchStart = useRef<{ x: number; y: number } | null>(null);
   const [busyQuestion, setBusyQuestion] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [summary, setSummary] = useState<{
@@ -123,6 +131,7 @@ function PracticePage() {
     setActiveBlockIds(
       shuffled.slice(0, requested).map((block) => block.item_id),
     );
+    setVocabularyIndex(0);
     setSessionId(crypto.randomUUID());
     setResponses({});
     setFeedback({});
@@ -217,7 +226,16 @@ function PracticePage() {
           <ArrowLeft className="h-4 w-4" />
           {t("back")}
         </Link>
-        <h1 className="text-2xl font-bold">{data.catalog.name}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{data.catalog.name}</h1>
+          {lesson && (
+            <Button asChild variant="outline" size="sm">
+              <Link to="/student/lessons/$id" params={{ id }}>
+                {lesson.complete ? "Review lesson" : "Continue learning"}
+              </Link>
+            </Button>
+          )}
+        </div>
         {data.catalog.description && <p className="mt-1 text-sm text-muted-foreground">{data.catalog.description}</p>}
         <div className="mt-2 text-xs text-muted-foreground">
           {feedbackMode === "instant" ? t("instant_feedback") : t("feedback_after_finish")}
@@ -276,6 +294,7 @@ function PracticePage() {
               variant="ghost"
               onClick={() => {
                 setActiveBlockIds(null);
+                setVocabularyIndex(0);
                 setSessionId(crypto.randomUUID());
                 setResponses({});
                 setFeedback({});
@@ -321,6 +340,16 @@ function PracticePage() {
             <option value="reverse_recall">{t("reverse_translation")}</option>
             <option value="multiple_choice">{t("multiple_choice_practice")}</option>
           </select>
+          {vocabularyEntries.length > 1 && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={sequentialVocabulary}
+                onChange={(event) => {
+                  setSequentialVocabulary(event.target.checked);
+                  setVocabularyIndex(0);
+                }} />
+              {t("catalog_word_one_by_one")} ({vocabularyEntries.length})
+            </label>
+          )}
         </section>
       )}
 
@@ -352,15 +381,57 @@ function PracticePage() {
 
           if (block.kind === "vocabulary") {
             const entry = block.entry as VocabularyPracticeEntry;
+            const wordIndex = vocabularyEntries.findIndex((word) => word.id === entry.id);
+            if (sequentialVocabulary && wordIndex !== Math.min(vocabularyIndex, vocabularyEntries.length - 1)) {
+              return null;
+            }
             return (
-              <VocabularyPracticeCard
-                key={block.item_id}
-                catalogId={id}
-                sessionId={sessionId}
-                entry={entry}
-                allEntries={vocabularyEntries}
-                mode={vocabularyMode}
-              />
+              <div key={block.item_id}
+                onTouchStart={(event) => {
+                  if (!sequentialVocabulary) return;
+                  const touch = event.touches[0];
+                  if (touch) wordTouchStart.current = { x: touch.clientX, y: touch.clientY };
+                }}
+                onTouchEnd={(event) => {
+                  const touch = event.changedTouches[0];
+                  const start = wordTouchStart.current;
+                  wordTouchStart.current = null;
+                  if (!sequentialVocabulary || !start || !touch) return;
+                  const dx = touch.clientX - start.x;
+                  const dy = touch.clientY - start.y;
+                  if (Math.abs(dx) > 70 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+                    setVocabularyIndex((value) => Math.max(0,
+                      Math.min(vocabularyEntries.length - 1, value + (dx < 0 ? 1 : -1))));
+                  }
+                }}
+              >
+                {sequentialVocabulary && vocabularyEntries.length > 1 && (
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <Button type="button" size="sm" variant="outline"
+                      disabled={wordIndex <= 0}
+                      onClick={() => setVocabularyIndex((value) => Math.max(0, value - 1))}>
+                      <ChevronLeft className="h-4 w-4" /> {t("previous")}
+                    </Button>
+                    <span className="text-sm text-muted-foreground" aria-live="polite">
+                      {wordIndex + 1} / {vocabularyEntries.length}
+                    </span>
+                    <Button type="button" size="sm" variant="outline"
+                      disabled={wordIndex >= vocabularyEntries.length - 1}
+                      onClick={() => setVocabularyIndex((value) =>
+                        Math.min(vocabularyEntries.length - 1, value + 1))}>
+                      {t("next")} <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                <VocabularyPracticeCard
+                  key={`${entry.id}:${vocabularyMode}`}
+                  catalogId={id}
+                  sessionId={sessionId}
+                  entry={entry}
+                  allEntries={vocabularyEntries}
+                  mode={vocabularyMode}
+                />
+              </div>
             );
           }
 

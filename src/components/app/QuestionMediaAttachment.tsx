@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { getMediaPreviewUrl, listMedia } from "@/lib/media.functions";
 import { useI18n } from "@/lib/i18n";
 import { MediaUploadButton } from "@/components/app/MediaUploadButton";
+import { isYouTubeEmbedUrl } from "@/lib/youtube-media";
 
 type MediaKind = "image" | "audio" | "video";
 
@@ -62,7 +63,11 @@ export function QuestionMediaAttachment({
       </div>
 
       {mediaId && preview?.url && (
-        preview.kind === "video" ? (
+        isYouTubeEmbedUrl(preview.url) ? (
+          <iframe src={preview.url} title={mediaLabel || t("video")}
+            className="aspect-video w-full rounded-md bg-black" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen"
+            referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />
+        ) : preview.kind === "video" ? (
           <video src={preview.url} controls className="max-h-[55vh] w-full rounded-md bg-black" />
         ) : preview.kind === "image" ? (
           <img
@@ -106,7 +111,7 @@ function MediaPicker({
   const kinds: MediaKind[] = allowedKinds.length
     ? allowedKinds
     : ["image", "audio", "video"];
-  const [kind, setKind] = useState<MediaKind>(kinds[0]!);
+  const [kind, setKind] = useState<MediaKind | "youtube">(kinds[0]!);
   const [page, setPage] = useState(0);
 
   const { data, isFetching } = useQuery({
@@ -169,6 +174,7 @@ function MediaPicker({
                 {t(value)}
               </option>
             ))}
+            {kinds.includes("video") && <option value="youtube">{t("youtube_references")}</option>}
           </select>
         </div>
 
@@ -186,7 +192,7 @@ function MediaPicker({
                       {media.original_filename ?? media.id}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {media.mime_type ?? t(media.kind)}
+                      {kind === "youtube" ? t("youtube_reference_label") : media.mime_type ?? t(media.kind)}
                     </div>
                   </div>
                   <Button type="button" size="sm" onClick={() => onChoose(media)}>

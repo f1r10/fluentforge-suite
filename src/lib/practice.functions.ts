@@ -10,6 +10,8 @@ import {
   type Scoring,
 } from "./grading";
 import { TYPE_BY_ID } from "./question-types";
+import { lessonItemAccess } from "./lesson-access.server";
+import { recordGradedLessonActivity } from "./lesson-grading.server";
 import {
   acceptedVocabularyAnswers,
   gradeVocabularyResponse,
@@ -94,6 +96,7 @@ const vocabularyPracticeInputSchema = z.object({
 
 type LoadedQuestion = {
   id: string;
+  catalog_item_id?: string;
   question_type: string;
   prompt: string;
   instructions: string | null;
@@ -263,7 +266,10 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
       .order("created_at");
     if (itemsError) throw new Error(itemsError.message);
 
-    const items = rawItems ?? [];
+    const lessonAccess = await lessonItemAccess(admin, data.catalogId, studentId);
+    const items = (rawItems ?? []).filter(
+      (item) => !lessonAccess?.enforceCatalogLocks || lessonAccess.allowedItemIds.has(item.id),
+    );
     const directQuestionIds = items.filter((x) => x.entity_type === "question").map((x) => x.entity_id);
     const vocabularyIds = items.filter((x) => x.entity_type === "vocabulary").map((x) => x.entity_id);
     const readingIds = items.filter((x) => x.entity_type === "reading").map((x) => x.entity_id);
@@ -387,7 +393,7 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     const mediaRows = await loadInChunks(listeningMediaIds, (batch) =>
       admin
         .from("media_assets")
-        .select("id,kind,storage_path,external_url,mime_type,duration_seconds")
+        .select("id,kind,storage_path,external_url,mime_type,duration_seconds,metadata")
         .in("id", batch)
         .is("deleted_at", null),
     );
@@ -423,9 +429,11 @@ export const getStudentCatalogPractice = createServerFn({ method: "GET" })
     );
     const readings = new Map(readingRowsRaw.map((reading) => [reading.id, reading]));
     const listenings = new Map(listeningRowsRaw.map((listening) => [listening.id, listening]));
+    const { presentedMediaKind } = await import("./youtube-media");
     const resolvedMedia = await Promise.all(
       mediaRows.map(async (asset) => ({
         ...asset,
+        kind: presentedMediaKind(asset),
         external_url: await resolveMediaUrl(admin as never, asset, 60 * 60),
       })),
     );
@@ -666,6 +674,7 @@ async function loadAllowedQuestions(
   admin: Admin,
   catalogId: string,
   questionIds: string[],
+  studentId: string,
 ) {
   const unique = [...new Set(questionIds)];
   if (!unique.length) return new Map<string, LoadedQuestion>();
@@ -682,18 +691,23 @@ async function loadAllowedQuestions(
 
   const { data: catalogItems, error: catalogError } = await admin
     .from("catalog_items")
-    .select("entity_type,entity_id")
+    .select("id,entity_type,entity_id")
     .eq("catalog_id", catalogId);
   if (catalogError) throw new Error(catalogError.message);
 
-  const directQuestions = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "question").map((x) => x.entity_id),
+  const lessonAccess = await lessonItemAccess(admin, catalogId, studentId);
+  const permittedItems = (catalogItems ?? []).filter(
+    (item) => !lessonAccess?.enforceCatalogLocks || lessonAccess.allowedItemIds.has(item.id),
   );
+  const directItems = new Map(
+    permittedItems.filter((x) => x.entity_type === "question").map((x) => [x.entity_id, x.id]),
+  );
+  const directQuestions = new Set(directItems.keys());
   const readingIds = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "reading").map((x) => x.entity_id),
+    permittedItems.filter((x) => x.entity_type === "reading").map((x) => x.entity_id),
   );
   const listeningIds = new Set(
-    (catalogItems ?? []).filter((x) => x.entity_type === "listening").map((x) => x.entity_id),
+    permittedItems.filter((x) => x.entity_type === "listening").map((x) => x.entity_id),
   );
 
   const readingSetIds = (questions ?? [])
@@ -736,7 +750,10 @@ async function loadAllowedQuestions(
     ) {
       permitted = true;
     }
-    if (permitted) allowed.set(row.id, row as LoadedQuestion);
+    if (permitted) allowed.set(row.id, {
+      ...row,
+      catalog_item_id: directItems.get(row.id),
+    } as LoadedQuestion);
   }
 
   return allowed;
@@ -760,6 +777,7 @@ async function gradeAndLog(
     admin,
     catalogId,
     answers.map((answer) => answer.questionId),
+    studentId,
   );
 
   if (loaded.size !== new Set(answers.map((answer) => answer.questionId)).size) {
@@ -802,8 +820,30 @@ async function gradeAndLog(
           needs_review: result.needs_review,
         } as never,
       })),
-    ).select("id");
+    ).select("id,entity_id");
     if (error) throw new Error(error.message);
+
+    const eventsByQuestionId = new Map<string, number[]>();
+    for (const event of loggedEvents ?? []) {
+      const key = event.entity_id ?? "";
+      const ids = eventsByQuestionId.get(key) ?? [];
+      ids.push(event.id);
+      eventsByQuestionId.set(key, ids);
+    }
+    for (const result of results) {
+      const itemId = loaded.get(result.question_id)?.catalog_item_id;
+      if (!itemId) continue; // contextual readings need aggregate grading
+      const eventId = eventsByQuestionId.get(result.question_id)?.shift();
+      if (eventId === undefined) throw new Error("Question event was not recorded.");
+      const score = result.needs_review ? null : {
+        points: result.score,
+        possible: result.max_score,
+      };
+      await recordGradedLessonActivity(
+        admin, catalogId, studentId, itemId, eventId, score,
+      );
+    }
+
     const { recordReviewEvents } = await import("./review-schedule.server");
     await recordReviewEvents(admin, loggedEvents ?? []);
   }
@@ -835,6 +875,10 @@ export const submitVocabularyPracticeAnswer = createServerFn({
         throw new Error(
           "This vocabulary entry is not available in the catalog.",
         );
+      }
+      const access = await lessonItemAccess(admin, data.catalogId, studentId);
+      if (access?.enforceCatalogLocks && !access.allowedItemIds.has(catalogItem.id)) {
+        throw new Error("Complete the earlier required lesson steps first.");
       }
     }
 
@@ -960,6 +1004,20 @@ export const submitVocabularyPracticeAnswer = createServerFn({
       } as never,
     }).select("id").single();
     if (activityError) throw new Error(activityError.message);
+    if (data.catalogId && gradedEvent) {
+      const { data: catalogItem, error: catalogItemError } = await admin
+        .from("catalog_items").select("id")
+        .eq("catalog_id", data.catalogId)
+        .eq("entity_type", "vocabulary")
+        .eq("entity_id", entry.id)
+        .maybeSingle();
+      if (catalogItemError) throw new Error(catalogItemError.message);
+      if (!catalogItem) throw new Error("Vocabulary catalog item not found.");
+      await recordGradedLessonActivity(
+        admin, data.catalogId, studentId, catalogItem.id, gradedEvent.id,
+        correct === null ? null : { points: correct ? 1 : 0, possible: 1 },
+      );
+    }
     if (data.mode !== "flashcard" && gradedEvent) {
       const { recordReviewEvents } = await import("./review-schedule.server");
       await recordReviewEvents(admin, [gradedEvent]);
@@ -1059,6 +1117,7 @@ export const finishPractice = createServerFn({ method: "POST" })
         admin,
         data.catalogId,
         skippedIds,
+        studentId,
       );
       if (allowed.size !== skippedIds.length) {
         throw new Error(

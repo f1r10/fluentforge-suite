@@ -689,7 +689,7 @@ function ListeningsPage() {
                     )}
                   </div>
                   <Button type="button" variant="outline" onClick={() => setMediaPickerOpen(true)}>
-                    {t("choose_media")}
+                    {editor.media_id ? t("change_media") : t("choose_media")}
                   </Button>
                   {editor.media_id && (
                     <Button
@@ -977,7 +977,7 @@ function ListeningMediaPicker({
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<"audio" | "video">("audio");
+  const [kind, setKind] = useState<"audio" | "video" | "youtube">("audio");
   const [page, setPage] = useState(0);
   const { data, isFetching } = useQuery({
     queryKey: ["listening-media-picker", search, kind, page],
@@ -1020,8 +1020,12 @@ function ListeningMediaPicker({
           >
             <option value="audio">{t("audio")}</option>
             <option value="video">{t("video")}</option>
+            <option value="youtube">{t("youtube_references")}</option>
           </select>
         </div>
+        {kind === "youtube" && (
+          <p className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">{t("youtube_uncontrolled_playback_hint")}</p>
+        )}
         <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border">
           {rows.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
@@ -1036,7 +1040,7 @@ function ListeningMediaPicker({
                       {media.original_filename ?? media.id}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {media.mime_type ?? t(media.kind)}
+                      {kind === "youtube" ? t("youtube_reference_label") : media.mime_type ?? t(media.kind)}
                     </div>
                   </div>
                   <Button size="sm" onClick={() => onChoose(media)}>{t("select")}</Button>

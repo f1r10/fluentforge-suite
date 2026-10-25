@@ -1,3 +1,5 @@
+import { presentedMediaKind, youtubeEmbedUrlForMedia } from "./youtube-media";
+
 export const MEDIA_BUCKET = "media";
 
 type StorageAdmin = {
@@ -14,6 +16,8 @@ type StorageAdmin = {
 export type MediaLocation = {
   storage_path?: string | null;
   external_url?: string | null;
+  metadata?: unknown;
+  kind?: string | null;
 };
 
 export async function resolveMediaUrl(
@@ -22,6 +26,8 @@ export async function resolveMediaUrl(
   expiresInSeconds = 3_600,
 ) {
   if (!media) return null;
+  const embed = youtubeEmbedUrlForMedia(media);
+  if (embed) return embed;
   if (media.external_url) return media.external_url;
   if (!media.storage_path) return null;
 
@@ -71,7 +77,7 @@ export async function hydrateQuestionMedia<
   const { data: mediaRows, error } = await admin
     .from("media_assets")
     .select(
-      "id,kind,storage_path,external_url,original_filename,mime_type,width,height,duration_seconds",
+      "id,kind,storage_path,external_url,original_filename,mime_type,width,height,duration_seconds,metadata",
     )
     .in("id", mediaIds)
     .is("deleted_at", null);
@@ -102,10 +108,11 @@ export async function hydrateQuestionMedia<
       width: number | null;
       height: number | null;
       duration_seconds: number | null;
+      metadata: unknown;
     }) => {
       resolved.set(media.id, {
         id: media.id,
-        kind: media.kind,
+        kind: presentedMediaKind(media),
         external_url: await resolveMediaUrl(admin, media, expiresInSeconds),
         original_filename: media.original_filename,
         mime_type: media.mime_type,

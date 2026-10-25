@@ -37,6 +37,9 @@ jobs:
       - name: Check migration runner syntax
         run: node --check scripts/migrate.mjs
 
+      - name: Validate isolated UAT installer syntax
+        run: bash -n scripts/setup-isolated-uat.sh
+
 
   processing-service:
     runs-on: ubuntu-latest
@@ -201,6 +204,14 @@ jobs:
             --env-file .env.postgres.ci \
             -f docker-compose.postgres.yml \
             up -d --build app scheduler
+
+      - name: Show plain runtime migration errors
+        if: failure()
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            logs --no-color --tail=100 migrate || true
 
       - name: Verify plain runtime readiness
         run: |

@@ -17,6 +17,20 @@ class DocumentImportRequest(BaseModel):
     profile: dict[str, Any] | None = None
 
 
+class NormalizedPdfCrop(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
+class DocumentCropRequest(BaseModel):
+    source_url: HttpUrl
+    filename: str = Field(min_length=1, max_length=255)
+    page: int = Field(ge=1, le=20000)
+    crop: NormalizedPdfCrop
+
+
 class TranscriptionRequest(BaseModel):
     media_id: str
     source_url: HttpUrl

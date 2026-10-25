@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireTeacher } from "./teacher-middleware";
+import { presentedMediaKind, youtubeEmbedUrlForMedia } from "./youtube-media";
 
 const BUCKET = "media";
 const PAGE_SIZE = 40;
@@ -155,7 +156,7 @@ export const listMedia = createServerFn({ method: "GET" })
     z
       .object({
         search: z.string().max(200).default(""),
-        kind: z.enum(["all", ...MEDIA_KINDS]).default("all"),
+        kind: z.enum(["all", "youtube", ...MEDIA_KINDS]).default("all"),
         includeDeleted: z.boolean().default(false),
         page: z.number().int().min(0).default(0),
       })
@@ -172,7 +173,11 @@ export const listMedia = createServerFn({ method: "GET" })
       .range(data.page * PAGE_SIZE, data.page * PAGE_SIZE + PAGE_SIZE - 1);
 
     if (!data.includeDeleted) query = query.is("deleted_at", null);
-    if (data.kind !== "all") query = query.eq("kind", data.kind);
+    if (data.kind === "youtube") {
+      query = query.eq("kind", "other").contains("metadata", {
+        source: "youtube", reference_only: true,
+      });
+    } else if (data.kind !== "all") query = query.eq("kind", data.kind);
     if (data.search.trim()) {
       const safe = data.search.trim().replace(/[,()%]/g, " ");
       query = query.ilike("original_filename", `%${safe}%`);
@@ -215,7 +220,9 @@ export const saveYouTubeReference = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const sourceUrl = normalizeYouTubeUrl(data.url);
     const videoId = youtubeVideoId(sourceUrl);
-    if (!videoId) throw new Error("Could not determine the YouTube video id.");
+    if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      throw new Error("Could not determine a valid YouTube video id.");
+    }
 
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
@@ -829,12 +836,14 @@ export const getMediaPreviewUrl = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { data: media, error } = await context.supabase
       .from("media_assets")
-      .select("id,kind,mime_type,storage_path,external_url")
+      .select("id,kind,mime_type,storage_path,external_url,metadata")
       .eq("id", data.id)
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!media) throw new Error("Media not found.");
+    const youtubeEmbed = youtubeEmbedUrlForMedia(media);
+    if (youtubeEmbed) return { url: youtubeEmbed, expiresIn: null, kind: presentedMediaKind(media), mimeType: media.mime_type };
     if (media.external_url) return { url: media.external_url, expiresIn: null, kind: media.kind, mimeType: media.mime_type };
     if (!media.storage_path) throw new Error("Media has no storage location.");
 

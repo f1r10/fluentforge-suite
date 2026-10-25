@@ -24,6 +24,8 @@ import {
   updateImportItem,
 } from "@/lib/document-import.functions";
 import { supabase } from "@/integrations/supabase/client";
+import { listCatalogsDetailed, saveCatalog } from "@/lib/catalog.functions";
+import { organizeDocumentImport } from "@/lib/import-organization.functions";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 
@@ -843,6 +845,70 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
   const { t } = useI18n();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [catalogId, setCatalogId] = useState("");
+  const [newCatalogName, setNewCatalogName] = useState("");
+  const [tagNames, setTagNames] = useState("");
+  const [selectedKinds, setSelectedKinds] = useState<Array<"question" | "vocabulary" | "reading" | "listening">>([
+    "question", "vocabulary", "reading", "listening",
+  ]);
+  const [pageFrom, setPageFrom] = useState("");
+  const [pageTo, setPageTo] = useState("");
+  const { data: catalogs = [] } = useQuery({
+    queryKey: ["catalogs-detailed"],
+    queryFn: () => listCatalogsDetailed(),
+  });
+  const hasOrganization = Boolean(catalogId || newCatalogName.trim() || tagNames.trim());
+
+  async function organize() {
+    let targetId = catalogId || null;
+    if (newCatalogName.trim()) {
+      const created = await saveCatalog({
+        data: {
+          name: newCatalogName.trim(),
+          description: null,
+          parent_id: null,
+          status: "active",
+          settings: {
+            shuffle_questions: true,
+            shuffle_vocabulary: true,
+            preserve_context: true,
+            feedback_mode: "instant",
+            show_explanations: true,
+            allow_self_practice: true,
+          },
+        },
+      });
+      targetId = created.id;
+      setCatalogId(created.id);
+      setNewCatalogName("");
+      await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
+    }
+    const result = await organizeDocumentImport({
+      data: {
+        jobId: job.id,
+        catalogId: targetId,
+        tags: tagNames.split(",").map((name) => name.trim()).filter(Boolean),
+        kinds: selectedKinds,
+        pageFrom: pageFrom.trim() ? Number(pageFrom) : null,
+        pageTo: pageTo.trim() ? Number(pageTo) : null,
+      },
+    });
+    toast.success(`${t("import_assigned_success")}: ${result.matched}`);
+    await qc.invalidateQueries({ queryKey: ["catalogs-detailed"] });
+    return result;
+  }
+
+  async function organizeNow() {
+    setBusy(true);
+    try {
+      await organize();
+      await refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["document-import", job.id],
@@ -923,6 +989,12 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
         batches += 1;
       }
 
+      if (totalImported > 0 && hasOrganization && selectedKinds.length) {
+        // Organization remains independently retryable; import never needs to
+        // be repeated to repair a failed catalog/tag assignment.
+        await organize();
+      }
+
       toast.success(
         result.completed
           ? `${t("imported")}: ${totalImported}`
@@ -961,6 +1033,69 @@ function ImportReviewDialog({ job, onClose }: { job: ImportRow; onClose: () => v
             onChanged={refetch}
           />
         )}
+        <details className="shrink-0 rounded-md border border-border bg-background px-3 py-2 text-sm">
+          <summary className="cursor-pointer font-semibold">
+            {t("import_organize_title")}
+          </summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">{t("import_catalog_existing")}</span>
+              <select className="h-9 w-full rounded-md border border-input bg-background px-2"
+                value={catalogId} onChange={(event) => setCatalogId(event.target.value)}>
+                <option value="">{t("import_catalog_none")}</option>
+                {catalogs.filter((catalog) => catalog.status !== "archived").map((catalog) => (
+                  <option key={catalog.id} value={catalog.id}>{catalog.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">{t("import_catalog_new")}</span>
+              <input className="h-9 w-full rounded-md border border-input bg-background px-2"
+                maxLength={120} value={newCatalogName}
+                onChange={(event) => setNewCatalogName(event.target.value)}
+                placeholder={t("import_catalog_placeholder")} />
+            </label>
+            <label className="space-y-1 md:col-span-2">
+              <span className="block text-xs text-muted-foreground">{t("import_tags_label")}</span>
+              <input className="h-9 w-full rounded-md border border-input bg-background px-2"
+                value={tagNames} onChange={(event) => setTagNames(event.target.value)}
+                placeholder={t("import_tags_placeholder")} />
+            </label>
+            <fieldset className="flex flex-wrap gap-3 md:col-span-2">
+              <legend className="mb-1 text-xs text-muted-foreground">{t("import_content_types")}</legend>
+              {(["question", "vocabulary", "reading", "listening"] as const).map((kind) => (
+                <label key={kind} className="flex items-center gap-1">
+                  <Checkbox checked={selectedKinds.includes(kind)}
+                    onCheckedChange={(checked) => setSelectedKinds((current) =>
+                      checked ? [...current, kind] : current.filter((item) => item !== kind)
+                    )} />
+                  {t(kind)}
+                </label>
+              ))}
+            </fieldset>
+            <div className="flex gap-3 md:col-span-2">
+              <label className="flex-1 space-y-1">
+                <span className="block text-xs text-muted-foreground">{t("import_page_from")}</span>
+                <input type="number" min={1} className="h-9 w-full rounded-md border border-input bg-background px-2"
+                  value={pageFrom} onChange={(event) => setPageFrom(event.target.value)} />
+              </label>
+              <label className="flex-1 space-y-1">
+                <span className="block text-xs text-muted-foreground">{t("import_page_to")}</span>
+                <input type="number" min={1} className="h-9 w-full rounded-md border border-input bg-background px-2"
+                  value={pageTo} onChange={(event) => setPageTo(event.target.value)} />
+              </label>
+            </div>
+            <div className="flex items-center justify-between gap-3 md:col-span-2">
+              <p className="text-xs text-muted-foreground">
+                {t("import_organize_hint")}
+              </p>
+              <Button type="button" size="sm" variant="outline"
+                disabled={busy || !hasOrganization || selectedKinds.length === 0 ||
+                  !data?.items.some((item) => item.created_entity_id)}
+                onClick={organizeNow}>{t("import_assign_action")}</Button>
+            </div>
+          </div>
+        </details>
       </DialogContent>
     </Dialog>
   );

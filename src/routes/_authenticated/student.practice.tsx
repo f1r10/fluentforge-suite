@@ -49,6 +49,7 @@ import {
   type SelfPracticeVocabularyItem,
 } from "@/lib/self-practice.functions";
 import { getWhoAmI } from "@/lib/teacher.functions";
+import { submitVocabularyPracticeAnswer } from "@/lib/practice.functions";
 import { LEVELS } from "@/lib/question-types";
 import { supabase } from "@/integrations/supabase/client";
 import { useI18n } from "@/lib/i18n";
@@ -118,6 +119,7 @@ function initialFilters(focus?: PracticeFocus): SelfPracticeGenerator {
       count: counts.vocabulary,
       partOfSpeech: null,
       direction: "word_to_translation",
+      questionStyle: "typed",
       translationLanguage: "az",
       topicIds: [],
     },
@@ -326,7 +328,17 @@ function SelfPracticePage() {
     try {
       const effectiveFilters =
         filters.sessionMode === "mock_exam"
-          ? { ...filters, feedbackMode: "end" as const }
+          ? {
+              ...filters,
+              feedbackMode: "end" as const,
+              // A flashcard reveals its answer and cannot appear in an exam.
+              vocabulary: {
+                ...filters.vocabulary,
+                questionStyle: filters.vocabulary.questionStyle === "flashcard"
+                  ? ("typed" as const)
+                  : filters.vocabulary.questionStyle,
+              },
+            }
           : filters;
       const result = await generateSelfPractice({
         data: effectiveFilters,
@@ -431,7 +443,39 @@ function SelfPracticePage() {
     }
   }
 
+  async function rateVocabularyCard(
+    item: SelfPracticeVocabularyItem,
+    rating: "known" | "learning",
+  ) {
+    if (!sessionId || filters.sessionMode !== "practice") return;
+    setBusyVocabulary(item.entryId);
+    try {
+      await submitVocabularyPracticeAnswer({
+        data: {
+          catalogId: null,
+          sessionId,
+          entryId: item.entryId,
+          mode: "flashcard",
+          response: "",
+          targetLanguage: item.targetLanguage,
+          rating,
+          duration_ms: 0,
+        },
+      });
+      setVocabularyResponses((current) => ({
+        ...current,
+        [item.entryId]: "__rated_" + rating + "__",
+      }));
+      await qc.invalidateQueries({ queryKey: ["practice-progress"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyVocabulary(null);
+    }
+  }
+
   async function checkVocabulary(item: SelfPracticeVocabularyItem) {
+    if (item.questionStyle === "flashcard") return;
     if (
       !sessionId ||
       filters.sessionMode === "mock_exam" ||
@@ -480,6 +524,9 @@ function SelfPracticePage() {
     const answeredVocabulary = vocabulary.filter(
       (item) => !!vocabularyResponses[item.entryId]?.trim(),
     );
+    const gradedVocabulary = answeredVocabulary.filter(
+      (item) => item.questionStyle !== "flashcard",
+    );
     const answeredCount =
       answeredQuestions.length + answeredVocabulary.length;
     const totalCount = allQuestions.length + vocabulary.length;
@@ -507,15 +554,15 @@ function SelfPracticePage() {
           presentedQuestionIds: allQuestions.map(
             (question) => question.id,
           ),
-          presentedVocabularyIds: vocabulary.map(
-            (item) => item.entryId,
-          ),
+          presentedVocabularyIds: vocabulary.filter(
+            (item) => item.questionStyle !== "flashcard",
+          ).map((item) => item.entryId),
           answers: answeredQuestions.map((question) => ({
             questionId: question.id,
             response: responseFor(question),
             duration_ms: 0,
           })),
-          vocabularyAnswers: answeredVocabulary.map((item) => ({
+          vocabularyAnswers: gradedVocabulary.map((item) => ({
             entryId: item.entryId,
             direction: item.direction,
             targetLanguage: item.targetLanguage,
@@ -809,6 +856,12 @@ function SelfPracticePage() {
                       });
                     }}
                     onCheck={() => checkVocabulary(item)}
+                    revealed={!!revealed[item.entryId]}
+                    onReveal={() => setRevealed((current) => ({
+                      ...current,
+                      [item.entryId]: true,
+                    }))}
+                    onRate={(rating) => rateVocabularyCard(item, rating)}
                   />
                 ))}
               </section>
@@ -1219,6 +1272,26 @@ function VocabularyPoolCard({
           />
         </Field>
       )}
+
+      <Field label={t("vocabulary_practice_mode")}>
+        <select
+          className={selectClass}
+          value={pool.questionStyle ?? "typed"}
+          onChange={(event) => onChange({
+            ...pool,
+            questionStyle: event.target.value as SelfPracticeGenerator["vocabulary"]["questionStyle"],
+          })}
+        >
+          <option value="typed">{t("translation_recall")} / {t("reverse_translation")}</option>
+          <option value="multiple_choice">{t("multiple_choice_practice")}</option>
+          <option value="flashcard">{t("flashcards")}</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {pool.questionStyle === "flashcard"
+            ? t("vocabulary_practice_mode_hint")
+            : t("vocabulary_direction")}
+        </p>
+      </Field>
 
       <Field label={t("vocabulary_direction")}>
         <select
@@ -1711,6 +1784,9 @@ function VocabularyExamCard({
   showCheck,
   onChange,
   onCheck,
+  revealed,
+  onReveal,
+  onRate,
 }: {
   item: SelfPracticeVocabularyItem;
   index: number;
@@ -1721,8 +1797,12 @@ function VocabularyExamCard({
   showCheck: boolean;
   onChange: (value: string) => void;
   onCheck: () => void;
+  revealed: boolean;
+  onReveal: () => void;
+  onRate: (rating: "known" | "learning") => void;
 }) {
   const { t } = useI18n();
+  const style = item.questionStyle ?? "typed";
   return (
     <div className="rounded-md border border-border p-4">
       <div className="mb-3 text-xs text-muted-foreground">
@@ -1732,25 +1812,61 @@ function VocabularyExamCard({
           : t("translation_to_word")}
       </div>
       <div className="mb-3 text-lg font-semibold">{item.prompt}</div>
-      <Input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={t("type_answer")}
-        disabled={!!feedback}
-      />
-      {showCheck && !feedback && (
+      {style === "flashcard" ? (
+        <div className="space-y-3">
+          {!revealed ? (
+            <Button variant="outline" type="button" onClick={onReveal}>
+              {t("show_meaning")}
+            </Button>
+          ) : (
+            <>
+              <div className="rounded-md bg-muted p-3 text-base">{item.studyAnswer}</div>
+              {value.startsWith("__rated_") ? (
+                <p role="status" className="text-sm text-muted-foreground">{t("saved_as")}</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" type="button" disabled={busy}
+                    onClick={() => onRate("learning")}>{t("still_learning")}</Button>
+                  <Button type="button" disabled={busy}
+                    onClick={() => onRate("known")}>{t("i_know_this")}</Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : style === "multiple_choice" && (item.options?.length ?? 0) >= 2 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {item.options!.map((option) => (
+            <Button type="button" key={option}
+              variant={value === option ? "default" : "outline"}
+              disabled={!!feedback || busy}
+              className="h-auto min-h-10 whitespace-normal text-left"
+              onClick={() => onChange(option)}>{option}</Button>
+          ))}
+        </div>
+      ) : style === "multiple_choice" ? (
+        <p className="text-sm text-muted-foreground">{t("not_enough_vocabulary_choices")}</p>
+      ) : (
+        <Input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={t("type_answer")}
+          disabled={!!feedback}
+        />
+      )}
+      {style !== "flashcard" && showCheck && !feedback && (
         <div className="mt-3 flex justify-end">
           <Button
             type="button"
             size="sm"
-            disabled={busy || !value.trim()}
+            disabled={busy || !value.trim() || (style === "multiple_choice" && (item.options?.length ?? 0) < 2)}
             onClick={onCheck}
           >
             {t("check")}
           </Button>
         </div>
       )}
-      {feedback && (
+      {style !== "flashcard" && feedback && (
         <div
           className={
             "mt-3 rounded-md border p-3 text-sm " +
