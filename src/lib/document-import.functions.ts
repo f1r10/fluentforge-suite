@@ -2650,7 +2650,7 @@ async function prepareItems(
         if (legacySenseLookup) {
           const { data: fetched, error: duplicateError } = await admin
             .from("vocabulary_entries")
-            .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations(language,value)")
+            .select("id,word,learning_language,part_of_speech,definition,notes,vocabulary_translations!vocabulary_translations_entry_id_fkey(language,value)")
             .ilike("word", word)
             .eq("learning_language", learningLanguage)
             .is("deleted_at", null)
