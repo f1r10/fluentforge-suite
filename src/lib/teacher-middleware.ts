@@ -8,8 +8,8 @@ export const requireTeacher = createMiddleware({ type: "function" })
     // role through the trusted server client instead of a user-scoped RLS query.
     // This avoids false "Forbidden" responses when PostgREST/RLS role visibility
     // differs between GET loaders and POST server functions.
-    const { adminClient } = await import("./security.server");
-    const admin = await adminClient();
+    const { privilegedAdminClient } = await import("./security.server");
+    const admin = await privilegedAdminClient();
     const { data, error } = await admin
       .from("user_roles")
       .select("role")
