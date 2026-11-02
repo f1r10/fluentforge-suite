@@ -154,6 +154,15 @@ export const resetPlatformTeacherPassword=createServerFn({method:"POST"})
      password:data.newPassword,
    });
    if(error)throw new Error(error.message);
+   // A changed password must also invalidate issued runtime refresh sessions:
+   // changing the password alone does not revoke already-issued tokens.
+   if(process.env["RUNTIME_BACKEND"]==="postgres"){
+     const {error:revokeError}=await admin.from("runtime_refresh_tokens")
+       .update({revoked_at:new Date().toISOString()})
+       .eq("user_id",data.teacherAuthUserId)
+       .is("revoked_at",null);
+     if(revokeError)throw new Error("Password updated but session revocation failed.");
+   }
    await audit(admin,{actor_type:"platform_admin",actor_id:context.userId,
      action:"platform_teacher_password_reset",entity_type:"teacher",
      entity_id:teacher.id,summary:"Teacher password reset; password not logged"});
