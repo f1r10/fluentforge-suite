@@ -204,6 +204,9 @@ function ReviewsPage() {
           <h2 className="font-semibold">{t("results_waiting_approval")}</h2>
           <p className="text-sm text-muted-foreground">{t("approval_queue_hint")}</p>
         </div>
+        <p className="text-sm text-muted-foreground">
+          {t("result_release_queue_notice")}
+        </p>
         {releaseQueue.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("no_results_waiting_approval")}</p>
         ) : (
@@ -239,6 +242,7 @@ function ReviewsPage() {
                         size="sm"
                         disabled={attempt.pending_reviews > 0}
                         onClick={async () => {
+                          if (!window.confirm(t("result_release_confirm_student"))) return;
                           try {
                             await releaseAttemptResult({ data: { attemptId: attempt.id } });
                             toast.success(t("result_released"));
