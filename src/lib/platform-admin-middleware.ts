@@ -4,8 +4,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 export const requirePlatformAdmin = createMiddleware({type:"function"})
   .middleware([requireSupabaseAuth])
   .server(async ({context,next})=>{
-    const {adminClient}=await import("./security.server");
-    const client=await adminClient();
+    const {privilegedAdminClient}=await import("./security.server");
+    const client=await privilegedAdminClient();
     const {data, error}=await client.from("platform_admin_users")
       .select("auth_user_id,disabled_at")
       .eq("auth_user_id",context.userId).maybeSingle();
