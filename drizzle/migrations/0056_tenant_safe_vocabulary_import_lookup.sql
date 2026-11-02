@@ -26,7 +26,7 @@ as $$
       array(select lower(trim(x)) from unnest(_words) as w(x))
     )
     and (
-      auth.role() = 'service_role'
+      current_setting('request.jwt.claim.role', true) = 'service_role'
       or (
         public.is_teacher()
         and v.workspace_id = public.current_workspace_id()
