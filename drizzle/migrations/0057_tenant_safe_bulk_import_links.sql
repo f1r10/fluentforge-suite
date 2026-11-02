@@ -12,7 +12,8 @@ declare
   _updated integer := 0;
   _workspace uuid;
   _service boolean :=
-    current_setting('request.jwt.claim.role', true) = 'service_role';
+    current_setting('role', true) = 'service_role'
+    and current_setting('request.jwt.claim.role', true) = 'service_role';
 begin
   if _links is null or jsonb_typeof(_links) <> 'array'
      or jsonb_array_length(_links) > 500 then
