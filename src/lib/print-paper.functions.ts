@@ -38,9 +38,11 @@ export const createPrintablePaper = createServerFn({method:"POST"})
       title=catalog.name;
       const {data:items,error:itemsError}=await db.from("catalog_items")
         .select("entity_type,entity_id,sort_order")
-        .eq("catalog_id",catalog.id).order("sort_order").limit(500);
+        .eq("catalog_id",catalog.id).order("sort_order").limit(501);
       if(itemsError)throw new Error(itemsError.message);
       if(!items?.length)throw new Error("Catalog is empty.");
+      // Reject rather than silently omit items from an oversized worksheet.
+      if(items.length>500)throw new Error("Catalog contains more than 500 printable items. Split the paper before export.");
       blocks=await catalogPaperBlocks(db,items);
     }
     await attachPrintableImages(db,blocks);
