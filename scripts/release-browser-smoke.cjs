@@ -472,9 +472,19 @@ async function gotoHydrated(page, path) {
     await vocabularyImportDialog
       .getByRole("button", { name: /Import approved/ })
       .click();
-    await vocabularyImportDialog
-      .getByText("completed", { exact: true })
-      .waitFor({ timeout: 20000 });
+    try {
+      await vocabularyImportDialog
+        .getByText("completed", { exact: true })
+        .waitFor({ timeout: 20000 });
+    } catch (error) {
+      const notices = await page.evaluate(() => window.__ffVocabularyAlerts ?? []);
+      const dialogText = (await vocabularyImportDialog.innerText()).slice(-1800);
+      throw new Error(
+        "Vocabulary approved commit did not complete. Notices: " +
+          JSON.stringify(notices) + "; dialog: " + dialogText,
+        { cause: error },
+      );
+    }
 
     // Organizing an already committed import must not require picking items
     // individually in the Vocabulary or Catalog admin pages.
