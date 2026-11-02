@@ -192,6 +192,23 @@ async function gotoHydrated(page, path) {
     console.log("[ok] teacher created student and received one-time access key");
 
     await gotoHydrated(page, "/teacher/sources");
+    // Preserve ephemeral upload errors even if Sonner dismisses them before
+    // the 30-second assertion timeout.
+    await page.evaluate(() => {
+      window.__ffImportAlerts = [];
+      const collect = () => {
+        for (const el of document.querySelectorAll('[data-sonner-toast]')) {
+          const message = el.textContent?.trim();
+          if (message && !window.__ffImportAlerts.includes(message)) {
+            window.__ffImportAlerts.push(message.slice(0, 500));
+          }
+        }
+      };
+      new MutationObserver(collect).observe(document.body, {
+        subtree: true, childList: true, characterData: true,
+      });
+      collect();
+    });
     const sourceInput = page.locator('input[type="file"]');
     await sourceInput.setInputFiles({
       name: "release-import-smoke.pdf",
@@ -205,7 +222,7 @@ async function gotoHydrated(page, path) {
         .waitFor({ timeout: 30000 });
     } catch (uploadTimeout) {
       // Surface the actual import failure rather than an opaque locator timeout.
-      const notices = await page.locator('[data-sonner-toast]').allTextContents();
+      const notices = await page.evaluate(() => window.__ffImportAlerts ?? []);
       const pageText = (await page.locator("body").innerText()).slice(0, 2500);
       throw new Error(
         "PDF upload/import did not appear in the source list. Notices: " +
