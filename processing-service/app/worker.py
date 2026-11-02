@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import mimetypes
 import os
 import tempfile
@@ -56,9 +57,16 @@ def stop_worker() -> None:
 
 def _loop() -> None:
     while not _STOP.is_set():
-        job = claim_next_job()
+        try:
+            job = claim_next_job()
+        except Exception:
+            # A transient SQLite lock must not silently kill the only worker
+            # and leave every subsequent import permanently queued.
+            logging.exception("Processing worker could not claim a job; retrying")
+            _STOP.wait(2.0)
+            continue
         if not job:
-            time.sleep(0.5)
+            _STOP.wait(0.5)
             continue
 
         try:
