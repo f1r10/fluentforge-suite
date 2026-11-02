@@ -37,6 +37,21 @@ describe("print content filters", () => {
       .toThrow("No content matches");
   });
 
+  it("rejects inaccessible or stale explicitly selected question IDs", () => {
+    expect(() => selectPrintableContent("questions", tables, {
+      selectedIds: [q1, "00000000-0000-4000-8000-000000000099"],
+    })).toThrow("unavailable or not authorized");
+  });
+
+  it("rejects duplicate or empty explicit selections", () => {
+    expect(() => selectPrintableContent("questions", tables, {
+      selectedIds: [q1, q1],
+    })).toThrow("Duplicate items");
+    expect(() => selectPrintableContent("questions", tables, {
+      selectedIds: [],
+    })).toThrow("Select at least one");
+  });
+
   it("filters vocabulary by POS and level, preserving source data", () => {
     const words = {
       vocabulary_entries: [
