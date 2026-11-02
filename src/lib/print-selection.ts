@@ -35,7 +35,21 @@ export function selectPrintableContent(
   filter: PrintSelection,
 ): Record<string, Row[]> {
   const main = kind === "questions" ? "questions" : "vocabulary_entries";
-  const selected = filter.selectedIds?.length ? new Set(filter.selectedIds) : null;
+  // Explicit selections must never produce an incomplete paper silently.
+  // A missing ID may indicate the teacher does not own that record.
+  if (filter.selectedIds && filter.selectedIds.length === 0) {
+    throw new Error("Select at least one item before printing.");
+  }
+  const selected = filter.selectedIds ? new Set(filter.selectedIds) : null;
+  if (selected) {
+    if (selected.size !== filter.selectedIds!.length) {
+      throw new Error("Duplicate items in print selection.");
+    }
+    const visibleIds = new Set((tables[main] ?? []).map((row) => String(row["id"] ?? "")));
+    if ([...selected].some((id) => !visibleIds.has(id))) {
+      throw new Error("Some selected items are unavailable or not authorized for printing.");
+    }
+  }
   const topicMembers = filter.topicId
     ? selectedTopicIds(
       tables[kind === "questions" ? "question_topics" : "vocabulary_topics"] ?? [],
