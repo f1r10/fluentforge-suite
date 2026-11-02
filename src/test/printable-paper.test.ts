@@ -19,4 +19,14 @@ describe("published exam print fidelity",()=>{
   expect(()=>examPaperBlocks({sections:[{fixed_items:[{snapshot:{kind:"bad"}}]}]})).toThrow();
   expect(()=>renderPrintablePaper({title:"X",blocks:[{kind:"question",prompt:"image",media_id:"x"}],includeAnswers:false})).toThrow();
  });
+ it("prints authorized inline images and rejects arbitrary iframe/media URLs",()=>{
+  const image = "data:image/png;base64,iVBORw0KGgo=";
+  const html=renderPrintablePaper({title:"Worksheet",
+    blocks:[{kind:"question",prompt:"Look at the picture",media_id:"asset-1",media_data_url:image}],
+    includeAnswers:false});
+  expect(html).toContain(`src="${image}"`);
+  expect(()=>renderPrintablePaper({title:"Worksheet",
+    blocks:[{kind:"question",prompt:"Picture",media_data_url:"https://untrusted.invalid/a.png"}],
+    includeAnswers:false})).toThrow("Unsafe");
+ });
 });
