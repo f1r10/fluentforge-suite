@@ -419,6 +419,20 @@ async function gotoHydrated(page, path) {
     console.log("[ok] raw text converted, corrected, approved and committed as a real question");
 
     await gotoHydrated(page, "/teacher/sources");
+    await page.evaluate(() => {
+      window.__ffVocabularyAlerts = [];
+      const collect = () => {
+        for (const el of document.querySelectorAll('[data-sonner-toast]')) {
+          const message = el.textContent?.trim();
+          if (message && !window.__ffVocabularyAlerts.includes(message)) {
+            window.__ffVocabularyAlerts.push(message.slice(0, 500));
+          }
+        }
+      };
+      new MutationObserver(collect).observe(document.body, {
+        subtree: true, childList: true, characterData: true,
+      });
+    });
     await page
       .getByRole("combobox", { name: "Import into", exact: true })
       .selectOption("vocabulary");
@@ -434,9 +448,19 @@ async function gotoHydrated(page, path) {
     });
 
     const vocabularyImportDialog = page.getByRole("dialog");
-    await vocabularyImportDialog
-      .getByText(/^(needs_review|completed)$/)
-      .waitFor({ timeout: 60000 });
+    try {
+      await vocabularyImportDialog
+        .getByText(/^(needs_review|completed)$/)
+        .waitFor({ timeout: 60000 });
+    } catch (error) {
+      const notices = await page.evaluate(() => window.__ffVocabularyAlerts ?? []);
+      const pageText = (await page.locator("body").innerText()).slice(-1500);
+      throw new Error(
+        "Vocabulary import did not become reviewable. Notices: " +
+        JSON.stringify(notices) + "; page: " + pageText,
+        { cause: error },
+      );
+    }
     const vocabularyReviewItem = vocabularyImportDialog
       .locator("article")
       .filter({ hasText: "releaseword" })
