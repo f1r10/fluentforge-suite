@@ -2586,7 +2586,11 @@ async function prepareItems(
         { _language: language, _words: words },
       );
       if (error) {
-        if (/could not find the function|function .* does not exist|pgrst202/i.test(error.message)) {
+        if (/could not find the function|function .* does not exist|pgrst202|permission denied for function|42501/i.test(error.message)) {
+          // Runtime teacher requests have tenant-scoped RLS and cannot call
+          // the legacy service-only lookup RPC. Use a scoped read fallback;
+          // never elevate duplicate matching to a cross-tenant service role.
+
           legacySenseLookup = true;
           break;
         }
