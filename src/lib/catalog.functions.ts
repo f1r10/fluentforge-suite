@@ -59,7 +59,7 @@ export const listCatalogsDetailed = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("catalogs")
-      .select("id,parent_id,name,description,status,settings,sort_order,updated_at,catalog_items(count),catalog_assignments(count)")
+      .select("id,parent_id,name,description,status,settings,sort_order,updated_at,catalog_items!catalog_items_catalog_id_fkey(count),catalog_assignments(count)")
       .is("deleted_at", null)
       .order("sort_order")
       .order("name");
