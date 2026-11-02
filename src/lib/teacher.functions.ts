@@ -137,13 +137,16 @@ export const createStudent = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { adminClient, randomToken, randomPassword, audit } = await import("./security.server");
+    const { adminClient, privilegedAdminClient, randomToken, randomPassword, audit } = await import("./security.server");
     const admin = await adminClient();
+    // The server may assign a fixed student auth role; the teacher JWT must
+    // never acquire write privileges on the user_roles table.
+    const identityAdmin = await privilegedAdminClient();
     const username = data.username.toLowerCase();
     const { data: exists } = await admin.from("students").select("id").ilike("username", username).maybeSingle();
     if (exists) throw new Error("This username is already taken.");
 
-    const { data: u, error } = await admin.auth.admin.createUser({
+    const { data: u, error } = await identityAdmin.auth.admin.createUser({
       email: `student-${randomToken(14).toLowerCase()}@accounts.local`,
       password: randomPassword(),
       email_confirm: true,
@@ -152,7 +155,7 @@ export const createStudent = createServerFn({ method: "POST" })
 
     let studentId: string | null = null;
     try {
-      const { error: roleError } = await admin.from("user_roles").insert({
+      const { error: roleError } = await identityAdmin.from("user_roles").insert({
         user_id: u.user.id,
         role: "student",
       });
@@ -197,8 +200,8 @@ export const createStudent = createServerFn({ method: "POST" })
       if (studentId) {
         await admin.from("students").delete().eq("id", studentId);
       }
-      await admin.from("user_roles").delete().eq("user_id", u.user.id);
-      await admin.auth.admin.deleteUser(u.user.id);
+      await identityAdmin.from("user_roles").delete().eq("user_id", u.user.id);
+      await identityAdmin.auth.admin.deleteUser(u.user.id);
       throw studentError;
     }
   });
