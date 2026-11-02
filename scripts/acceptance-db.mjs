@@ -78,6 +78,30 @@ async function verifySchemaSecurity() {
     pass("RLS enabled on critical tables");
   }
 
+  const workspaceTables = await sql`
+    select c.table_name
+    from information_schema.columns c
+    join pg_class t on t.relname=c.table_name
+    join pg_namespace n on n.oid=t.relnamespace and n.nspname='public'
+    where c.table_schema='public' and c.column_name='workspace_id'
+      and t.relkind in ('r','p')
+  `;
+  const boundaries = await sql`
+    select tablename, qual, with_check, permissive
+    from pg_policies where schemaname='public'
+      and policyname='workspace_boundary_restrictive'
+  `;
+  const byTable = new Map(boundaries.map(x=>[x.tablename,x]));
+  for (const row of workspaceTables) {
+    const policy = byTable.get(row.table_name);
+    if (!policy || policy.permissive !== 'RESTRICTIVE' ||
+      !String(policy.qual).includes('current_workspace_id') ||
+      !String(policy.with_check).includes('current_workspace_id')) {
+      fail(`Workspace RLS missing or permissive on ${row.table_name}`);
+    }
+  }
+  pass(`Tenant RLS restrictive gates cover ${workspaceTables.length} owned tables`);
+
   const feedbackPolicies = await sql`
     select policyname, qual
     from pg_policies
