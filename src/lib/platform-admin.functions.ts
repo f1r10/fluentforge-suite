@@ -13,8 +13,8 @@ function equal(a:string,b:string){
 }
 
 export const getPlatformAdminSetupState=createServerFn({method:"GET"}).handler(async()=>{
-  const {adminClient}=await import("./security.server");
-  const admin=await adminClient();
+  const {privilegedAdminClient}=await import("./security.server");
+  const admin=await privilegedAdminClient();
   const {count,error}=await admin.from("platform_admin_users")
     .select("auth_user_id",{count:"exact",head:true});
   if(error)throw new Error(error.message);
@@ -24,8 +24,8 @@ export const getPlatformAdminSetupState=createServerFn({method:"GET"}).handler(a
 export const setupPlatformAdmin=createServerFn({method:"POST"})
  .inputValidator((x)=>z.object({username,password,setupToken:z.string().min(16).max(500)}).parse(x))
  .handler(async ({data})=>{
-   const {adminClient,audit,checkRateLimit,recordAttempt,randomToken}=await import("./security.server");
-   const admin=await adminClient();
+   const {privilegedAdminClient,audit,checkRateLimit,recordAttempt,randomToken}=await import("./security.server");
+   const admin=await privilegedAdminClient();
    const clientIp=ip();
    await checkRateLimit(admin,"platform_setup","initial",clientIp);
    const expected=process.env["PLATFORM_ADMIN_SETUP_TOKEN"];
@@ -57,8 +57,8 @@ export const setupPlatformAdmin=createServerFn({method:"POST"})
 export const platformAdminLogin=createServerFn({method:"POST"})
  .inputValidator((x)=>z.object({username,password:z.string().min(1).max(200)}).parse(x))
  .handler(async ({data})=>{
-   const {adminClient,publicClient,checkRateLimit,recordAttempt,audit}=await import("./security.server");
-   const admin=await adminClient();
+   const {privilegedAdminClient,publicClient,checkRateLimit,recordAttempt,audit}=await import("./security.server");
+   const admin=await privilegedAdminClient();
    const clientIp=ip(),name=data.username.toLowerCase();
    await checkRateLimit(admin,"platform_admin",name,clientIp);
    const {data:row}=await admin.from("platform_admin_users")
@@ -86,8 +86,8 @@ export const platformAdminLogin=createServerFn({method:"POST"})
 export const getPlatformAdminProfile=createServerFn({method:"GET"})
  .middleware([requirePlatformAdmin])
  .handler(async ({context})=>{
-  const {adminClient}=await import("./security.server");
-  const admin=await adminClient();
+  const {privilegedAdminClient}=await import("./security.server");
+  const admin=await privilegedAdminClient();
   const {data}=await admin.from("platform_admin_users").select("username")
     .eq("auth_user_id",context.userId).single();
   return {username:data?.username??""};
@@ -96,8 +96,8 @@ export const getPlatformAdminProfile=createServerFn({method:"GET"})
 export const listPlatformTeachers=createServerFn({method:"GET"})
  .middleware([requirePlatformAdmin])
  .handler(async ()=>{
-   const {adminClient}=await import("./security.server");
-   const admin=await adminClient();
+   const {privilegedAdminClient}=await import("./security.server");
+   const admin=await privilegedAdminClient();
    const [teachers,memberships]=await Promise.all([
      admin.from("admin_users").select("id,auth_user_id,username,display_name,created_at")
        .order("created_at"),
@@ -145,8 +145,8 @@ export const resetPlatformTeacherPassword=createServerFn({method:"POST"})
  .middleware([requirePlatformAdmin])
  .inputValidator((x)=>z.object({teacherAuthUserId:z.string().uuid(),newPassword:password}).parse(x))
  .handler(async ({context,data})=>{
-   const {adminClient,audit}=await import("./security.server");
-   const admin=await adminClient();
+   const {privilegedAdminClient,audit}=await import("./security.server");
+   const admin=await privilegedAdminClient();
    const {data:teacher}=await admin.from("admin_users").select("id")
      .eq("auth_user_id",data.teacherAuthUserId).maybeSingle();
    if(!teacher)throw new Error("Teacher not found.");
@@ -164,8 +164,8 @@ export const archivePlatformTeacher=createServerFn({method:"POST"})
  .middleware([requirePlatformAdmin])
  .inputValidator((x)=>z.object({teacherAuthUserId:z.string().uuid()}).parse(x))
  .handler(async ({context,data})=>{
-   const {adminClient,audit}=await import("./security.server");
-   const admin=await adminClient();
+   const {privilegedAdminClient,audit}=await import("./security.server");
+   const admin=await privilegedAdminClient();
    const {data:membership}=await admin.from("tenant_teacher_memberships")
      .select("workspace_id").eq("teacher_auth_user_id",data.teacherAuthUserId).maybeSingle();
    if(!membership)throw new Error("Teacher workspace not found.");
