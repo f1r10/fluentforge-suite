@@ -32,6 +32,8 @@ export const requireTeacher = createMiddleware({ type: "function" })
     if (!member || workspace?.status !== "active") {
       throw new Error("Teacher workspace is not active.");
     }
+    const { assertActiveWorkspaceSession } = await import("./session-workspace.server");
+    await assertActiveWorkspaceSession(context.userId, String(context.claims?.session_id ?? ""));
 
     return next();
   });
