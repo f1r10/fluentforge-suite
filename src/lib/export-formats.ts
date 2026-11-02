@@ -16,8 +16,8 @@ export type ExportKind = (typeof EXPORT_KINDS)[number];
 export type ExportFormat = "json" | "xlsx" | "csv" | "pdf" | "docx";
 
 export const EXPORT_FORMATS: Record<ExportKind, readonly ExportFormat[]> = {
-  questions: ["xlsx", "pdf", "json", "csv"],
-  vocabulary: ["xlsx", "pdf", "json", "csv"],
+  questions: ["xlsx", "pdf", "docx", "json", "csv"],
+  vocabulary: ["xlsx", "pdf", "docx", "json", "csv"],
   readings: ["pdf", "docx"],
   listenings: ["xlsx", "json", "csv"],
   catalogs: ["xlsx", "json", "csv"],
