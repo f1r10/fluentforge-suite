@@ -11,9 +11,11 @@ as $$
 declare
   _updated integer := 0;
   _workspace uuid;
-  _service boolean :=
+  _service boolean := coalesce(
     current_setting('role', true) = 'service_role'
-    and current_setting('request.jwt.claim.role', true) = 'service_role';
+    and current_setting('request.jwt.claim.role', true) = 'service_role',
+    false
+  );
 begin
   if _links is null or jsonb_typeof(_links) <> 'array'
      or jsonb_array_length(_links) > 500 then
