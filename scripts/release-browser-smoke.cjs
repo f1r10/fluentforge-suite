@@ -198,10 +198,21 @@ async function gotoHydrated(page, path) {
       mimeType: "application/pdf",
       buffer: minimalPdfBuffer(),
     });
-    await page
-      .getByText("release-import-smoke.pdf", { exact: true })
-      .first()
-      .waitFor({ timeout: 30000 });
+    try {
+      await page
+        .getByText("release-import-smoke.pdf", { exact: true })
+        .first()
+        .waitFor({ timeout: 30000 });
+    } catch (uploadTimeout) {
+      // Surface the actual import failure rather than an opaque locator timeout.
+      const notices = await page.locator('[data-sonner-toast]').allTextContents();
+      const pageText = (await page.locator("body").innerText()).slice(0, 2500);
+      throw new Error(
+        "PDF upload/import did not appear in the source list. Notices: " +
+        JSON.stringify(notices) + "; page: " + pageText,
+        { cause: uploadTimeout },
+      );
+    }
 
     const importDialog = page.getByRole("dialog");
     const previewFrame = importDialog.locator("iframe");
