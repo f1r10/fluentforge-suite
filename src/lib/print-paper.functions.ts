@@ -75,9 +75,8 @@ export const createPrintablePaper = createServerFn({method:"POST"})
     return {url:signed.signedUrl,filename:`fluentforge-${data.kind}-${data.id}.${data.format}`,blocks:blocks.length};
   });
 
-type Db = Parameters<typeof catalogPaperBlocks>[0];
 async function catalogPaperBlocks(
-  db: import("@supabase/supabase-js").SupabaseClient<any>,
+  db: import("@supabase/supabase-js").SupabaseClient<import("@/integrations/supabase/types").Database>,
   items: Array<{entity_type:string;entity_id:string}>,
 ):Promise<PaperBlock[]>{
   const output:PaperBlock[]=[];
