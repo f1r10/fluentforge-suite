@@ -25,6 +25,27 @@ function options(x: unknown): Array<{ id: string; text: string }> {
       text: text(row.text ?? row.label ?? row.value) };
   });
 }
+function answerText(answer: unknown, opts: Array<{id:string;text:string}>) {
+  const row=object(answer);
+  if(Array.isArray(row.correct)){
+    const map=new Map(opts.map(x=>[x.id.toLocaleLowerCase(),x.text]));
+    return row.correct.map((k)=>{
+      const id=text(k);
+      return map.has(id.toLocaleLowerCase()) ?
+        `${id}: ${map.get(id.toLocaleLowerCase())}` : id;
+    }).join("; ");
+  }
+  if(Array.isArray(row.blanks))return row.blanks.map((v,i)=>
+    `${i+1}: ${Array.isArray(v)?v.map(text).join(" / "):text(v)}`).join("; ");
+  if(Array.isArray(row.pairs))return row.pairs.map((v)=>{
+    const pair=object(v);return `${text(pair.left)} → ${text(pair.right)}`;
+  }).join("; ");
+  if(Array.isArray(row.order))return row.order.map(text).join(" → ");
+  for(const k of ["model_answer","answer","text"])
+    if(typeof row[k]==="string")return row[k] as string;
+  return text(answer);
+}
+
 export function renderPrintablePaper(input: {
   title: string; blocks: PaperBlock[]; includeAnswers: boolean;
   showTranscript?: boolean; variant?: string;
@@ -46,7 +67,7 @@ export function renderPrintablePaper(input: {
     return `<article><b>${questionCount}. </b>${paperEscape(block.prompt)}
       ${block.instructions ? `<p class="muted">${paperEscape(block.instructions)}</p>` : ""}
       ${items}
-      ${input.includeAnswers ? `<p class="answer"><b>Answer:</b> ${paperEscape(text(block.answer_key))}</p>` : ""}
+      ${input.includeAnswers ? `<p class="answer"><b>Answer:</b> ${paperEscape(answerText(block.answer_key,opts))}</p>` : ""}
       ${input.includeAnswers && block.explanation ? `<p class="answer">${paperEscape(block.explanation)}</p>` : ""}</article>`;
   }).join("\n");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${paperEscape(input.title)}</title>
