@@ -49,6 +49,21 @@ export function createRuntimeAdminClient() {
   });
 }
 
+/** Privileged auth/storage helpers with request-user-scoped PostgREST data.
+ * The data client is always evaluated under RLS. A service-role bypass must
+ * be explicitly requested by an audited platform/system-only codepath.
+ */
+export function createRuntimeScopedAdminClient(userAccessToken: string) {
+  const claims = verifyRuntimeJwt(userAccessToken);
+  if (claims.role !== "authenticated") throw new Error("Authenticated actor required.");
+  const scopedData = restClient(userAccessToken);
+  const serviceData = restClient(serviceRoleJwt());
+  return compatibleClient(scopedData, {
+    storage: createRuntimeStorageServer(),
+    auth: createRuntimeAdminAuth(serviceData),
+  });
+}
+
 export function createRuntimePublicClient() {
   const anonymousData = restClient();
   const serviceData = restClient(serviceRoleJwt());

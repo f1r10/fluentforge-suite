@@ -14,8 +14,8 @@ type Tokens = { access_token: string; refresh_token: string };
 
 /** Public: is first-run setup still needed? */
 export const getSetupState = createServerFn({ method: "GET" }).handler(async () => {
-  const { adminClient } = await import("./security.server");
-  const admin = await adminClient();
+  const { privilegedAdminClient } = await import("./security.server");
+  const admin = await privilegedAdminClient();
   const { count } = await admin.from("admin_users").select("id", { count: "exact", head: true });
   return {
     needsSetup: (count ?? 0) === 0,
@@ -38,8 +38,8 @@ export const setupTeacher = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data }) => {
-    const { adminClient, randomToken, sha256, audit } = await import("./security.server");
-    const admin = await adminClient();
+    const { privilegedAdminClient, randomToken, sha256, audit } = await import("./security.server");
+    const admin = await privilegedAdminClient();
 
     const requiredSetupToken = process.env["SETUP_TOKEN"];
     if (requiredSetupToken && data.setupToken !== requiredSetupToken) {
@@ -107,8 +107,8 @@ export const setupTeacher = createServerFn({ method: "POST" })
 export const teacherLogin = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ username: z.string().trim().min(1).max(60), password: z.string().min(1).max(200) }).parse(d))
   .handler(async ({ data }): Promise<Tokens> => {
-    const { adminClient, publicClient, checkRateLimit, recordAttempt, audit } = await import("./security.server");
-    const admin = await adminClient();
+    const { privilegedAdminClient, publicClient, checkRateLimit, recordAttempt, audit } = await import("./security.server");
+    const admin = await privilegedAdminClient();
     const ip = clientIp();
     const username = data.username.toLowerCase();
     await checkRateLimit(admin, "teacher", username, ip);
@@ -119,6 +119,11 @@ export const teacherLogin = createServerFn({ method: "POST" })
       throw new Error("Wrong username or password.");
     };
     if (!row) return fail();
+    const { data: member } = await admin.from("tenant_teacher_memberships")
+      .select("workspace_id,tenant_workspaces!inner(status)")
+      .eq("teacher_auth_user_id",row.auth_user_id).maybeSingle();
+    const workspace = member?.tenant_workspaces as unknown as { status: string } | null;
+    if (!member || workspace?.status !== "active") return fail();
     const { data: u } = await admin.auth.admin.getUserById(row.auth_user_id);
     if (!u.user?.email) return fail();
     const { data: s, error } = await publicClient().auth.signInWithPassword({ email: u.user.email, password: data.password });
@@ -131,21 +136,27 @@ export const teacherLogin = createServerFn({ method: "POST" })
 export const studentLogin = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ key: z.string().trim().min(10).max(200) }).parse(d))
   .handler(async ({ data }): Promise<Tokens> => {
-    const { adminClient, sha256, checkRateLimit, recordAttempt, mintSession, decodeJwt } = await import("./security.server");
-    const admin = await adminClient();
+    const { privilegedAdminClient, sha256, checkRateLimit, recordAttempt, mintSession, decodeJwt } = await import("./security.server");
+    const admin = await privilegedAdminClient();
     const ip = clientIp();
     const username = (data.key.split("@")[0] ?? "").toLowerCase();
     await checkRateLimit(admin, "student", username || "unknown", ip);
     const { data: keyRow } = await admin
       .from("student_access_keys")
-      .select("student_id, students!inner(id, auth_user_id, status, deleted_at, username)")
+      .select("student_id, students!inner(id, auth_user_id, status, deleted_at, username, workspace_id)")
       .eq("key_hash", sha256(data.key))
       .is("revoked_at", null)
       .maybeSingle();
-    const st = keyRow?.students as unknown as { id: string; auth_user_id: string | null; status: string; deleted_at: string | null } | undefined;
+    const st = keyRow?.students as unknown as { id: string; auth_user_id: string | null; status: string; deleted_at: string | null; workspace_id: string } | undefined;
     if (!st || !st.auth_user_id || st.status !== "active" || st.deleted_at) {
       await recordAttempt(admin, "student", username || "unknown", ip, false);
       throw new Error("This access key is not valid. Ask your teacher for a new one.");
+    }
+    const { data: space, error: spaceError } = await admin.from("tenant_workspaces")
+      .select("status").eq("id",st.workspace_id).maybeSingle();
+    if (spaceError || space?.status !== "active") {
+      await recordAttempt(admin, "student", username || "unknown", ip, false);
+      throw new Error("This access key is not active. Ask your teacher.");
     }
     const session = await mintSession(admin, st.auth_user_id);
     const claims = decodeJwt(session.access_token);
@@ -166,8 +177,8 @@ export const recoverTeacher = createServerFn({ method: "POST" })
     z.object({ username: z.string().trim().min(1).max(60), code: z.string().trim().min(6).max(60), newPassword: passwordSchema }).parse(d),
   )
   .handler(async ({ data }) => {
-    const { adminClient, sha256, checkRateLimit, recordAttempt, audit } = await import("./security.server");
-    const admin = await adminClient();
+    const { privilegedAdminClient, sha256, checkRateLimit, recordAttempt, audit } = await import("./security.server");
+    const admin = await privilegedAdminClient();
     const ip = clientIp();
     const username = data.username.toLowerCase();
     await checkRateLimit(admin, "recovery", username, ip);

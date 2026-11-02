@@ -160,8 +160,11 @@ export const saveBackupSchedule = createServerFn({ method: "POST" })
   });
 
 export async function runScheduledBackupIfDue() {
-  const { adminClient, audit } = await import("./security.server");
-  const admin = await adminClient();
+  // Invoked only from the scheduled-backup system endpoint after its secret
+  // has been authenticated. Its authorization header is not a user JWT.
+  // Never use the user-scoped adminClient() for the scheduler.
+  const { privilegedAdminClient, audit } = await import("./security.server");
+  const admin = await privilegedAdminClient();
 
   const { data: settingRow, error: settingError } = await admin
     .from("system_settings")

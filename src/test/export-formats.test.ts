@@ -6,14 +6,17 @@ import {
 } from "@/lib/export-formats";
 
 describe("export format policy", () => {
-  it("offers vocabulary as spreadsheet and printable PDF", () => {
+  it("offers vocabulary as spreadsheet and printable PDF/Word", () => {
     expect(EXPORT_FORMATS.vocabulary).toEqual([
       "xlsx",
       "pdf",
+      "docx",
       "json",
       "csv",
     ]);
     expect(isExportFormatAllowed("vocabulary", "pdf")).toBe(true);
+    expect(isExportFormatAllowed("vocabulary", "docx")).toBe(true);
+    expect(isExportFormatAllowed("questions", "docx")).toBe(true);
   });
 
   it("keeps reading exports document-oriented", () => {

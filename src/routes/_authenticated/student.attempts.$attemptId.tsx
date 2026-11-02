@@ -713,6 +713,14 @@ function ResultView({ attemptId, data }: { attemptId: string; data: AttemptData 
                     {answer.explanation && (
                       <div className="mt-2 rounded bg-muted p-3 text-sm">{answer.explanation}</div>
                     )}
+                    {answer.teacher_feedback?.length > 0 && (
+                      <div className="mt-3 space-y-2 rounded-md border border-border p-3 text-sm">
+                        <div className="font-semibold">{t("teacher_feedback")}</div>
+                        {answer.teacher_feedback.map((comment, feedbackIndex) => (
+                          <p className="whitespace-pre-wrap" key={feedbackIndex}>{comment}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}

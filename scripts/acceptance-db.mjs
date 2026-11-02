@@ -78,6 +78,58 @@ async function verifySchemaSecurity() {
     pass("RLS enabled on critical tables");
   }
 
+  const workspaceTables = await sql`
+    select c.table_name
+    from information_schema.columns c
+    join pg_class t on t.relname=c.table_name
+    join pg_namespace n on n.oid=t.relnamespace and n.nspname='public'
+    where c.table_schema='public' and c.column_name='workspace_id'
+      and t.relkind in ('r','p')
+  `;
+  const boundaries = await sql`
+    select tablename, qual, with_check, permissive
+    from pg_policies where schemaname='public'
+      and policyname='workspace_boundary_restrictive'
+  `;
+  const byTable = new Map(boundaries.map(x=>[x.tablename,x]));
+  for (const row of workspaceTables) {
+    const policy = byTable.get(row.table_name);
+    if (!policy || policy.permissive !== 'RESTRICTIVE' ||
+      !String(policy.qual).includes('current_workspace_id') ||
+      !String(policy.with_check).includes('current_workspace_id')) {
+      fail(`Workspace RLS missing or permissive on ${row.table_name}`);
+    }
+  }
+  pass(`Tenant RLS restrictive gates cover ${workspaceTables.length} owned tables`);
+
+  const feedbackPolicies = await sql`
+    select policyname, qual
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'teacher_feedback'
+      and roles @> array['authenticated']::name[]
+  `;
+  const studentFeedbackPolicy = feedbackPolicies.find((policy) =>
+    policy.policyname === "student reads released feedback");
+  if (!studentFeedbackPolicy ||
+      !String(studentFeedbackPolicy.qual).includes("is_student_feedback_released") ||
+      !String(studentFeedbackPolicy.qual).includes("current_student_id")) {
+    fail("Student feedback must be RLS-embargoed until exam result release.");
+  } else {
+    pass("Exam teacher feedback RLS embargo is present");
+    const [{ owned: helperOwned }] = await sql`
+      select exists (
+        select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname = 'is_student_feedback_released'
+          and p.prosecdef = true
+      ) as owned
+    `;
+    if (!helperOwned) fail("Feedback embargo helper must run SECURITY DEFINER.");
+    else pass("Feedback embargo uses restricted SECURITY DEFINER lookup");
+  }
+
   const serviceOnlyFunctions = [
     "save_attempt_answer",
     "append_exam_violation",
@@ -728,6 +780,58 @@ async function verifyPerformance() {
   }
 }
 
+async function verifyTenantIsolation() {
+  const tenantB=crypto.randomUUID();
+  const teacherA=crypto.randomUUID();
+  const teacherB=crypto.randomUUID();
+  await sql.unsafe("begin");
+  try {
+    await sql`insert into public.tenant_workspaces(id,name)
+      values (${tenantB},'CI isolated second workspace')`;
+    await sql`insert into public.user_roles(user_id,role)
+      values (${teacherA},'teacher'),(${teacherB},'teacher')`;
+    await sql`insert into public.tenant_teacher_memberships(teacher_auth_user_id,workspace_id)
+      values
+       (${teacherA},'00000000-0000-4000-8000-000000000001'::uuid),
+       (${teacherB},${tenantB})`;
+    const [a]=await sql`insert into public.groups(name)
+      values ('CI Tenant A') returning id`;
+    const [b]=await sql`insert into public.groups(name,workspace_id)
+      values ('CI Tenant B',${tenantB}) returning id`;
+    const [student]=await sql`insert into public.students(first_name,last_name,username,workspace_id)
+      values ('CI','TenantB',${'tenantb-'+tenantB.slice(0,8)},${tenantB}) returning id`;
+    await sql.unsafe("savepoint tenant_fk_test");
+    let forbidden=false;
+    try {
+      await sql`insert into public.student_access_keys(student_id,key_hash,workspace_id)
+        values(${student.id},${crypto.randomBytes(32).toString('hex')},
+        '00000000-0000-4000-8000-000000000001'::uuid)`;
+    } catch(e) {
+      if(e?.code==="23503") forbidden=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint tenant_fk_test");
+    }
+    if(!forbidden)fail("Tenant composite foreign key did not reject cross-workspace student key");
+    else pass("Cross-workspace child-parent FK rejected");
+
+    await sql.unsafe("set local role authenticated");
+    await sql`select set_config('request.jwt.claim.sub',${teacherA},true)`;
+    const visibleA=await sql`select id from public.groups where id in (${a.id},${b.id})`;
+    if(visibleA.some(x=>x.id===b.id)||!visibleA.some(x=>x.id===a.id))
+      fail("Tenant A authenticated teacher saw wrong groups");
+    else pass("Tenant A teacher cannot read Tenant B groups");
+
+    await sql`select set_config('request.jwt.claim.sub',${teacherB},true)`;
+    const visibleB=await sql`select id from public.groups where id in (${a.id},${b.id})`;
+    if(visibleB.some(x=>x.id===a.id)||!visibleB.some(x=>x.id===b.id))
+      fail("Tenant B authenticated teacher saw wrong groups");
+    else pass("Tenant B teacher cannot read Tenant A groups");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
 async function verifyLessonRestoreRpc() {
   await sql.unsafe("begin");
   try {
@@ -808,6 +912,7 @@ END $test$;`);
 
 try {
   await verifySchemaSecurity();
+  await verifyTenantIsolation();
   await verifyIdempotentEventRestore();
   await verifyLessonRestoreRpc();
   await verifyPerformance();

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireTeacher } from "./teacher-middleware";
+import { selectPrintableContent } from "./print-selection";
 import {
   EXPORT_FORMATS,
   EXPORT_KINDS,
@@ -164,6 +165,14 @@ export const createExport = createServerFn({ method: "POST" })
         includeTrash: z.boolean().default(false),
         includeAnswers: z.boolean().default(false),
         includeExplanations: z.boolean().default(false),
+        printSelection: z.object({
+          level: z.enum(["A1", "A2", "B1", "B2", "C1", "C2"]).optional(),
+          language: z.string().trim().max(20).optional(),
+          topicId: z.string().uuid().optional(),
+          partOfSpeech: z.string().trim().max(50).optional(),
+          search: z.string().trim().max(100).optional(),
+          selectedIds: z.array(z.string().uuid()).max(2000).optional(),
+        }).optional(),
       })
       .parse(d),
   )
@@ -174,6 +183,11 @@ export const createExport = createServerFn({ method: "POST" })
       );
     }
 
+    if (data.printSelection &&
+      (!["questions", "vocabulary"].includes(data.kind) ||
+       !["pdf", "docx"].includes(data.format))) {
+      throw new Error("Print filters are available for PDF/Word questions and vocabulary only.");
+    }
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -187,6 +201,7 @@ export const createExport = createServerFn({ method: "POST" })
           schema_version: 1,
           include_answers: data.includeAnswers,
           include_explanations: data.includeExplanations,
+          print_selection: data.printSelection ?? null,
         },
         status: "processing",
         include_trash: data.includeTrash,
@@ -203,17 +218,24 @@ export const createExport = createServerFn({ method: "POST" })
       const rowCounts: Record<string, number> = {};
 
       if (data.kind === "analytics") {
-        const analytics = await fetchAnalytics(admin);
+        const analytics = await fetchAnalytics(context.supabase);
         for (const [key, rows] of Object.entries(analytics)) {
           tables[key] = rows;
           rowCounts[key] = rows.length;
         }
       } else {
         for (const spec of TABLES[data.kind]) {
-          const rows = await fetchTable(admin, spec, data.includeTrash);
+          const rows = await fetchTable(context.supabase, spec, data.includeTrash);
           tables[spec.key] = rows;
           rowCounts[spec.key] = rows.length;
         }
+      }
+
+      if (data.printSelection && (data.kind === "questions" || data.kind === "vocabulary")) {
+        const selected = selectPrintableContent(data.kind, tables, data.printSelection);
+        Object.assign(tables, selected);
+        rowCounts[data.kind === "questions" ? "questions" : "vocabulary_entries"] =
+          tables[data.kind === "questions" ? "questions" : "vocabulary_entries"]?.length ?? 0;
       }
 
       const exportedAt = new Date().toISOString();
@@ -267,6 +289,7 @@ export const createExport = createServerFn({ method: "POST" })
           include_trash: data.includeTrash,
           include_answers: data.includeAnswers,
           include_explanations: data.includeExplanations,
+          print_selection: data.printSelection ?? null,
           row_counts: rowCounts,
           size_bytes: sizeBytes,
         },
@@ -305,11 +328,10 @@ export const createExport = createServerFn({ method: "POST" })
 export const getExportDownload = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data }) => {
-    const { adminClient } = await import("./security.server");
-    const admin = await adminClient();
-
-    const { data: job, error } = await admin
+  .handler(async ({ data, context }) => {
+    // Resolve the job with the caller's RLS-scoped client. Service-role
+    // lookups by guessed UUID bypass workspace policies and expose exports.
+    const { data: job, error } = await context.supabase
       .from("export_jobs")
       .select("id,kind,format,status,storage_path,expires_at")
       .eq("id", data.id)
@@ -322,6 +344,8 @@ export const getExportDownload = createServerFn({ method: "GET" })
       throw new Error("This export has expired. Create a new export.");
     }
 
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
     const { data: signed, error: signedError } = await admin.storage
       .from(EXPORT_BUCKET)
       .createSignedUrl(job.storage_path, 15 * 60);
