@@ -1473,9 +1473,26 @@ export const getExamResult = createServerFn({ method: "GET" })
     const questions = collectAttemptQuestions(snapshot);
     const { data: answers, error } = await admin
       .from("attempt_answers")
-      .select("item_key,response,is_correct,score,auto_score,flagged")
+      .select("id,item_key,response,is_correct,score,auto_score,flagged")
       .eq("attempt_id", attempt.id);
     if (error) throw new Error(error.message);
+
+    // Teacher feedback is embargoed until the result is released. Only
+    // this released-result path retrieves and exposes the feedback.
+    const { data: feedbackRows, error: feedbackError } = await admin
+      .from("teacher_feedback")
+      .select("answer_id,body,created_at")
+      .eq("attempt_id", attempt.id)
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: true });
+    if (feedbackError) throw new Error(feedbackError.message);
+    const feedbackByAnswer = new Map<string, string[]>();
+    for (const feedback of feedbackRows ?? []) {
+      if (!feedback.answer_id) continue;
+      const old = feedbackByAnswer.get(feedback.answer_id) ?? [];
+      old.push(feedback.body);
+      feedbackByAnswer.set(feedback.answer_id, old);
+    }
 
     const visibilityContext = {
       submittedAt: attempt.submitted_at,
@@ -1506,6 +1523,7 @@ export const getExamResult = createServerFn({ method: "GET" })
           is_correct: answer.is_correct,
           score: answer.score,
           flagged: answer.flagged,
+          teacher_feedback: feedbackByAnswer.get(answer.id) ?? [],
           answer_key: answerVisibility ? question?.answer_key ?? null : null,
           explanation: explanationVisibility ? question?.explanation ?? null : null,
         };
