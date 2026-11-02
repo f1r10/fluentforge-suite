@@ -48,15 +48,35 @@ export function publicClient(): SupabaseCompatibleClient {
   );
 }
 
-export async function adminClient(): Promise<SupabaseCompatibleClient> {
+/** Platform-only privileged client. Do not use in teacher/student CRUD. */
+export async function privilegedAdminClient(): Promise<SupabaseCompatibleClient> {
   if (postgresRuntime()) {
     return createRuntimeAdminClient() as unknown as SupabaseCompatibleClient;
   }
-
-  const { supabaseAdmin } = await import(
-    "@/integrations/supabase/client.server"
-  );
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
+}
+
+/** Authenticated teacher/student data MUST run under user RLS. The separate
+ * service-role auth/storage helpers are retained for controlled operations.
+ * No request token means this is a public/system action and callers must
+ * separately authorize it; public actions are audited by route.
+ */
+export async function adminClient(): Promise<SupabaseCompatibleClient> {
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const auth = getRequest()?.headers.get("authorization");
+  const token = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+  if (token && postgresRuntime()) {
+    const { verifyRuntimeJwt } = await import("@/runtime/jwt.server");
+    const claims = verifyRuntimeJwt(token);
+    if (claims.role === "authenticated") {
+      const { createRuntimeScopedAdminClient } = await import("@/runtime/server-client");
+      return createRuntimeScopedAdminClient(token) as unknown as SupabaseCompatibleClient;
+    }
+  }
+  // Supabase Cloud still uses V1 unscoped semantics and is explicitly
+  // ineligible for multi-teacher enablement until parity is established.
+  return privilegedAdminClient();
 }
 
 type Admin = Awaited<ReturnType<typeof adminClient>>;
