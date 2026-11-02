@@ -78,6 +78,23 @@ async function verifySchemaSecurity() {
     pass("RLS enabled on critical tables");
   }
 
+  const feedbackPolicies = await sql`
+    select policyname, qual
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'teacher_feedback'
+      and roles @> array['authenticated']::name[]
+  `;
+  const studentFeedbackPolicy = feedbackPolicies.find((policy) =>
+    policy.policyname === "student reads released feedback");
+  if (!studentFeedbackPolicy ||
+      !String(studentFeedbackPolicy.qual).includes("result_released") ||
+      !String(studentFeedbackPolicy.qual).includes("current_student_id")) {
+    fail("Student feedback must be RLS-embargoed until exam result release.");
+  } else {
+    pass("Exam teacher feedback RLS embargo is present");
+  }
+
   const serviceOnlyFunctions = [
     "save_attempt_answer",
     "append_exam_violation",
