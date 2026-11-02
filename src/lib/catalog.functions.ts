@@ -206,7 +206,7 @@ export const getCatalog = createServerFn({ method: "GET" })
         : Promise.resolve({ data: [], error: null }),
       context.supabase
         .from("catalog_assignments")
-        .select("id,group_id,student_id,groups(id,name),students(id,first_name,last_name,username,status)")
+        .select("id,group_id,student_id,groups!catalog_assignments_group_id_fkey(id,name),students!catalog_assignments_student_id_fkey(id,first_name,last_name,username,status)")
         .eq("catalog_id", data.id)
         .order("created_at"),
     ]);
