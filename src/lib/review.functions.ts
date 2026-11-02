@@ -598,7 +598,7 @@ export const reviewManualAnswer = createServerFn({ method: "POST" })
     const { data: review, error } = await admin
       .from("manual_reviews")
       .select(
-        "id,status,student_id,question_id,answer_id,attempt_answers!inner(id,attempt_id,item_key,exam_attempts!inner(id,snapshot))",
+        "id,status,student_id,question_id,answer_id,attempt_answers!inner(id,attempt_id,item_key,exam_attempts!inner(id,snapshot,result_released))",
       )
       .eq("id", data.reviewId)
       .single();
@@ -614,7 +614,7 @@ export const reviewManualAnswer = createServerFn({ method: "POST" })
         id: string;
         attempt_id: string;
         item_key: string;
-        exam_attempts: { id: string; snapshot: unknown };
+        exam_attempts: { id: string; snapshot: unknown; result_released: boolean };
       };
     };
 
@@ -659,7 +659,8 @@ export const reviewManualAnswer = createServerFn({ method: "POST" })
       if (feedbackError) throw new Error(feedbackError.message);
 
       const { notifyStudent } = await import("./notifications.functions");
-      await notifyStudent(admin, typed.student_id, {
+      if (typed.attempt_answers.exam_attempts.result_released) {
+        await notifyStudent(admin, typed.student_id, {
         kind: "teacher_feedback",
         title: "Teacher feedback available",
         body: data.feedback,
@@ -670,7 +671,8 @@ export const reviewManualAnswer = createServerFn({ method: "POST" })
           question_id: typed.question_id,
         },
         dedupeKey: `teacher-feedback:${typed.answer_id}`,
-      });
+        });
+      }
     }
 
     const attempt = await recomputeAttempt(admin, typed.attempt_answers.attempt_id);
@@ -703,6 +705,16 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { adminClient, audit } = await import("./security.server");
     const admin = await adminClient();
+    const { data: existing, error: existingError } = await admin
+      .from("exam_attempts")
+      .select("id,status,result_released,reset_at")
+      .eq("id", data.attemptId)
+      .maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (!existing || existing.reset_at || existing.status === "in_progress" || existing.status === "abandoned") {
+      throw new Error("Only submitted, non-reset exam attempts can be released.");
+    }
+    if (existing.result_released) return { ok: true, alreadyReleased: true };
     const recomputed = await recomputeAttempt(admin, data.attemptId);
 
     if (recomputed.pending > 0) {
@@ -716,9 +728,12 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
         status: "graded",
       })
       .eq("id", data.attemptId)
+      .eq("result_released", false)
+      .is("reset_at", null)
       .select("student_id,exam_id")
-      .single();
-    if (error || !attempt) throw new Error(error?.message ?? "Attempt not found.");
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!attempt) return { ok: true, alreadyReleased: true };
 
     const { notifyStudent } = await import("./notifications.functions");
     await notifyStudent(admin, attempt.student_id, {
@@ -742,7 +757,7 @@ export const releaseAttemptResult = createServerFn({ method: "POST" })
       summary: "Exam result released to student",
     });
 
-    return { ok: true };
+    return { ok: true, alreadyReleased: false };
   });
 
 export const resetExamAttempt = createServerFn({ method: "POST" })
