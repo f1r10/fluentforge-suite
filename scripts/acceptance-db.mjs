@@ -102,6 +102,24 @@ async function verifySchemaSecurity() {
   }
   pass(`Tenant RLS restrictive gates cover ${workspaceTables.length} owned tables`);
 
+  // The teacher catalog PostgREST embed must name the original catalog_id
+  // relationship. Tenant composite guards add a second relationship and make
+  // an unqualified catalog_items(count) embed ambiguous.
+  const catalogLinks = await sql`
+    select c.conname as name
+    from pg_constraint c
+    where c.contype = 'f'
+      and c.conrelid = 'public.catalog_items'::regclass
+      and c.confrelid = 'public.catalogs'::regclass
+  `;
+  if (!catalogLinks.some((row) => row.name === "catalog_items_catalog_id_fkey")) {
+    fail("Catalog embed references a missing catalog_items_catalog_id_fkey relationship.");
+  } else if (catalogLinks.length < 2) {
+    fail("Tenant composite catalog foreign key guard is missing.");
+  } else {
+    pass("Catalog embed explicitly resolves the original FK despite tenant guards");
+  }
+
   const feedbackPolicies = await sql`
     select policyname, qual
     from pg_policies
