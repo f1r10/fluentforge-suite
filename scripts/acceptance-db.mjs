@@ -780,6 +780,58 @@ async function verifyPerformance() {
   }
 }
 
+async function verifyTenantIsolation() {
+  const tenantB=crypto.randomUUID();
+  const teacherA=crypto.randomUUID();
+  const teacherB=crypto.randomUUID();
+  await sql.unsafe("begin");
+  try {
+    await sql`insert into public.tenant_workspaces(id,name)
+      values (${tenantB},'CI isolated second workspace')`;
+    await sql`insert into public.user_roles(user_id,role)
+      values (${teacherA},'teacher'),(${teacherB},'teacher')`;
+    await sql`insert into public.tenant_teacher_memberships(teacher_auth_user_id,workspace_id)
+      values
+       (${teacherA},'00000000-0000-4000-8000-000000000001'::uuid),
+       (${teacherB},${tenantB})`;
+    const [a]=await sql`insert into public.groups(name)
+      values ('CI Tenant A') returning id`;
+    const [b]=await sql`insert into public.groups(name,workspace_id)
+      values ('CI Tenant B',${tenantB}) returning id`;
+    const [student]=await sql`insert into public.students(first_name,last_name,username,workspace_id)
+      values ('CI','TenantB',${'tenantb-'+tenantB.slice(0,8)},${tenantB}) returning id`;
+    await sql.unsafe("savepoint tenant_fk_test");
+    let forbidden=false;
+    try {
+      await sql`insert into public.student_access_keys(student_id,key_hash,workspace_id)
+        values(${student.id},${crypto.randomBytes(32).toString('hex')},
+        '00000000-0000-4000-8000-000000000001'::uuid)`;
+    } catch(e) {
+      if(e?.code==="23503") forbidden=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint tenant_fk_test");
+    }
+    if(!forbidden)fail("Tenant composite foreign key did not reject cross-workspace student key");
+    else pass("Cross-workspace child-parent FK rejected");
+
+    await sql.unsafe("set local role authenticated");
+    await sql`select set_config('request.jwt.claim.sub',${teacherA},true)`;
+    const visibleA=await sql`select id from public.groups where id in (${a.id},${b.id})`;
+    if(visibleA.some(x=>x.id===b.id)||!visibleA.some(x=>x.id===a.id))
+      fail("Tenant A authenticated teacher saw wrong groups");
+    else pass("Tenant A teacher cannot read Tenant B groups");
+
+    await sql`select set_config('request.jwt.claim.sub',${teacherB},true)`;
+    const visibleB=await sql`select id from public.groups where id in (${a.id},${b.id})`;
+    if(visibleB.some(x=>x.id===a.id)||!visibleB.some(x=>x.id===b.id))
+      fail("Tenant B authenticated teacher saw wrong groups");
+    else pass("Tenant B teacher cannot read Tenant A groups");
+  } finally {
+    await sql.unsafe("rollback");
+  }
+}
+
 async function verifyLessonRestoreRpc() {
   await sql.unsafe("begin");
   try {
@@ -860,6 +912,7 @@ END $test$;`);
 
 try {
   await verifySchemaSecurity();
+  await verifyTenantIsolation();
   await verifyIdempotentEventRestore();
   await verifyLessonRestoreRpc();
   await verifyPerformance();
