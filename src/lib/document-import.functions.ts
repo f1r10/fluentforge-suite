@@ -1827,7 +1827,47 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
         "bulk_link_import_entities",
         { _links: links as never },
       );
-      if (linkError) throw new Error(linkError.message);
+      if (linkError) {
+        // The legacy batch RPC is service-role-only. On the multi-tenant
+        // runtime, never elevate the teacher's request to service role:
+        // verify every new entry and update each import link through teacher RLS.
+        if (!/permission denied for function bulk_link_import_entities|42501/i.test(linkError.message)) {
+          throw new Error(linkError.message);
+        }
+        const { data: visibleEntries, error: visibilityError } = await context.supabase
+          .from("vocabulary_entries")
+          .select("id")
+          .in("id", batchEntryIds)
+          .is("deleted_at", null);
+        if (visibilityError || (visibleEntries ?? []).length !== new Set(batchEntryIds).size) {
+          throw new Error("One or more imported vocabulary entries are not visible in this workspace.");
+        }
+        for (const link of links) {
+          const { data: updated, error: updateError } = await context.supabase
+            .from("import_items")
+            .update({ created_entity_id: link.entity_id })
+            .eq("id", link.item_id)
+            .eq("job_id", job.id)
+            .eq("decision", "approved")
+            .is("created_entity_id", null)
+            .select("id")
+            .maybeSingle();
+          if (updateError) throw new Error(updateError.message);
+          if (!updated) {
+            // A retry may have already committed this exact item. Refuse to
+            // overwrite a different mapping or touch another import job.
+            const { data: existing, error: existingError } = await context.supabase
+              .from("import_items")
+              .select("created_entity_id")
+              .eq("id", link.item_id)
+              .eq("job_id", job.id)
+              .maybeSingle();
+            if (existingError || existing?.created_entity_id !== link.entity_id) {
+              throw new Error("Import item could not be linked to its approved vocabulary entry.");
+            }
+          }
+        }
+      }
 
       const [
         { count: remainingPending, error: pendingError },
