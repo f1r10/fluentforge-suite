@@ -843,6 +843,30 @@ async function verifyTenantIsolation() {
       values ('releaselexeme','en') returning id`;
     const [senseB]=await sql`insert into public.vocabulary_entries(word,learning_language,workspace_id)
       values ('releaselexeme','en',${tenantB}) returning id`;
+    const [sourceA]=await sql`insert into public.source_files(original_filename)
+      values ('ci-a.csv') returning id`;
+    const [sourceB]=await sql`insert into public.source_files(original_filename,workspace_id)
+      values ('ci-b.csv',${tenantB}) returning id`;
+    const [jobA]=await sql`insert into public.import_jobs(source_file_id)
+      values (${sourceA.id}) returning id`;
+    const [jobB]=await sql`insert into public.import_jobs(source_file_id,workspace_id)
+      values (${sourceB.id},${tenantB}) returning id`;
+    const [itemA]=await sql`insert into public.import_items(job_id,item_type)
+      values (${jobA.id},'vocabulary') returning id`;
+    const [itemB]=await sql`insert into public.import_items(job_id,item_type,workspace_id)
+      values (${jobB.id},'vocabulary',${tenantB}) returning id`;
+    const [entryA]=await sql`insert into public.vocabulary_entries(
+      word,learning_language,provenance)
+      values ('ci-link-a','en',
+        jsonb_build_object('import',jsonb_build_object(
+          'job_id',${jobA.id}::text,'import_item_id',${itemA.id}::text)))
+      returning id`;
+    const [entryB]=await sql`insert into public.vocabulary_entries(
+      word,learning_language,provenance,workspace_id)
+      values ('ci-link-b','en',
+        jsonb_build_object('import',jsonb_build_object(
+          'job_id',${jobB.id}::text,'import_item_id',${itemB.id}::text)),${tenantB})
+      returning id`;
     await sql.unsafe("savepoint tenant_fk_test");
     let forbidden=false;
     try {
@@ -869,6 +893,24 @@ async function verifyTenantIsolation() {
     if(sensesA.length!==1||sensesA[0].id!==senseA.id)
       fail("Tenant A vocabulary import lookup leaked another workspace");
     else pass("Tenant A vocabulary import lookup is isolated");
+    const linkA=JSON.stringify([{item_id:itemA.id,entity_id:entryA.id}]);
+    const linkedA=await sql`select public.bulk_link_import_entities(${linkA}::jsonb) as n`;
+    if(linkedA[0]?.n!==1)fail("Tenant A could not link own imported vocabulary");
+    else pass("Tenant A can link own imported vocabulary");
+    await sql.unsafe("savepoint cross_tenant_link");
+    let rejectedForeignLink=false;
+    try {
+      const foreign=JSON.stringify([{item_id:itemB.id,entity_id:entryB.id}]);
+      await sql`select public.bulk_link_import_entities(${foreign}::jsonb)`;
+    } catch(e) {
+      if(e?.code==="42501")rejectedForeignLink=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint cross_tenant_link");
+    }
+    if(!rejectedForeignLink)fail("Teacher A linked tenant B imported vocabulary");
+    else pass("Cross-workspace vocabulary link rejected");
+
 
 
     await sql`select set_config('request.jwt.claim.sub',${teacherB},true)`;
@@ -881,6 +923,11 @@ async function verifyTenantIsolation() {
     if(sensesB.length!==1||sensesB[0].id!==senseB.id)
       fail("Tenant B vocabulary import lookup leaked another workspace");
     else pass("Tenant B vocabulary import lookup is isolated");
+    const linkB=JSON.stringify([{item_id:itemB.id,entity_id:entryB.id}]);
+    const linkedB=await sql`select public.bulk_link_import_entities(${linkB}::jsonb) as n`;
+    if(linkedB[0]?.n!==1)fail("Tenant B could not link own imported vocabulary");
+    else pass("Tenant B can link own imported vocabulary");
+
 
   } finally {
     await sql.unsafe("rollback");
