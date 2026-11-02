@@ -2,7 +2,7 @@
 export type PaperBlock =
   | { kind: "section"; title: string }
   | { kind: "text"; title: string; body: string }
-  | { kind: "question"; prompt: string; instructions?: string | null; payload?: unknown; answer_key?: unknown; explanation?: string | null; media_id?: string | null }
+  | { kind: "question"; prompt: string; instructions?: string | null; payload?: unknown; answer_key?: unknown; explanation?: string | null; media_id?: string | null; media_data_url?: string | null }
   | { kind: "word"; word: string; pos?: string | null; translation?: string }
   | { kind: "audio"; title: string; transcript: string };
 
@@ -61,12 +61,17 @@ export function renderPrintablePaper(input: {
     if (block.kind === "word") return `<article><b>${paperEscape(block.word)}</b> ${paperEscape(block.pos)}
       ${input.includeAnswers ? `— ${paperEscape(block.translation)}` : ""}</article>`;
     questionCount++;
-    if (block.media_id) throw new Error("Question includes image/media. Attach its printable image before exporting; it cannot be silently omitted.");
+    if (block.media_id && !block.media_data_url) throw new Error("Question image/media is missing: printable output cannot silently omit it.");
+    if (block.media_data_url && !/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(block.media_data_url))
+      throw new Error("Unsafe print image encoding.");
+    const image = block.media_data_url ?
+      `<div class="paper-image"><img src="${block.media_data_url}" alt="Question illustration" /></div>` : "";
     const opts = options(object(block.payload).options);
     const items = opts.length ? `<ol type="A">${opts.map(x=>`<li>${paperEscape(x.text)}</li>`).join("")}</ol>`:"";
     return `<article><b>${questionCount}. </b>${paperEscape(block.prompt)}
       ${block.instructions ? `<p class="muted">${paperEscape(block.instructions)}</p>` : ""}
       ${items}
+      ${image}
       ${input.includeAnswers ? `<p class="answer"><b>Answer:</b> ${paperEscape(answerText(block.answer_key,opts))}</p>` : ""}
       ${input.includeAnswers && block.explanation ? `<p class="answer">${paperEscape(block.explanation)}</p>` : ""}</article>`;
   }).join("\n");
@@ -75,7 +80,7 @@ export function renderPrintablePaper(input: {
   h1{font-size:18pt;border-bottom:2px solid #333;padding-bottom:5mm}h2{font-size:14pt;margin-top:8mm}
   h3{font-size:12pt}section,article{margin:5mm 0;break-inside:avoid}
   .body{white-space:pre-wrap}.muted{color:#555;font-size:9pt}ol{margin:2mm 0 3mm 9mm}
-  li{padding:1mm}.answer{border-left:2px solid #777;padding:2mm 4mm;background:#f1f1f1}
+  li{padding:1mm}.paper-image img{max-width:100%;max-height:85mm;object-fit:contain}.answer{border-left:2px solid #777;padding:2mm 4mm;background:#f1f1f1}
   </style></head><body><h1>${paperEscape(input.title)}</h1>
   ${input.variant ? `<p class="muted">Variant: ${paperEscape(input.variant)}</p>` : ""}
   ${body}</body></html>`;
