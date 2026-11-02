@@ -1285,10 +1285,10 @@ export const getDocumentImport = createServerFn({ method: "GET" })
 export const getSourcePreviewUrl = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ jobId: z.string().uuid() }).parse(d))
-  .handler(async ({ data }) => {
-    const { adminClient } = await import("./security.server");
-    const admin = await adminClient();
-    const { data: job, error } = await admin
+  .handler(async ({ data, context }) => {
+    // Only issue a storage signature for an import visible to this teacher.
+    // A service-role lookup by caller-supplied job ID would bypass RLS.
+    const { data: job, error } = await context.supabase
       .from("import_jobs")
       .select("source_files(storage_path,mime_type,original_filename)")
       .eq("id", data.jobId)
@@ -1308,6 +1308,8 @@ export const getSourcePreviewUrl = createServerFn({ method: "GET" })
       };
     }
 
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
     const { data: signed, error: signedError } = await admin.storage
       .from(SOURCE_BUCKET)
       .createSignedUrl(source.storage_path, 15 * 60);
