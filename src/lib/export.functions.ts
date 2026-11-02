@@ -218,14 +218,14 @@ export const createExport = createServerFn({ method: "POST" })
       const rowCounts: Record<string, number> = {};
 
       if (data.kind === "analytics") {
-        const analytics = await fetchAnalytics(admin);
+        const analytics = await fetchAnalytics(context.supabase);
         for (const [key, rows] of Object.entries(analytics)) {
           tables[key] = rows;
           rowCounts[key] = rows.length;
         }
       } else {
         for (const spec of TABLES[data.kind]) {
-          const rows = await fetchTable(admin, spec, data.includeTrash);
+          const rows = await fetchTable(context.supabase, spec, data.includeTrash);
           tables[spec.key] = rows;
           rowCounts[spec.key] = rows.length;
         }
