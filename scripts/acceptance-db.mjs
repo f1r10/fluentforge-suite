@@ -867,6 +867,14 @@ async function verifyTenantIsolation() {
         jsonb_build_object('import',jsonb_build_object(
           'job_id',${jobB.id}::text,'import_item_id',${itemB.id}::text)),${tenantB})
       returning id`;
+    const [lessonCatalogB]=await sql`insert into public.catalogs(
+      name,status,workspace_id)
+      values ('CI tenant B lesson','active',${tenantB}) returning id`;
+    const [lessonDraftB]=await sql`insert into public.lesson_revisions(
+      catalog_id,revision,title,steps,workspace_id)
+      values (${lessonCatalogB.id},1,'Tenant B lesson',
+        '[{"id":"ci-theory","kind":"theory","title":"Read"}]'::jsonb,
+        ${tenantB}) returning id`;
     await sql.unsafe("savepoint tenant_fk_test");
     let forbidden=false;
     try {
@@ -910,6 +918,21 @@ async function verifyTenantIsolation() {
     }
     if(!rejectedForeignLink)fail("Teacher A linked tenant B imported vocabulary");
     else pass("Cross-workspace vocabulary link rejected");
+    await sql.unsafe("savepoint cross_tenant_lesson");
+    let lessonDenied=false;
+    try {
+      await sql`select public.publish_lesson_revision(
+        ${lessonCatalogB.id},${lessonDraftB.id})`;
+    } catch(e) {
+      if(/not found|not active|permission|workspace|authorization/i.test(e?.message??""))
+        lessonDenied=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint cross_tenant_lesson");
+    }
+    if(!lessonDenied)fail("Teacher A published tenant B lesson");
+    else pass("Cross-workspace lesson publication rejected");
+
 
 
 
@@ -927,6 +950,12 @@ async function verifyTenantIsolation() {
     const linkedB=await sql`select public.bulk_link_import_entities(${linkB}::jsonb) as n`;
     if(linkedB[0]?.n!==1)fail("Tenant B could not link own imported vocabulary");
     else pass("Tenant B can link own imported vocabulary");
+    const publishedB=await sql`select public.publish_lesson_revision(
+      ${lessonCatalogB.id},${lessonDraftB.id}) as id`;
+    if(publishedB[0]?.id!==lessonDraftB.id)
+      fail("Tenant B could not publish own lesson");
+    else pass("Tenant B can publish own lesson");
+
 
 
   } finally {
