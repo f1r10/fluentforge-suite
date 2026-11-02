@@ -169,6 +169,21 @@ async function verifySchemaSecurity() {
     else pass("Feedback embargo uses restricted SECURITY DEFINER lookup");
   }
 
+  // Publication is now a teacher-executable SECURITY INVOKER RPC with
+  // explicit active-workspace checks. Adversarial A/B execution is exercised
+  // by verifyTenantIsolation below; it is no longer service-role-only.
+  const [publishPermission] = await sql`
+    select
+      has_function_privilege('authenticated',
+        'public.publish_lesson_revision(uuid,uuid)', 'EXECUTE') as granted,
+      p.prosecdef as security_definer
+    from pg_proc p
+    where p.oid = 'public.publish_lesson_revision(uuid,uuid)'::regprocedure
+  `;
+  if (!publishPermission?.granted || publishPermission.security_definer)
+    fail("Teacher lesson publication must be executable under tenant RLS.");
+  else pass("Teacher lesson publication uses SECURITY INVOKER and tenant checks");
+
   const serviceOnlyFunctions = [
     "save_attempt_answer",
     "append_exam_violation",
@@ -179,7 +194,6 @@ async function verifySchemaSecurity() {
     "student_practice_daily_stats",
     "student_streak_stats",
     "student_domain_progress",
-    "publish_lesson_revision",
     "record_lesson_step_grade",
     "restore_lesson_revision_rows",
     "restore_event_batch",
