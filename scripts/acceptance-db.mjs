@@ -88,11 +88,22 @@ async function verifySchemaSecurity() {
   const studentFeedbackPolicy = feedbackPolicies.find((policy) =>
     policy.policyname === "student reads released feedback");
   if (!studentFeedbackPolicy ||
-      !String(studentFeedbackPolicy.qual).includes("result_released") ||
+      !String(studentFeedbackPolicy.qual).includes("is_student_feedback_released") ||
       !String(studentFeedbackPolicy.qual).includes("current_student_id")) {
     fail("Student feedback must be RLS-embargoed until exam result release.");
   } else {
     pass("Exam teacher feedback RLS embargo is present");
+    const [{ owned: helperOwned }] = await sql`
+      select exists (
+        select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname = 'is_student_feedback_released'
+          and p.prosecdef = true
+      ) as owned
+    `;
+    if (!helperOwned) fail("Feedback embargo helper must run SECURITY DEFINER.");
+    else pass("Feedback embargo uses restricted SECURITY DEFINER lookup");
   }
 
   const serviceOnlyFunctions = [
