@@ -11,7 +11,7 @@ create or replace function public.is_student_feedback_released(
   p_student_id uuid
 ) returns boolean
 language sql stable security definer
-set search_path = public, pg_temp as $
+set search_path = public, pg_temp as $$
   select exists (
     select 1
     from public.exam_attempts a
@@ -20,7 +20,7 @@ set search_path = public, pg_temp as $
       and a.result_released = true
       and a.reset_at is null
   )
-$;
+$$;
 revoke all on function public.is_student_feedback_released(uuid,uuid) from public, anon;
 grant execute on function public.is_student_feedback_released(uuid,uuid) to authenticated, service_role;
 
