@@ -22,5 +22,16 @@ export const requireTeacher = createMiddleware({ type: "function" })
     }
     if (!data) throw new Error("Forbidden");
 
+    const { data: member, error: memberError } = await admin
+      .from("tenant_teacher_memberships")
+      .select("workspace_id,tenant_workspaces!inner(status)")
+      .eq("teacher_auth_user_id", context.userId)
+      .maybeSingle();
+    if (memberError) throw new Error(memberError.message);
+    const workspace = member?.tenant_workspaces as unknown as { status: string } | null;
+    if (!member || workspace?.status !== "active") {
+      throw new Error("Teacher workspace is not active.");
+    }
+
     return next();
   });
