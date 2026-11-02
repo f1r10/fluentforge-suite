@@ -95,7 +95,7 @@ export const listVocabulary = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }) => {
     let select =
-      "id,word,learning_language,definition,ipa,part_of_speech,level,status,updated_at,vocabulary_translations(language,value)";
+      "id,word,learning_language,definition,ipa,part_of_speech,level,status,updated_at,vocabulary_translations!vocabulary_translations_entry_id_fkey(language,value)";
     if (data.topicId) select += ",vt:vocabulary_topics!inner(topic_id)";
 
     let q = context.supabase
@@ -142,7 +142,7 @@ export const getVocabularyEntry = createServerFn({ method: "GET" })
     const { data: row, error } = await context.supabase
       .from("vocabulary_entries")
       .select(
-        "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,level,notes,status,audio_media_id,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order),vocabulary_topics(topic_id),vocabulary_tags(tags(name))",
+        "id,word,learning_language,definition,ipa,part_of_speech,synonyms,antonyms,level,notes,status,audio_media_id,provenance,vocabulary_translations!vocabulary_translations_entry_id_fkey(id,language,value),vocabulary_examples!vocabulary_examples_entry_id_fkey(id,sentence,translation,sort_order),vocabulary_topics!vocabulary_topics_entry_id_fkey(topic_id),vocabulary_tags!vocabulary_tags_entry_id_fkey(tags!vocabulary_tags_tag_id_fkey(name))",
       )
       .eq("id", data.id)
       .is("deleted_at", null)
@@ -1153,7 +1153,7 @@ export const bulkEnrichVocabulary = createServerFn({ method: "POST" })
         admin
           .from("vocabulary_entries")
           .select(
-            "id,word,learning_language,definition,ipa,part_of_speech,level,synonyms,antonyms,provenance,vocabulary_translations(id,language,value),vocabulary_examples(id,sentence,translation,sort_order)",
+            "id,word,learning_language,definition,ipa,part_of_speech,level,synonyms,antonyms,provenance,vocabulary_translations!vocabulary_translations_entry_id_fkey(id,language,value),vocabulary_examples!vocabulary_examples_entry_id_fkey(id,sentence,translation,sort_order)",
           )
           .in("id", data.ids)
           .is("deleted_at", null),
