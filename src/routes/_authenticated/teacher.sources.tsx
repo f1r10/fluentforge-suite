@@ -69,7 +69,7 @@ function SourcesPage() {
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
 
-  const { data: jobs = [], isFetching } = useQuery({
+  const { data: jobs = [], isFetching, isError: jobsLoadFailed, error: jobsLoadError } = useQuery({
     queryKey: ["document-imports"],
     queryFn: () => listDocumentImports(),
     refetchInterval: 5_000,
@@ -311,6 +311,13 @@ function SourcesPage() {
         {t("document_import_pipeline_hint")}
       </div>
 
+      {jobsLoadFailed && (
+        <p role="alert" className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          {jobsLoadError instanceof Error
+            ? jobsLoadError.message
+            : "Could not load document imports. Please refresh the page."}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full text-sm">
           <thead className="bg-muted text-left text-xs text-muted-foreground">
