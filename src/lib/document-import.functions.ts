@@ -1223,7 +1223,7 @@ export const listDocumentImports = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("import_jobs")
       .select(
-        "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files(id,original_filename,mime_type,size_bytes,keep_original)",
+        "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files!import_jobs_source_file_id_fkey(id,original_filename,mime_type,size_bytes,keep_original)",
       )
       .order("created_at", { ascending: false })
       .limit(100);
@@ -1238,7 +1238,7 @@ export const getDocumentImport = createServerFn({ method: "GET" })
     const jobResult = await context.supabase
       .from("import_jobs")
       .select(
-        "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files(id,original_filename,mime_type,size_bytes,keep_original,storage_path)",
+        "id,status,mode,progress,extraction_method,error,stats,created_at,updated_at,source_files!import_jobs_source_file_id_fkey(id,original_filename,mime_type,size_bytes,keep_original,storage_path)",
       )
       .eq("id", data.jobId)
       .maybeSingle();
@@ -1290,7 +1290,7 @@ export const getSourcePreviewUrl = createServerFn({ method: "GET" })
     // issuing any privileged signed storage URL.
     const { data: job, error } = await context.supabase
       .from("import_jobs")
-      .select("source_files(storage_path,mime_type,original_filename)")
+      .select("source_files!import_jobs_source_file_id_fkey(storage_path,mime_type,original_filename)")
       .eq("id", data.jobId)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -1511,7 +1511,7 @@ export const commitDocumentImport = createServerFn({ method: "POST" })
 
     const { data: job, error: jobError } = await admin
       .from("import_jobs")
-      .select("id,source_file_id,status,source_files(storage_path,keep_original,mime_type,original_filename)")
+      .select("id,source_file_id,status,source_files!import_jobs_source_file_id_fkey(storage_path,keep_original,mime_type,original_filename)")
       .eq("id", data.jobId)
       .maybeSingle();
     if (jobError) throw new Error(jobError.message);
