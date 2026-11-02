@@ -893,14 +893,14 @@ async function verifyTenantIsolation() {
     if(sensesA.length!==1||sensesA[0].id!==senseA.id)
       fail("Tenant A vocabulary import lookup leaked another workspace");
     else pass("Tenant A vocabulary import lookup is isolated");
-    const linkA=JSON.stringify([{item_id:itemA.id,entity_id:entryA.id}]);
+    const linkA=sql.json([{item_id:itemA.id,entity_id:entryA.id}]);
     const linkedA=await sql`select public.bulk_link_import_entities(${linkA}::jsonb) as n`;
     if(linkedA[0]?.n!==1)fail("Tenant A could not link own imported vocabulary");
     else pass("Tenant A can link own imported vocabulary");
     await sql.unsafe("savepoint cross_tenant_link");
     let rejectedForeignLink=false;
     try {
-      const foreign=JSON.stringify([{item_id:itemB.id,entity_id:entryB.id}]);
+      const foreign=sql.json([{item_id:itemB.id,entity_id:entryB.id}]);
       await sql`select public.bulk_link_import_entities(${foreign}::jsonb)`;
     } catch(e) {
       if(e?.code==="42501")rejectedForeignLink=true;
@@ -923,7 +923,7 @@ async function verifyTenantIsolation() {
     if(sensesB.length!==1||sensesB[0].id!==senseB.id)
       fail("Tenant B vocabulary import lookup leaked another workspace");
     else pass("Tenant B vocabulary import lookup is isolated");
-    const linkB=JSON.stringify([{item_id:itemB.id,entity_id:entryB.id}]);
+    const linkB=sql.json([{item_id:itemB.id,entity_id:entryB.id}]);
     const linkedB=await sql`select public.bulk_link_import_entities(${linkB}::jsonb) as n`;
     if(linkedB[0]?.n!==1)fail("Tenant B could not link own imported vocabulary");
     else pass("Tenant B can link own imported vocabulary");
