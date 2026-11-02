@@ -119,6 +119,11 @@ export const teacherLogin = createServerFn({ method: "POST" })
       throw new Error("Wrong username or password.");
     };
     if (!row) return fail();
+    const { data: member } = await admin.from("tenant_teacher_memberships")
+      .select("workspace_id,tenant_workspaces!inner(status)")
+      .eq("teacher_auth_user_id",row.auth_user_id).maybeSingle();
+    const workspace = member?.tenant_workspaces as unknown as { status: string } | null;
+    if (!member || workspace?.status !== "active") return fail();
     const { data: u } = await admin.auth.admin.getUserById(row.auth_user_id);
     if (!u.user?.email) return fail();
     const { data: s, error } = await publicClient().auth.signInWithPassword({ email: u.user.email, password: data.password });
@@ -138,14 +143,20 @@ export const studentLogin = createServerFn({ method: "POST" })
     await checkRateLimit(admin, "student", username || "unknown", ip);
     const { data: keyRow } = await admin
       .from("student_access_keys")
-      .select("student_id, students!inner(id, auth_user_id, status, deleted_at, username)")
+      .select("student_id, students!inner(id, auth_user_id, status, deleted_at, username, workspace_id)")
       .eq("key_hash", sha256(data.key))
       .is("revoked_at", null)
       .maybeSingle();
-    const st = keyRow?.students as unknown as { id: string; auth_user_id: string | null; status: string; deleted_at: string | null } | undefined;
+    const st = keyRow?.students as unknown as { id: string; auth_user_id: string | null; status: string; deleted_at: string | null; workspace_id: string } | undefined;
     if (!st || !st.auth_user_id || st.status !== "active" || st.deleted_at) {
       await recordAttempt(admin, "student", username || "unknown", ip, false);
       throw new Error("This access key is not valid. Ask your teacher for a new one.");
+    }
+    const { data: space, error: spaceError } = await admin.from("tenant_workspaces")
+      .select("status").eq("id",st.workspace_id).maybeSingle();
+    if (spaceError || space?.status !== "active") {
+      await recordAttempt(admin, "student", username || "unknown", ip, false);
+      throw new Error("This access key is not active. Ask your teacher.");
     }
     const session = await mintSession(admin, st.auth_user_id);
     const claims = decodeJwt(session.access_token);
