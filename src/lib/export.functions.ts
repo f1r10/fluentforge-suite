@@ -328,11 +328,10 @@ export const createExport = createServerFn({ method: "POST" })
 export const getExportDownload = createServerFn({ method: "GET" })
   .middleware([requireTeacher])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data }) => {
-    const { adminClient } = await import("./security.server");
-    const admin = await adminClient();
-
-    const { data: job, error } = await admin
+  .handler(async ({ data, context }) => {
+    // Resolve the job with the caller's RLS-scoped client. Service-role
+    // lookups by guessed UUID bypass workspace policies and expose exports.
+    const { data: job, error } = await context.supabase
       .from("export_jobs")
       .select("id,kind,format,status,storage_path,expires_at")
       .eq("id", data.id)
@@ -345,6 +344,8 @@ export const getExportDownload = createServerFn({ method: "GET" })
       throw new Error("This export has expired. Create a new export.");
     }
 
+    const { adminClient } = await import("./security.server");
+    const admin = await adminClient();
     const { data: signed, error: signedError } = await admin.storage
       .from(EXPORT_BUCKET)
       .createSignedUrl(job.storage_path, 15 * 60);
