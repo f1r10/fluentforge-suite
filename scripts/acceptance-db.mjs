@@ -839,6 +839,10 @@ async function verifyTenantIsolation() {
       values ('CI Tenant B',${tenantB}) returning id`;
     const [student]=await sql`insert into public.students(first_name,last_name,username,workspace_id)
       values ('CI','TenantB',${'tenantb-'+tenantB.slice(0,8)},${tenantB}) returning id`;
+    const [senseA]=await sql`insert into public.vocabulary_entries(word,learning_language)
+      values ('releaselexeme','en') returning id`;
+    const [senseB]=await sql`insert into public.vocabulary_entries(word,learning_language,workspace_id)
+      values ('releaselexeme','en',${tenantB}) returning id`;
     await sql.unsafe("savepoint tenant_fk_test");
     let forbidden=false;
     try {
@@ -860,12 +864,24 @@ async function verifyTenantIsolation() {
     if(visibleA.some(x=>x.id===b.id)||!visibleA.some(x=>x.id===a.id))
       fail("Tenant A authenticated teacher saw wrong groups");
     else pass("Tenant A teacher cannot read Tenant B groups");
+    const sensesA=await sql`select id from public.lookup_vocabulary_import_senses(
+      'en',array['releaselexeme']::text[])`;
+    if(sensesA.length!==1||sensesA[0].id!==senseA.id)
+      fail("Tenant A vocabulary import lookup leaked another workspace");
+    else pass("Tenant A vocabulary import lookup is isolated");
+
 
     await sql`select set_config('request.jwt.claim.sub',${teacherB},true)`;
     const visibleB=await sql`select id from public.groups where id in (${a.id},${b.id})`;
     if(visibleB.some(x=>x.id===a.id)||!visibleB.some(x=>x.id===b.id))
       fail("Tenant B authenticated teacher saw wrong groups");
     else pass("Tenant B teacher cannot read Tenant A groups");
+    const sensesB=await sql`select id from public.lookup_vocabulary_import_senses(
+      'en',array['releaselexeme']::text[])`;
+    if(sensesB.length!==1||sensesB[0].id!==senseB.id)
+      fail("Tenant B vocabulary import lookup leaked another workspace");
+    else pass("Tenant B vocabulary import lookup is isolated");
+
   } finally {
     await sql.unsafe("rollback");
   }
