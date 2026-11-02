@@ -18,6 +18,7 @@ import {
 } from "@/lib/export-formats";
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
+import { listTopics, listQuestions } from "@/lib/questions.functions";
 
 export const Route = createFileRoute("/_authenticated/teacher/exports")({
   component: ExportCenter,
@@ -51,6 +52,29 @@ function ExportCenter() {
   const [includeExplanations, setIncludeExplanations] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [printLevel, setPrintLevel] = useState("");
+  const [printLanguage, setPrintLanguage] = useState("");
+  const [printTopicId, setPrintTopicId] = useState("");
+  const [printPos, setPrintPos] = useState("");
+  const [printSearch, setPrintSearch] = useState("");
+  const [printQuestionPage, setPrintQuestionPage] = useState(0);
+  const [printSelectedIds, setPrintSelectedIds] = useState<string[]>([]);
+  const printable = (kind === "questions" || kind === "vocabulary") &&
+    (format === "pdf" || format === "docx");
+  const { data: printableTopics = [] } = useQuery({
+    queryKey: ["print-topics"],
+    queryFn: () => listTopics(),
+    enabled: printable,
+  });
+  const { data: printableQuestions } = useQuery({
+    queryKey: ["printable-questions", kind, printQuestionPage, printSearch, printLevel, printLanguage, printTopicId],
+    queryFn: () => listQuestions({ data: {
+      text: printSearch, type: "", level: printLevel,
+      language: printLanguage, topicId: printTopicId || undefined,
+      status: "active", page: printQuestionPage,
+    }}),
+    enabled: printable && kind === "questions",
+  });
 
   const { data: jobs = [], isFetching } = useQuery({
     queryKey: ["exports"],
@@ -67,6 +91,18 @@ function ExportCenter() {
           includeTrash,
           includeAnswers,
           includeExplanations,
+          printSelection: printable && (
+            printLevel || printLanguage || printTopicId || printPos ||
+            printSearch || printSelectedIds.length
+          ) ? {
+            level: printLevel ? printLevel as "A1" | "A2" | "B1" | "B2" | "C1" | "C2" : undefined,
+            language: printLanguage || undefined,
+            topicId: printTopicId || undefined,
+            partOfSpeech: kind === "vocabulary" ? printPos || undefined : undefined,
+            search: printSearch || undefined,
+            selectedIds: kind === "questions" && printSelectedIds.length
+              ? printSelectedIds : undefined,
+          } : undefined,
         },
       });
       await qc.invalidateQueries({ queryKey: ["exports"] });
@@ -108,6 +144,8 @@ function ExportCenter() {
                 type="button"
                 onClick={() => {
                   setKind(option.kind);
+                  setPrintSelectedIds([]);
+                  setPrintQuestionPage(0);
                   if (!EXPORT_FORMATS[option.kind].includes(format)) {
                     setFormat(defaultExportFormat(option.kind));
                   }
@@ -167,6 +205,97 @@ function ExportCenter() {
             </p>
           </div>
 
+          {printable && (
+            <div className="space-y-3 rounded-md border border-border bg-background p-3 text-sm">
+              <div className="font-semibold">{t("print_builder_filters")}</div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1">
+                  <span className="text-xs">{t("level")}</span>
+                  <select className="h-9 w-full rounded-md border border-input bg-background px-2"
+                    value={printLevel} onChange={(e) => {
+                      setPrintLevel(e.target.value); setPrintQuestionPage(0);
+                    }}>
+                    <option value="">{t("all")}</option>
+                    {["A1","A2","B1","B2","C1","C2"].map((x) => <option value={x} key={x}>{x}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs">{t("language")}</span>
+                  <select className="h-9 w-full rounded-md border border-input bg-background px-2"
+                    value={printLanguage} onChange={(e) => {
+                      setPrintLanguage(e.target.value); setPrintQuestionPage(0);
+                    }}>
+                    <option value="">{t("all")}</option>
+                    {["en","az","ru","tr"].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}
+                  </select>
+                </label>
+                <label className="col-span-2 space-y-1">
+                  <span className="text-xs">{t("topics")}</span>
+                  <select className="h-9 w-full rounded-md border border-input bg-background px-2"
+                    value={printTopicId} onChange={(e) => {
+                      setPrintTopicId(e.target.value); setPrintQuestionPage(0);
+                    }}>
+                    <option value="">{t("all")}</option>
+                    {printableTopics.map((topic) => (
+                      <option key={topic.id} value={topic.id}>{topic.name}</option>
+                    ))}
+                  </select>
+                </label>
+                {kind === "vocabulary" && (
+                  <label className="col-span-2 space-y-1">
+                    <span className="text-xs">{t("part_of_speech")}</span>
+                    <input className="h-9 w-full rounded-md border border-input bg-background px-2"
+                      value={printPos} maxLength={50}
+                      onChange={(e) => setPrintPos(e.target.value)}
+                      placeholder="noun / verb / adjective" />
+                  </label>
+                )}
+                <label className="col-span-2 space-y-1">
+                  <span className="text-xs">{t("search")}</span>
+                  <input className="h-9 w-full rounded-md border border-input bg-background px-2"
+                    value={printSearch} maxLength={100}
+                    onChange={(e) => { setPrintSearch(e.target.value); setPrintQuestionPage(0); }}
+                    placeholder={t("print_builder_search_hint")} />
+                </label>
+              </div>
+              {kind === "questions" && (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold">
+                    {t("print_builder_pick_questions")} ({printSelectedIds.length})
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t("print_builder_empty_selection")}</p>
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+                    {(printableQuestions?.rows ?? []).map((question) => (
+                      <label key={question.id} className="flex cursor-pointer items-start gap-2 py-1 text-xs">
+                        <Checkbox checked={printSelectedIds.includes(question.id)}
+                          onCheckedChange={(checked) => setPrintSelectedIds((old) =>
+                            checked ? [...old.filter((id) => id !== question.id), question.id] :
+                              old.filter((id) => id !== question.id)
+                          )}/>
+                        <span>{question.prompt.slice(0, 130)} · {question.level ?? "—"}</span>
+                      </label>
+                    ))}
+                    {!printableQuestions?.rows.length && <p className="text-xs text-muted-foreground">{t("no_results")}</p>}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <Button type="button" size="sm" variant="outline"
+                      onClick={() => setPrintSelectedIds([])}>{t("clear")}</Button>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" size="sm" variant="outline"
+                        disabled={printQuestionPage === 0}
+                        onClick={() => setPrintQuestionPage((v) => Math.max(0,v-1))}>←</Button>
+                      <span className="text-xs">{printQuestionPage+1}</span>
+                      <Button type="button" size="sm" variant="outline"
+                        disabled={!printableQuestions ||
+                          (printQuestionPage+1)*printableQuestions.pageSize >= printableQuestions.total}
+                        onClick={() => setPrintQuestionPage((v) => v+1)}>→</Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <label className="flex items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
             <Checkbox
               className="mt-0.5"
@@ -179,7 +308,7 @@ function ExportCenter() {
             </span>
           </label>
 
-          {kind === "questions" && format === "pdf" && (
+          {kind === "questions" && (format === "pdf" || format === "docx") && (
             <div className="space-y-2 rounded-md border border-border bg-background p-3 text-sm">
               <label className="flex items-center gap-2">
                 <Checkbox
