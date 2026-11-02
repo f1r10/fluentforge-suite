@@ -2,8 +2,8 @@
  * content data access still requires tenant-scoped RLS and service queries.
  */
 export async function assertActiveWorkspaceSession(userId:string,sessionId?:string){
- const {adminClient}=await import("./security.server");
- const admin=await adminClient();
+ const {privilegedAdminClient}=await import("./security.server");
+ const admin=await privilegedAdminClient();
  const {data:teacher,error:teacherError}=await admin
    .from("tenant_teacher_memberships")
    .select("workspace_id").eq("teacher_auth_user_id",userId).maybeSingle();
