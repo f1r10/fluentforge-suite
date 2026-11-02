@@ -68,6 +68,7 @@ function SourcesPage() {
   const [autoEnrichVocabulary, setAutoEnrichVocabulary] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<ImportRow | null>(null);
+  const syncErrorsShown = useRef(new Set<string>());
 
   const { data: jobs = [], isFetching, isError: jobsLoadFailed, error: jobsLoadError } = useQuery({
     queryKey: ["document-imports"],
@@ -101,8 +102,15 @@ function SourcesPage() {
         if (cancelled) return;
         try {
           await syncDocumentImport({ data: { jobId } });
-        } catch {
-          // Persisted error state will appear on the next poll.
+        } catch (error) {
+          // Sync failures do not persist a terminal job state. Surface the
+          // first failure so teachers and CI can diagnose a stuck queued job.
+          if (!syncErrorsShown.current.has(jobId)) {
+            syncErrorsShown.current.add(jobId);
+            const message = error instanceof Error ? error.message : String(error);
+            console.error("Document import synchronization failed:", message);
+            toast.error("Document import status update failed. Retry with Refresh.");
+          }
         }
       }
       if (!cancelled) {
