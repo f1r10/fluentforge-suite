@@ -196,7 +196,7 @@ export const listExamsDetailed = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("exams")
       .select(
-        "id,title,description,status,available_from,available_until,duration_minutes,settings,published_at,updated_at,exam_sections(count),exam_items(count),exam_assignments(count)",
+        "id,title,description,status,available_from,available_until,duration_minutes,settings,published_at,updated_at,exam_sections!exam_sections_exam_id_fkey(count),exam_items!exam_items_exam_id_fkey(count),exam_assignments!exam_assignments_exam_id_fkey(count)",
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false });
@@ -313,7 +313,7 @@ export const getExam = createServerFn({ method: "GET" })
         .order("id"),
       context.supabase
         .from("exam_assignments")
-        .select("id,group_id,student_id,groups(id,name),students(id,first_name,last_name,username,status)")
+        .select("id,group_id,student_id,groups!exam_assignments_group_id_fkey(id,name),students!exam_assignments_student_id_fkey(id,first_name,last_name,username,status)")
         .eq("exam_id", data.id)
         .order("created_at"),
     ]);
