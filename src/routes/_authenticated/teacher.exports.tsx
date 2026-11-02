@@ -19,6 +19,7 @@ import {
 import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 import { listTopics, listQuestions } from "@/lib/questions.functions";
+import { getLanguageSettings } from "@/lib/teacher.functions";
 
 export const Route = createFileRoute("/_authenticated/teacher/exports")({
   component: ExportCenter,
@@ -61,6 +62,11 @@ function ExportCenter() {
   const [printSelectedIds, setPrintSelectedIds] = useState<string[]>([]);
   const printable = (kind === "questions" || kind === "vocabulary") &&
     (format === "pdf" || format === "docx");
+  const { data: printableLanguages = [] } = useQuery({
+    queryKey: ["print-learning-languages"],
+    queryFn: () => getLanguageSettings(),
+    enabled: printable,
+  });
   const { data: printableTopics = [] } = useQuery({
     queryKey: ["print-topics"],
     queryFn: () => listTopics(),
@@ -226,7 +232,9 @@ function ExportCenter() {
                       setPrintLanguage(e.target.value); setPrintQuestionPage(0);
                     }}>
                     <option value="">{t("all")}</option>
-                    {["en","az","ru","tr"].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}
+                    {printableLanguages.map((language) => (
+                      <option key={language.code} value={language.code}>{language.name}</option>
+                    ))}
                   </select>
                 </label>
                 <label className="col-span-2 space-y-1">
