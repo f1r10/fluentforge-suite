@@ -43,6 +43,7 @@ export const createPrintablePaper = createServerFn({method:"POST"})
       if(!items?.length)throw new Error("Catalog is empty.");
       blocks=await catalogPaperBlocks(db,items);
     }
+    await attachPrintableImages(db,blocks);
     const html=renderPrintablePaper({
       title,blocks,includeAnswers:data.includeAnswers,
       showTranscript:data.showTranscript,variant:data.kind==="exam"?data.variant:undefined,
@@ -74,6 +75,48 @@ export const createPrintablePaper = createServerFn({method:"POST"})
         include_answers:data.includeAnswers,variant:data.variant,block_count:blocks.length}});
     return {url:signed.signedUrl,filename:`fluentforge-${data.kind}-${data.id}.${data.format}`,blocks:blocks.length};
   });
+
+/** Resolve only images already visible through the current teacher's RLS.
+ * Never fetch arbitrary external URLs from a question snapshot.
+ */
+async function attachPrintableImages(
+  db: import("@supabase/supabase-js").SupabaseClient<import("@/integrations/supabase/types").Database>,
+  blocks:PaperBlock[],
+) {
+  const ids=[...new Set(blocks.filter(
+    (item):item is Extract<PaperBlock,{kind:"question"}> =>
+      item.kind==="question" && !!item.media_id,
+  ).map(item=>item.media_id!))];
+  if(!ids.length)return;
+  if(ids.length>50)throw new Error("Too many images to print at once.");
+  const {data:assets,error}=await db.from("media_assets")
+    .select("id,kind,mime_type,storage_path")
+    .in("id",ids).is("deleted_at",null);
+  if(error)throw new Error(error.message);
+  if((assets??[]).length!==ids.length)
+    throw new Error("Question image is missing or not available in your workspace.");
+  const {privilegedAdminClient}=await import("./security.server");
+  const storage=(await privilegedAdminClient()).storage.from("media");
+  const encoded=new Map<string,string>();
+  let totalBytes=0;
+  for(const asset of assets??[]){
+    const mime=asset.mime_type;
+    if(asset.kind!=="image"||!asset.storage_path||
+       !["image/png","image/jpeg","image/webp","image/gif"].includes(mime??""))
+      throw new Error("Only uploaded PNG, JPEG, GIF and WebP images are supported in paper exports.");
+    const {data:blob,error:downloadError}=await storage.download(asset.storage_path);
+    if(downloadError||!blob)throw new Error("Cannot access the printable image.");
+    if(blob.size>2*1024*1024)throw new Error("Image is larger than the 2 MB printing limit.");
+    totalBytes+=blob.size;
+    if(totalBytes>12*1024*1024)throw new Error("Total print images exceed 12 MB.");
+    const base64=Buffer.from(await blob.arrayBuffer()).toString("base64");
+    encoded.set(asset.id,`data:${mime};base64,${base64}`);
+  }
+  for(const block of blocks){
+    if(block.kind!=="question"||!block.media_id)continue;
+    block.media_data_url=encoded.get(block.media_id);
+  }
+}
 
 async function catalogPaperBlocks(
   db: import("@supabase/supabase-js").SupabaseClient<import("@/integrations/supabase/types").Database>,
