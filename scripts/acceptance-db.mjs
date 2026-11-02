@@ -122,6 +122,25 @@ async function verifySchemaSecurity() {
     }
   }
 
+  for (const [parent, fk] of [
+    ["groups", "catalog_assignments_group_id_fkey"],
+    ["students", "catalog_assignments_student_id_fkey"],
+  ]) {
+    const links = await sql`
+      select c.conname as name from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = 'public.catalog_assignments'::regclass
+        and c.confrelid = ('public.' || ${parent})::regclass
+    `;
+    if (!links.some((row) => row.name === fk)) {
+      fail("Catalog assignment embed references missing " + fk);
+    } else if (links.length < 2) {
+      fail("Tenant composite catalog assignment guard missing for " + parent);
+    } else {
+      pass("Catalog assignment " + parent + " embed resolves explicit FK");
+    }
+  }
+
   const feedbackPolicies = await sql`
     select policyname, qual
     from pg_policies
