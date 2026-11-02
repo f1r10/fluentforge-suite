@@ -20,6 +20,9 @@ import { formatDateTime } from "@/components/app/common";
 import { useI18n } from "@/lib/i18n";
 import { listTopics, listQuestions } from "@/lib/questions.functions";
 import { getLanguageSettings } from "@/lib/teacher.functions";
+import { listCatalogsDetailed } from "@/lib/catalog.functions";
+import { listExamsDetailed } from "@/lib/exam.functions";
+import { createPrintablePaper } from "@/lib/print-paper.functions";
 
 export const Route = createFileRoute("/_authenticated/teacher/exports")({
   component: ExportCenter,
@@ -60,12 +63,23 @@ function ExportCenter() {
   const [printSearch, setPrintSearch] = useState("");
   const [printQuestionPage, setPrintQuestionPage] = useState(0);
   const [printSelectedIds, setPrintSelectedIds] = useState<string[]>([]);
+  const [paperSourceId,setPaperSourceId]=useState("");
+  const [printVariant,setPrintVariant]=useState("A");
+  const [printTranscript,setPrintTranscript]=useState(false);
   const printable = (kind === "questions" || kind === "vocabulary") &&
     (format === "pdf" || format === "docx");
   const { data: printableLanguages = [] } = useQuery({
     queryKey: ["print-learning-languages"],
     queryFn: () => getLanguageSettings(),
     enabled: printable,
+  });
+  const {data: printCatalogs=[]}=useQuery({
+    queryKey:["print-catalogs"], queryFn:()=>listCatalogsDetailed(),
+    enabled:(kind==="catalogs"),
+  });
+  const {data: printExams=[]}=useQuery({
+    queryKey:["print-exams"], queryFn:()=>listExamsDetailed(),
+    enabled:(kind==="exams"),
   });
   const { data: printableTopics = [] } = useQuery({
     queryKey: ["print-topics"],
@@ -90,6 +104,17 @@ function ExportCenter() {
   async function generate() {
     setBusy(true);
     try {
+      if ((kind==="catalogs"||kind==="exams") && (format==="pdf"||format==="docx")) {
+        if(!paperSourceId) throw new Error(t("print_builder_choose_source"));
+        const result=await createPrintablePaper({data:{
+          kind:kind==="catalogs"?"catalog":"exam",
+          id:paperSourceId,format,includeAnswers,
+          showTranscript:printTranscript,variant:printVariant,
+        }});
+        openDownload(result.url,result.filename);
+        toast.success(t("export_ready"));
+        return;
+      }
       const result = await createExport({
         data: {
           kind,
@@ -152,6 +177,10 @@ function ExportCenter() {
                   setKind(option.kind);
                   setPrintSelectedIds([]);
                   setPrintQuestionPage(0);
+                  setPaperSourceId("");
+                  if (option.kind === "catalogs" || option.kind === "exams") {
+                    setFormat("pdf");
+                  } else
                   if (!EXPORT_FORMATS[option.kind].includes(format)) {
                     setFormat(defaultExportFormat(option.kind));
                   }
@@ -180,7 +209,7 @@ function ExportCenter() {
               value={format}
               onChange={(event) => setFormat(event.target.value as ExportFormat)}
             >
-              {EXPORT_FORMATS[kind].map((value) => (
+              {(kind==="catalogs"||kind==="exams" ? ["pdf","docx","xlsx","json","csv"] as const : EXPORT_FORMATS[kind]).map((value) => (
                 <option key={value} value={value}>
                   {value === "xlsx"
                     ? "Excel (.xlsx)"
@@ -211,6 +240,31 @@ function ExportCenter() {
             </p>
           </div>
 
+          {(kind==="catalogs"||kind==="exams") && (format==="pdf"||format==="docx") && (
+            <div className="space-y-3 rounded-md border border-border bg-background p-3 text-sm">
+              <div className="font-semibold">{t("print_builder_choose_source")}</div>
+              <select className="h-9 w-full rounded-md border border-input bg-background px-2"
+                value={paperSourceId} onChange={(e)=>setPaperSourceId(e.target.value)}>
+                <option value="">{t("print_builder_choose_source")}</option>
+                {kind==="catalogs" ?
+                  printCatalogs.map((x)=><option key={x.id} value={x.id}>{x.name}</option>) :
+                  printExams.filter((x)=>!!x.published_at).map((x)=>
+                    <option key={x.id} value={x.id}>{x.title}</option>)}
+              </select>
+              {kind==="exams" && (
+                <label className="space-y-1">
+                  <span className="text-xs">{t("print_builder_variant")}</span>
+                  <Input value={printVariant} maxLength={32}
+                    onChange={(e)=>setPrintVariant(e.target.value)} />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox checked={printTranscript}
+                  onCheckedChange={(checked)=>setPrintTranscript(!!checked)}/>
+                <span>{t("print_builder_transcript")}</span>
+              </label>
+            </div>
+          )}
           {printable && (
             <div className="space-y-3 rounded-md border border-border bg-background p-3 text-sm">
               <div className="font-semibold">{t("print_builder_filters")}</div>
@@ -316,7 +370,7 @@ function ExportCenter() {
             </span>
           </label>
 
-          {kind === "questions" && (format === "pdf" || format === "docx") && (
+          {(kind === "questions" || kind === "catalogs" || kind === "exams") && (format === "pdf" || format === "docx") && (
             <div className="space-y-2 rounded-md border border-border bg-background p-3 text-sm">
               <label className="flex items-center gap-2">
                 <Checkbox
