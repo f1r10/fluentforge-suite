@@ -356,6 +356,23 @@ jobs:
           export E2E_SCREENSHOT_PATH="$RUNNER_TEMP/fluentforge-release-smoke-failure.png"
           node scripts/release-browser-smoke.cjs
 
+      - name: Diagnose browser acceptance failure
+        if: failure()
+        run: |
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            ps || true
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            logs --no-color --tail=100 processing-service || true
+          docker compose \
+            --env-file .env.postgres.ci \
+            -f docker-compose.postgres.yml \
+            exec -T processing-service python -c \
+            "import sqlite3; db=sqlite3.connect('/data/processing.db'); print('processing job status counts:', db.execute('select kind,status,count(*) from jobs group by kind,status').fetchall()); print('recent job states:', db.execute('select kind,status,progress,substr(error,1,180) from jobs order by created_at desc limit 8').fetchall())" || true
+
       - name: Upload browser failure screenshot
         if: failure()
         uses: actions/upload-artifact@v4
