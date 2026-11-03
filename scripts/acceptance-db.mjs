@@ -102,6 +102,45 @@ async function verifySchemaSecurity() {
   }
   pass(`Tenant RLS restrictive gates cover ${workspaceTables.length} owned tables`);
 
+  // Composite tenant guards create additional PostgREST relationships.
+  // Every count embed must explicitly use its original catalog_id FK.
+  for (const child of ["catalog_items", "catalog_assignments"]) {
+    const links = await sql`
+      select c.conname as name
+      from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = ('public.' || ${child})::regclass
+        and c.confrelid = 'public.catalogs'::regclass
+    `;
+    const original = child + "_catalog_id_fkey";
+    if (!links.some((row) => row.name === original)) {
+      fail("Catalog embed references missing " + original);
+    } else if (links.length < 2) {
+      fail("Tenant composite catalog guard missing for " + child);
+    } else {
+      pass("Catalog " + child + " count embed resolves explicit FK");
+    }
+  }
+
+  for (const [parent, fk] of [
+    ["groups", "catalog_assignments_group_id_fkey"],
+    ["students", "catalog_assignments_student_id_fkey"],
+  ]) {
+    const links = await sql`
+      select c.conname as name from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = 'public.catalog_assignments'::regclass
+        and c.confrelid = ('public.' || ${parent})::regclass
+    `;
+    if (!links.some((row) => row.name === fk)) {
+      fail("Catalog assignment embed references missing " + fk);
+    } else if (links.length < 2) {
+      fail("Tenant composite catalog assignment guard missing for " + parent);
+    } else {
+      pass("Catalog assignment " + parent + " embed resolves explicit FK");
+    }
+  }
+
   const feedbackPolicies = await sql`
     select policyname, qual
     from pg_policies
@@ -130,6 +169,21 @@ async function verifySchemaSecurity() {
     else pass("Feedback embargo uses restricted SECURITY DEFINER lookup");
   }
 
+  // Publication is now a teacher-executable SECURITY INVOKER RPC with
+  // explicit active-workspace checks. Adversarial A/B execution is exercised
+  // by verifyTenantIsolation below; it is no longer service-role-only.
+  const [publishPermission] = await sql`
+    select
+      has_function_privilege('authenticated',
+        'public.publish_lesson_revision(uuid,uuid)', 'EXECUTE') as granted,
+      p.prosecdef as security_definer
+    from pg_proc p
+    where p.oid = 'public.publish_lesson_revision(uuid,uuid)'::regprocedure
+  `;
+  if (!publishPermission?.granted || publishPermission.security_definer)
+    fail("Teacher lesson publication must be executable under tenant RLS.");
+  else pass("Teacher lesson publication uses SECURITY INVOKER and tenant checks");
+
   const serviceOnlyFunctions = [
     "save_attempt_answer",
     "append_exam_violation",
@@ -140,7 +194,6 @@ async function verifySchemaSecurity() {
     "student_practice_daily_stats",
     "student_streak_stats",
     "student_domain_progress",
-    "publish_lesson_revision",
     "record_lesson_step_grade",
     "restore_lesson_revision_rows",
     "restore_event_batch",
@@ -800,6 +853,42 @@ async function verifyTenantIsolation() {
       values ('CI Tenant B',${tenantB}) returning id`;
     const [student]=await sql`insert into public.students(first_name,last_name,username,workspace_id)
       values ('CI','TenantB',${'tenantb-'+tenantB.slice(0,8)},${tenantB}) returning id`;
+    const [senseA]=await sql`insert into public.vocabulary_entries(word,learning_language)
+      values ('releaselexeme','en') returning id`;
+    const [senseB]=await sql`insert into public.vocabulary_entries(word,learning_language,workspace_id)
+      values ('releaselexeme','en',${tenantB}) returning id`;
+    const [sourceA]=await sql`insert into public.source_files(original_filename)
+      values ('ci-a.csv') returning id`;
+    const [sourceB]=await sql`insert into public.source_files(original_filename,workspace_id)
+      values ('ci-b.csv',${tenantB}) returning id`;
+    const [jobA]=await sql`insert into public.import_jobs(source_file_id)
+      values (${sourceA.id}) returning id`;
+    const [jobB]=await sql`insert into public.import_jobs(source_file_id,workspace_id)
+      values (${sourceB.id},${tenantB}) returning id`;
+    const [itemA]=await sql`insert into public.import_items(job_id,item_type)
+      values (${jobA.id},'vocabulary') returning id`;
+    const [itemB]=await sql`insert into public.import_items(job_id,item_type,workspace_id)
+      values (${jobB.id},'vocabulary',${tenantB}) returning id`;
+    const [entryA]=await sql`insert into public.vocabulary_entries(
+      word,learning_language,provenance)
+      values ('ci-link-a','en',
+        jsonb_build_object('import',jsonb_build_object(
+          'job_id',${jobA.id}::text,'import_item_id',${itemA.id}::text)))
+      returning id`;
+    const [entryB]=await sql`insert into public.vocabulary_entries(
+      word,learning_language,provenance,workspace_id)
+      values ('ci-link-b','en',
+        jsonb_build_object('import',jsonb_build_object(
+          'job_id',${jobB.id}::text,'import_item_id',${itemB.id}::text)),${tenantB})
+      returning id`;
+    const [lessonCatalogB]=await sql`insert into public.catalogs(
+      name,status,workspace_id)
+      values ('CI tenant B lesson','active',${tenantB}) returning id`;
+    const [lessonDraftB]=await sql`insert into public.lesson_revisions(
+      catalog_id,revision,title,steps,workspace_id)
+      values (${lessonCatalogB.id},1,'Tenant B lesson',
+        '[{"id":"ci-theory","kind":"theory","title":"Read"}]'::jsonb,
+        ${tenantB}) returning id`;
     await sql.unsafe("savepoint tenant_fk_test");
     let forbidden=false;
     try {
@@ -821,12 +910,68 @@ async function verifyTenantIsolation() {
     if(visibleA.some(x=>x.id===b.id)||!visibleA.some(x=>x.id===a.id))
       fail("Tenant A authenticated teacher saw wrong groups");
     else pass("Tenant A teacher cannot read Tenant B groups");
+    const sensesA=await sql`select id from public.lookup_vocabulary_import_senses(
+      'en',array['releaselexeme']::text[])`;
+    if(sensesA.length!==1||sensesA[0].id!==senseA.id)
+      fail("Tenant A vocabulary import lookup leaked another workspace");
+    else pass("Tenant A vocabulary import lookup is isolated");
+    const linkA=sql.json([{item_id:itemA.id,entity_id:entryA.id}]);
+    const linkedA=await sql`select public.bulk_link_import_entities(${linkA}::jsonb) as n`;
+    if(linkedA[0]?.n!==1)fail("Tenant A could not link own imported vocabulary");
+    else pass("Tenant A can link own imported vocabulary");
+    await sql.unsafe("savepoint cross_tenant_link");
+    let rejectedForeignLink=false;
+    try {
+      const foreign=sql.json([{item_id:itemB.id,entity_id:entryB.id}]);
+      await sql`select public.bulk_link_import_entities(${foreign}::jsonb)`;
+    } catch(e) {
+      if(e?.code==="42501")rejectedForeignLink=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint cross_tenant_link");
+    }
+    if(!rejectedForeignLink)fail("Teacher A linked tenant B imported vocabulary");
+    else pass("Cross-workspace vocabulary link rejected");
+    await sql.unsafe("savepoint cross_tenant_lesson");
+    let lessonDenied=false;
+    try {
+      await sql`select public.publish_lesson_revision(
+        ${lessonCatalogB.id},${lessonDraftB.id})`;
+    } catch(e) {
+      if(/not found|not active|permission|workspace|authorization/i.test(e?.message??""))
+        lessonDenied=true;
+      else throw e;
+    } finally {
+      await sql.unsafe("rollback to savepoint cross_tenant_lesson");
+    }
+    if(!lessonDenied)fail("Teacher A published tenant B lesson");
+    else pass("Cross-workspace lesson publication rejected");
+
+
+
 
     await sql`select set_config('request.jwt.claim.sub',${teacherB},true)`;
     const visibleB=await sql`select id from public.groups where id in (${a.id},${b.id})`;
     if(visibleB.some(x=>x.id===a.id)||!visibleB.some(x=>x.id===b.id))
       fail("Tenant B authenticated teacher saw wrong groups");
     else pass("Tenant B teacher cannot read Tenant A groups");
+    const sensesB=await sql`select id from public.lookup_vocabulary_import_senses(
+      'en',array['releaselexeme']::text[])`;
+    if(sensesB.length!==1||sensesB[0].id!==senseB.id)
+      fail("Tenant B vocabulary import lookup leaked another workspace");
+    else pass("Tenant B vocabulary import lookup is isolated");
+    const linkB=sql.json([{item_id:itemB.id,entity_id:entryB.id}]);
+    const linkedB=await sql`select public.bulk_link_import_entities(${linkB}::jsonb) as n`;
+    if(linkedB[0]?.n!==1)fail("Tenant B could not link own imported vocabulary");
+    else pass("Tenant B can link own imported vocabulary");
+    const publishedB=await sql`select public.publish_lesson_revision(
+      ${lessonCatalogB.id},${lessonDraftB.id}) as id`;
+    if(publishedB[0]?.id!==lessonDraftB.id)
+      fail("Tenant B could not publish own lesson");
+    else pass("Tenant B can publish own lesson");
+
+
+
   } finally {
     await sql.unsafe("rollback");
   }

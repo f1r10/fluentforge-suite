@@ -62,3 +62,27 @@
 - Run build/tests/lint before merging substantial changes.
 - Keep README and deployment documentation truthful about current portability and remaining adapter-specific dependencies.
 - Do not advance to a new product phase merely because schema tables exist; functionality is complete only when the workflow is implemented and tested.
+
+
+## Mandatory continuation handoff (2026-11-03)
+
+Before continuing the V1.1 multi-teacher work, read
+`docs/CODEX_CONTINUATION_HANDOFF_20261103.md` in full, followed by
+`docs/V1_1_MULTI_TEACHER_PRINT_RESULTS_PLAN.md` and
+`docs/PRODUCT_HARDENING_REAL_FIXTURES.md`.
+
+The handoff records the active PR/branch topology, known CI blocker, local
+installation procedure, real PDF acceptance fixtures, multi-tenant security
+gates and required execution order. Treat it as a living execution ledger:
+update it when a defect is reproduced/fixed or a test changes status.
+
+Release boundaries:
+- Keep V1 `main` stable while V1.1 is incomplete.
+- Never enable second-teacher creation until every tenant boundary and
+  service-role/RPC/storage/export/backup path passes adversarial two-tenant
+  tests. The disabled creation handler is an intentional safety gate.
+- Never deploy to AWS as part of local continuation. The existing EC2 host is
+  a test environment and requires separate explicit operator authorization.
+- Do not mark synthetic tests, missing real fixtures, or unavailable AWS
+  restore checks as PASS.
+- Do not rewrite published Git history or destroy existing local/remote data.
